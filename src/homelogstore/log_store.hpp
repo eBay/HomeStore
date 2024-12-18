@@ -489,15 +489,13 @@ public:
     }
 
     /**
-     * @brief Sync the log store to disk
+     * @brief Flush this log store (write/sync to disk) up to the sequence number
      *
-     * @param
+     * @param seq_num Sequence number upto which logs are to be flushed. If not provided, will wait to flush all seq
+     * numbers issued prior.
      * @return True on success
      */
-    bool sync() {
-        // TODO: Implement this method
-        return true;
-    }
+    void flush_sync(logstore_seq_num_t upto_seq_num = invalid_lsn());
 
     /**
      * @brief Rollback the given instance to the given sequence number
@@ -539,6 +537,11 @@ private:
     // seq_ld_key_pair m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed
     // batch
     logstore_seq_num_t m_flush_batch_max_lsn{std::numeric_limits< logstore_seq_num_t >::min()};
+
+    // Sync flush sections
+    std::atomic< logstore_seq_num_t > m_sync_flush_waiter_lsn{invalid_lsn()};
+    std::mutex m_sync_flush_mtx;
+    std::condition_variable m_sync_flush_cv;
 
     std::vector< seq_ld_key_pair > m_truncation_barriers; // List of truncation barriers
     truncation_info m_safe_truncation_boundary;

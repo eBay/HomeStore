@@ -173,6 +173,11 @@ void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
+
+    if (m_sync_flush_waiter_lsn.load() == req->seq_num) {
+        // Sync flush is waiting for this lsn to be completed, wake up the sync flush cv
+        m_sync_flush_cv.notify_one();
+    }
 }
 
 void HomeLogStore::on_read_completion(logstore_req* const req, const logdev_key ld_key) {
@@ -435,6 +440,33 @@ logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(const logstore_se
 
 logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(const logstore_seq_num_t from) const {
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
+}
+
+void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
+    // Logdev flush is async call and if flush_sync is called on the same thread which could potentially do logdev
+    // flush, waiting sync would cause deadlock.
+    HS_DBG_ASSERT_EQ(LogDev::flush_in_current_thread(), false,
+                     "Logstore flush sync cannot be called on same thread which could do logdev flush");
+
+    if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
+
+    // if we have flushed already, we are done
+    if (m_records.completed_upto() >= upto_seq_num) { return; }
+    {
+        std::unique_lock lk(m_sync_flush_mtx);
+        // Step 1: Mark the waiter lsn to the seqnum we wanted to wait for. The completion of every lsn checks
+        // for this and if this lsn is completed, will make a callback which signals the cv.
+        m_sync_flush_waiter_lsn.store(upto_seq_num);
+        // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
+        // and the lsn is stored in step 1 above.
+        if (m_records.completed_upto() >= upto_seq_num) { return; }
+        // Step 3: Force a flush (with least threshold)
+        m_logdev.flush_if_needed();
+        // Step 4: Wait for completion
+        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+        // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
+        // doing it saves an atomic instruction
+    }
 }
 
 uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb) {
