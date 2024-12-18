@@ -263,6 +263,9 @@ struct truncate_req {
     int trunc_outstanding{0};
 };
 
+static constexpr logstore_seq_num_t invalid_lsn() { return std::numeric_limits< logstore_seq_num_t >::min(); }
+typedef std::function< void(logstore_seq_num_t) > on_rollback_cb_t;
+
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
     friend class HomeLogStoreMgr;
@@ -502,10 +505,7 @@ public:
      * @param seq_num Sequence number back which logs are to be rollbacked
      * @return True on success
      */
-    bool rollback(const logstore_seq_num_t seq_num) {
-        // TODO: Implement this method
-        return true;
-    }
+    uint64_t rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb);
 
     [[nodiscard]] LogStoreFamily& get_family() { return m_logstore_family; }
 
