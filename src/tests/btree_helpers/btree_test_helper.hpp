@@ -439,8 +439,7 @@ private:
         K key = K{k};
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
         sreq.enable_route_tracing();
-        bool done = expect_success ? (m_bt->put(sreq) == btree_status_t::success)
-                                   : m_bt->put(sreq) == btree_status_t::put_failed;
+        bool done = expect_success == (m_bt->put(sreq) == btree_status_t::success);
 
         if (put_type == btree_put_type::INSERT) {
             ASSERT_EQ(done, !m_shadow_map.exists(key));

@@ -56,7 +56,7 @@ retry:
         const auto matched = my_node->match_range(req.working_range(), start_idx, end_idx);
         if (!matched) {
             BT_NODE_LOG_ASSERT(false, my_node, "match_range returns 0 entries for interior node is not valid pattern");
-            ret = btree_status_t::put_failed;
+            ret = btree_status_t::not_found;
             goto out;
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
@@ -182,10 +182,8 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
             req.shift_working_range();
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-        if (!to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val,
-                                           req.m_filter_cb)) {
-            ret = btree_status_t::put_failed;
-        }
+        ret = to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val,
+                                            req.m_filter_cb);
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
     }
 

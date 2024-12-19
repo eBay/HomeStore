@@ -192,14 +192,14 @@ public:
     /// translates into one of "Insert", "Update" or "Upsert".
     /// @param existing_val [optional] A pointer to a value to store the value of the existing entry if it was updated.
     /// @param filter_cb [optional] A callback function to be called for each entry found in the node that has a key. It
-    /// is used as an filter to remove anything that needn't be updated.
-    /// @return A boolean indicating whether the operation was successful.
+    /// is used as a filter to remove anything that needn't be updated.
+    /// @return A status code indicating whether the operation was successful.
     ///
-    virtual bool put(BtreeKey const& key, BtreeValue const& val, btree_put_type put_type, BtreeValue* existing_val,
-                     put_filter_cb_t const& filter_cb = nullptr) {
+    virtual btree_status_t put(BtreeKey const &key, BtreeValue const &val, btree_put_type put_type,
+                               BtreeValue *existing_val, put_filter_cb_t const &filter_cb = nullptr) {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
                          get_persistent_header_const()->to_string());
-        bool ret = true;
+        auto ret = btree_status_t::success;
 
         DEBUG_ASSERT_EQ(
             this->is_leaf(), true,
@@ -210,22 +210,26 @@ public:
             if (existing_val) { get_nth_value(idx, existing_val, true); }
             if (filter_cb &&
                 filter_cb(get_nth_key< K >(idx, false), get_nth_value(idx, false), val) !=
-                    put_filter_decision::replace) {
-                return false;
+                put_filter_decision::replace) {
+                LOGINFO("Filter callback rejected the update for key {}", key.to_string());
+                return btree_status_t::filtered_out;
             }
         }
 
         if (put_type == btree_put_type::INSERT) {
             if (found) {
-                LOGDEBUG("Attempt to insert duplicate entry {}", key.to_string());
-                return false;
+                LOGINFO("Attempt to insert duplicate entry {}", key.to_string());
+                return btree_status_t::already_exists;
             }
-            ret = (insert(idx, key, val) == btree_status_t::success);
+            ret = insert(idx, key, val);
         } else if (put_type == btree_put_type::UPDATE) {
-            if (!found) return false;
+            if (!found) {
+                LOGINFO("Attempt to update non-existent entry {}", key.to_string());
+                return btree_status_t::not_found;
+            }
             update(idx, key, val);
         } else if (put_type == btree_put_type::UPSERT) {
-            (found) ? update(idx, key, val) : (void)insert(idx, key, val);
+            found ? update(idx, key, val) : (void) insert(idx, key, val);
         } else {
             DEBUG_ASSERT(false, "Wrong put_type {}", put_type);
         }
