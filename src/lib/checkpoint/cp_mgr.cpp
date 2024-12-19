@@ -187,7 +187,8 @@ folly::Future< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_on_s
     // sealer should be the first one to switch over
     auto& sealer_cp = m_cp_cb_table[(size_t)cp_consumer_t::SEALER];
     if (sealer_cp) {
-        new_cp->m_contexts[(size_t)cp_consumer_t::SEALER] = std::move(sealer_cp->on_switchover_cp(cur_cp.get(), new_cp));
+        new_cp->m_contexts[(size_t)cp_consumer_t::SEALER] =
+            std::move(sealer_cp->on_switchover_cp(cur_cp.get(), new_cp));
     }
     // switch over other consumers
     for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
@@ -227,7 +228,8 @@ void CPManager::cp_start_flush(CP* cp) {
     for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
         if (svcid == (size_t)cp_consumer_t::SEALER) { continue; }
         auto& consumer = m_cp_cb_table[svcid];
-        if (consumer) { futs.emplace_back(std::move(consumer->cp_flush(cp))); }
+        bool participated = (cp->m_contexts[svcid] != nullptr);
+        if (consumer && participated) { futs.emplace_back(std::move(consumer->cp_flush(cp))); }
     }
 
     folly::collectAllUnsafe(futs).thenValue([this, cp](auto) {
@@ -235,7 +237,8 @@ void CPManager::cp_start_flush(CP* cp) {
         // at last as the cp_lsn updated here. Other component should
         // at least flushed to cp_lsn.
         auto& sealer_cp = m_cp_cb_table[(size_t)cp_consumer_t::SEALER];
-        if (sealer_cp) { sealer_cp->cp_flush(cp).wait(); }
+        bool participated = (cp->m_contexts[(size_t)cp_consumer_t::SEALER] != nullptr);
+        if (sealer_cp && participated) { sealer_cp->cp_flush(cp).wait(); }
         // All consumers have flushed for the cp
         on_cp_flush_done(cp);
     });

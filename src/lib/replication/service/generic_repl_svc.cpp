@@ -152,7 +152,9 @@ AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, const rep
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 
-std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }
+std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {
+    return std::make_unique< CPContext >(new_cp);
+}
 
 folly::Future< bool > SoloReplServiceCPHandler::cp_flush(CP* cp) {
     repl_service().iterate_repl_devs([cp](cshared< ReplDev >& repl_dev) {
