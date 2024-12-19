@@ -201,8 +201,8 @@ VENUM(btree_node_type, uint32_t, FIXED = 0, VAR_VALUE = 1, VAR_KEY = 2, VAR_OBJE
 VENUM(btree_store_type, uint8_t, MEM = 0, SSD = 1)
 #endif
 
-ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, node_read_failed, put_failed, space_not_avail,
-     cp_mismatch, merge_not_required, merge_failed, crc_mismatch, not_supported, node_freed)
+ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, node_read_failed, already_exists, filtered_out,
+     space_not_avail, cp_mismatch, merge_not_required, merge_failed, crc_mismatch, not_supported, node_freed)
 
 /*ENUM(btree_node_write_type, uint8_t,
      new_node,     // Node write whenever a new node is created.
