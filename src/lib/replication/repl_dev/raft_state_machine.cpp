@@ -332,10 +332,9 @@ int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx,
 
     // Listener will read the snapshot data and we pass through the same.
     int ret = m_rd.m_listener->read_snapshot_obj(snp_ctx, snp_data);
+    user_ctx = snp_data->user_ctx; // Have to pass the user_ctx to NuRaft even if ret<0 to get it freed later
     if (ret < 0) return ret;
 
-    // Update user_ctx and whether is_last_obj
-    user_ctx = snp_data->user_ctx;
     is_last_obj = snp_data->is_last_obj;
 
     // We are doing a copy here.
