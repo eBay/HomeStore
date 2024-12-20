@@ -93,6 +93,19 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
             if (rreq) { rreq->add_state(repl_req_state_t::LOG_FLUSHED); }
         }
     }
+
+    // Convert volatile logs to non-volatile logs in state machine
+    for (int64_t lsn = int64_cast(start_lsn); lsn <= end_lsn; ++lsn) {
+        auto rreq = m_sm.lsn_to_req(lsn);
+        if (rreq != nullptr) {
+            if (rreq->has_state(repl_req_state_t::ERRORED)) {
+                RD_LOGE("Raft Channel: rreq=[{}] met some errors before", rreq->to_compact_string());
+                continue;
+            }
+            rreq->set_is_volatile(false);
+        }
+    }
+
     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
     sisl::VectorPool< repl_req_ptr_t >::free(proposer_reqs);
 }

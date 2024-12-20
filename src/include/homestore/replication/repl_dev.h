@@ -152,6 +152,7 @@ public:
     int64_t lsn() const { return m_lsn; }
     bool is_proposer() const { return m_is_proposer; }
     journal_type_t op_code() const { return m_op_code; }
+    bool is_volatile() const { return m_is_volatile.load(); }
 
     sisl::blob const& header() const { return m_header; }
     sisl::blob const& key() const { return m_key; }
@@ -222,6 +223,7 @@ public:
 
     void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
     void set_local_blkid(MultiBlkId const& lbid) { m_local_blkid = lbid; } // Only used during recovery
+    void set_is_volatile(bool is_volatile) { m_is_volatile.store(is_volatile); }
     void set_lsn(int64_t lsn);
     void add_state(repl_req_state_t s);
     bool add_state_if_not_already(repl_req_state_t s);
@@ -248,6 +250,7 @@ private:
     bool m_is_proposer{false};                                 // Is the repl_req proposed by this node
     Clock::time_point m_start_time;                            // Start time of the request
     journal_type_t m_op_code{journal_type_t::HS_DATA_INLINED}; // Operation code for this request
+    std::atomic< bool > m_is_volatile{true};                   // Is the log still in memory and not flushed to disk yet
 
     /////////////// Data related section /////////////////
     MultiBlkId m_local_blkid;   // Local BlkId for the data
