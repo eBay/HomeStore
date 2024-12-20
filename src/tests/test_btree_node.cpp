@@ -88,13 +88,17 @@ struct NodeTest : public testing::Test {
         K key{k};
         V value{V::generate_rand()};
         V existing_v;
-        bool done = m_node1->put(key, value, put_type, &existing_v);
+        btree_status_t status = m_node1->put(key, value, put_type, &existing_v);
 
-        bool expected_done{true};
-        if (m_shadow_map.find(key) != m_shadow_map.end()) { expected_done = (put_type != btree_put_type::INSERT); }
-        ASSERT_EQ(done, expected_done) << "Expected put of key " << k << " of put_type " << enum_name(put_type)
-                                       << " to be " << expected_done;
-        if (expected_done) {
+        auto expected_status = btree_status_t::success;
+        if (m_shadow_map.contains(key)) {
+            expected_status = put_type != btree_put_type::INSERT
+                                  ? btree_status_t::success
+                                  : btree_status_t::already_exists;
+        }
+        ASSERT_EQ(status, expected_status) << "Expected put of key " << k << " of put_type " << enum_name(put_type)
+                                       << " to be " << expected_status;
+        if (expected_status == btree_status_t::success) {
             m_shadow_map.insert(std::make_pair(key, value));
         } else {
             const auto r = m_shadow_map.find(key);
