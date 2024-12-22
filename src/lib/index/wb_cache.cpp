@@ -582,26 +582,17 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             }
         } else if (buf->m_created_cp_id == icp_ctx->id()) {
             // New node
-            if (was_node_committed(buf)) {
-                if (was_node_committed(buf->m_up_buffer)) {
-                    // Both current and up buffer is commited, we can safely commit the current block
-                    m_vdev->commit_blk(buf->m_blkid);
-                    pending_bufs.push_back(buf->m_up_buffer);
-                } else {
-                    // Up buffer is not committed, we need to repair it first
-                    buf->m_up_buffer->remove_down_buffer(buf);
-                    // buf->m_up_buffer = nullptr;
-                    if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
-                        // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
-                        auto grand_buf = buf->m_up_buffer->m_up_buffer;
-                        if (grand_buf) {
-                            HS_DBG_ASSERT(!grand_buf->m_wait_for_down_buffers.testz(),
-                                          "upbuffer of upbuffer is already zero");
-                            grand_buf->remove_down_buffer(buf->m_up_buffer);
-                            LOGINFOMOD(wbcache, "Decrementing wait_for_down_buffers for up buffer of up buffer {}",
-                                       grand_buf->to_string());
-                        }
-                    }
+            if (was_node_committed(buf) && was_node_committed(buf->m_up_buffer)) {
+                // Both current and up buffer is commited, we can safely commit the current block
+                m_vdev->commit_blk(buf->m_blkid);
+                pending_bufs.push_back(buf->m_up_buffer);
+            } else {
+                // Up buffer is not committed, we need to repair it first
+                buf->m_up_buffer->remove_down_buffer(buf);
+                // buf->m_up_buffer = nullptr;
+                if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
+                    // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
+                    update_up_buffer_counters(buf->m_up_buffer);
                 }
             }
         }
@@ -630,26 +621,22 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     m_vdev->recovery_completed();
 }
 
-void IndexWBCache::updateUpBufferCounters(std::vector< IndexBufferPtr >& l0_bufs) {
-    std::unordered_set< IndexBufferPtr > allBuffers;
-
-    // First, collect all unique buffers and reset their counters
-    for (auto& leaf : l0_bufs) {
-        auto currentBuffer = leaf;
-        while (currentBuffer) {
-            if (allBuffers.insert(currentBuffer).second) { currentBuffer->m_wait_for_down_buffers.set(0); }
-            currentBuffer = currentBuffer->m_up_buffer;
-        }
+// if buf->m_wait_for_down_buffers.testz() is true (which means that it has  no dependency on any other buffer) then we
+// can decrement the wait_for_down_buffers of its up buffer. If the up buffer has up buffer, then we need to decrement
+// its wait_for_down_buffers. If the up buffer of up buffer has wait_for_down_buffers as 0, then we need to decrement
+// its wait_for_down_buffers. This process continues until we reach the root buffer. If the root buffer has
+// wait_for_down_buffers as 0, then we need to decrement its wait_for_down_buffers.
+void IndexWBCache::update_up_buffer_counters(IndexBufferPtr const& buf) {
+    if (buf == nullptr || !buf->m_wait_for_down_buffers.testz() || buf->m_up_buffer == nullptr) {
+        LOGINFOMOD(wbcache, "Finish decrementing wait_for_down_buffers");
+        return;
     }
-
-    // Now, iterate over each leaf buffer and update the count for each parent up the chain
-    for (auto& leaf : l0_bufs) {
-        auto currentBuffer = leaf;
-        while (currentBuffer) {
-            if (currentBuffer->m_up_buffer) { currentBuffer->m_up_buffer->m_wait_for_down_buffers.increment(1); }
-            currentBuffer = currentBuffer->m_up_buffer;
-        }
-    }
+    auto grand_buf = buf->m_up_buffer;
+    grand_buf->remove_down_buffer(buf);
+    LOGINFOMOD(wbcache,
+               "Decrementing wait_for_down_buffers for buffer {} due to zero dependency of child {}, Keep going up",
+               grand_buf->to_string(), buf->to_string());
+    update_up_buffer_counters(grand_buf);
 }
 
 void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
@@ -670,7 +657,7 @@ void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
         if (buf->m_up_buffer && buf->m_up_buffer->is_meta_buf()) {
             // Our up buffer is a meta buffer, which means old root is dirtied and may need no repair but possible of
             // new root on upper level so needs to be retore the edge
-            LOGTRACEMOD(wbcache, "check root change for without repairing {}\n\n", buf->to_string());
+            LOGTRACEMOD(wbcache, "check root change for without repairing {}", buf->to_string());
             index_service().update_root(buf->m_index_ordinal, buf);
         }
     }
