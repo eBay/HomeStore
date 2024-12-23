@@ -25,7 +25,11 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     m_header = user_header;
     m_key = key;
     m_is_jentry_localize_pending = (!is_proposer && (data_size > 0)); // Pending on the applier and with linked data
-    if (has_linked_data()) {
+
+    // We need to allocate the block if the req has data linked, since entry doesn't exist or if it exist, two threads(data channel and raft channel) are trying to do the same
+    // thing. So take state mutex and allocate the blk
+    std::unique_lock< std::mutex > lg(m_state_mtx);
+    if (has_linked_data() && !has_state(repl_req_state_t::BLK_ALLOCATED)) {
         auto alloc_status = alloc_local_blks(listener, data_size);
         if (alloc_status != ReplServiceError::OK) {
             LOGERROR("Allocate blk for rreq failed error={}", alloc_status);
@@ -101,7 +105,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     if (hints_result.hasError()) { return hints_result.error(); }
 
     if (hints_result.value().committed_blk_id.has_value()) {
-        //if the allocted_blk_id is already present, use it and skip allocation
+        //if the committed_blk_id is already present, use it and skip allocation and commitment
         LOGINFO("For Repl_key=[{}] data already exists, skip", rkey().to_string());
         m_local_blkid = hints_result.value().committed_blk_id.value();
         add_state(repl_req_state_t::BLK_ALLOCATED);

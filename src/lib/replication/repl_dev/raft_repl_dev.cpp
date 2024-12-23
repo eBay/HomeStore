@@ -501,9 +501,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         }
     }
 
-    // We need to allocate the block, since entry doesn't exist or if it exist, two threads are trying to do the same
-    // thing. So take state mutex and allocate the blk
-    std::unique_lock< std::mutex > lg(rreq->m_state_mtx);
+    // rreq->init will allocate the block if it has linked data.
     auto status = rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size, m_listener);
     if (!rreq->has_linked_data()) { return rreq; }
 #ifdef _PRERELEASE
