@@ -489,8 +489,9 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
     auto rreq = it->second;
 
     if (!happened) {
-        // We already have the entry in the map, check if we are already allocated the blk by previous caller, in
-        // that case we need to return the req.
+        // We already have the entry in the map, reset its start time to prevent it from being incorrectly gc during use.
+        rreq->set_created_time();
+        // Check if we are already allocated the blk by previous caller, in that case we need to return the req.
         if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
             // Do validation if we have the correct mapping
             // RD_REL_ASSERT(blob_equals(user_header, rreq->header), "User header mismatch for repl_key={}",
