@@ -450,8 +450,8 @@ public:
         REGISTER_COUNTER(drive_spurios_events, "Total number of spurious events per drive");
         REGISTER_COUNTER(drive_skipped_chunk_bm_writes, "Total number of skipped writes for chunk bitmap");
 
-        REGISTER_HISTOGRAM(drive_write_latency, "BlkStore drive write latency in us");
-        REGISTER_HISTOGRAM(drive_read_latency, "BlkStore drive read latency in us");
+        REGISTER_HISTOGRAM(drive_write_latency, "BlkStore drive write latency in us", HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM(drive_read_latency, "BlkStore drive read latency in us", HistogramBucketsType(OpLatecyBuckets));
 
         REGISTER_HISTOGRAM(write_io_sizes, "Write IO Sizes", "io_sizes", {"io_direction", "write"},
                            HistogramBucketsType(ExponentialOfTwoBuckets));

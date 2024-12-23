@@ -105,7 +105,6 @@ typedef std::map< boost::uuids::uuid, std::shared_ptr< homestore::Volume > > vol
 class HomeBlksMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit HomeBlksMetrics(const char* homeblks_name) : sisl::MetricsGroupWrapper("HomeBlks", homeblks_name) {
-        REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
         REGISTER_COUNTER(boot_cnt, "boot cnt", sisl::_publish_as::publish_as_gauge);
         REGISTER_GAUGE(recovery_phase0_latency, "recovery phase0 latency");
         REGISTER_GAUGE(recovery_phase1_latency, "recovery phase1 latency");

@@ -168,9 +168,8 @@ public:
                            HistogramBucketsType(LinearUpto64Buckets))
         REGISTER_HISTOGRAM(blkstore_cache_read_latency, "BlkStore cache read latency");
         REGISTER_HISTOGRAM(blkstore_cache_write_latency, "BlkStore cache write latency");
-        REGISTER_HISTOGRAM(blkstore_drive_write_latency, "BlkStore drive write latency");
-        REGISTER_HISTOGRAM(blkstore_drive_read_latency, "BlkStore drive read latency");
-        REGISTER_HISTOGRAM(blkstore_wbcache_hold_time, "Time data is held in writeback cache before flush");
+        REGISTER_HISTOGRAM(blkstore_drive_write_latency, "BlkStore drive write latency", HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM(blkstore_drive_read_latency, "BlkStore drive read latency", HistogramBucketsType(OpLatecyBuckets));
 
         register_me_to_farm();
     }
