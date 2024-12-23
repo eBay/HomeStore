@@ -184,7 +184,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             sisl::blob header(r_cast< uint8_t* >(&members), sizeof(replace_members_ctx));
             rreq->init(
                 repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
-                journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0);
+                journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0, m_listener);
 
             auto err = m_state_machine->propose_to_raft(std::move(rreq));
             if (err != ReplServiceError::OK) {
@@ -251,7 +251,7 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
     // here, we set the dsn to a new one , which is definitely unique in the follower, so that the new rreq will not
     // have a conflict with the old rreq.
     rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
-               journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0);
+               journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0, m_listener);
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -292,25 +292,28 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         }
     }
 
-    rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+    auto status = rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
                data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */,
-               header, key, data.size);
+               header, key, data.size, m_listener);
 
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
     auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
     RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
+    if (status != ReplServiceError::OK) {
+        RD_LOGD("Initializing rreq failed error={}, failing this req", status);
+        handle_error(rreq, status);
+        return;
+    }
+
     // If it is header only entry, directly propose to the raft
     if (rreq->has_linked_data()) {
-        push_data_to_all_followers(rreq, data);
-
-        // Step 1: Alloc Blkid
-        auto const status = rreq->alloc_local_blks(m_listener, data.size);
-        if (status != ReplServiceError::OK) {
-            RD_LOGD("Allocating blks failed error={}, failing this req", status);
-            handle_error(rreq, status);
+        if (rreq->is_proposer() && rreq->has_state(repl_req_state_t::DATA_COMMITTED)) {
+            RD_LOGD("data blks has already been allocated and committed, failing this req");
+            handle_error(rreq, ReplServiceError::DATA_DUPLICATED);
             return;
         }
+        push_data_to_all_followers(rreq, data);
 
         COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
         COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
@@ -498,32 +501,24 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         }
     }
 
-    // We need to allocate the block, since entry doesn't exist or if it exist, two threads are trying to do the same
-    // thing. So take state mutex and allocate the blk
-    std::unique_lock< std::mutex > lg(rreq->m_state_mtx);
-    rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size);
-
-    // There is no data portion, so there is not need to allocate
+    // rreq->init will allocate the block if it has linked data.
+    auto status = rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size, m_listener);
     if (!rreq->has_linked_data()) { return rreq; }
-    if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) { return rreq; }
-
-    auto alloc_status = rreq->alloc_local_blks(m_listener, data_size);
 #ifdef _PRERELEASE
     if (is_data_channel) {
         if (iomgr_flip::instance()->test_flip("fake_reject_append_data_channel")) {
             LOGINFO("Data Channel: Reject append_entries flip is triggered for rkey={}", rkey.to_string());
-            alloc_status = ReplServiceError::NO_SPACE_LEFT;
+            status = ReplServiceError::NO_SPACE_LEFT;
         }
     } else {
         if (iomgr_flip::instance()->test_flip("fake_reject_append_raft_channel")) {
             LOGINFO("Raft Channel: Reject append_entries flip is triggered for rkey={}", rkey.to_string());
-            alloc_status = ReplServiceError::NO_SPACE_LEFT;
+            status = ReplServiceError::NO_SPACE_LEFT;
         }
     }
 #endif
-
-    if (alloc_status != ReplServiceError::OK) {
-        RD_LOGE("For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(), alloc_status);
+    if (status != ReplServiceError::OK) {
+        RD_LOGD("For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(), status);
         // Do not call handle_error here, because handle_error is for rreq which needs to be terminated. This one can be
         // retried.
         return nullptr;
@@ -930,8 +925,8 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
     }
 }
 
-void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
-    commit_blk(rreq);
+    void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
+    if (!rreq->has_state(repl_req_state_t::DATA_COMMITTED)) { commit_blk(rreq); }
 
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());
@@ -979,7 +974,12 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
         HS_REL_ASSERT(false, "Unexpected: LSN={} is already ready to commit, exist_rreq=[{}]",
                       rreq->lsn(), exist_rreq->to_string());
     }
-
+    if (err == ReplServiceError::DATA_DUPLICATED) {
+        RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
+        m_listener->on_error(err, rreq->header(), rreq->key(), rreq);
+        rreq->clear();
+        return;
+    }
     if (rreq->op_code() == journal_type_t::HS_DATA_LINKED) {
         // Free the blks which is allocated already
         if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
@@ -1512,7 +1512,12 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->set_lsn(repl_lsn);
     // keep lentry in scope for the lyfe cycle of the rreq
     rreq->set_lentry(lentry);
-    rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry), data_size);
+    auto status = rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
+                             data_size, m_listener);
+    if (status != ReplServiceError::OK) {
+        RD_LOGE("Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+    }
+
     // we load the log from log device, implies log flushed.  We only flush log after data is written to data device.
     rreq->add_state(repl_req_state_t::DATA_WRITTEN);
     rreq->add_state(repl_req_state_t::LOG_RECEIVED);

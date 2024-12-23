@@ -36,7 +36,8 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
-      ERRORED = 1 << 5        // Error has happened and cleaned up
+      ERRORED = 1 << 5,        // Error has happened and cleaned up
+      DATA_COMMITTED = 1 << 6  // Data has already been committed, used in duplication handling, will skip commit_blk
 )
 
 VENUM(journal_type_t, uint16_t,
@@ -142,8 +143,8 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
 public:
     repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
-    void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-              sisl::blob const& key, uint32_t data_size);
+    ReplServiceError init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
+              sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
 
     /////////////////////// All getters ///////////////////////
     repl_key const& rkey() const { return m_rkey; }
