@@ -420,16 +420,88 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
     }
     buf->m_node_freed = true;
     resource_mgr().inc_free_blk(m_node_size);
-    m_vdev->free_blk(buf->m_blkid, s_cast<VDevCPContext *>(cp_ctx));
+    m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(cp_ctx));
 }
 
 //////////////////// Recovery Related section /////////////////////////////////
-void IndexWBCache::load_buf(IndexBufferPtr const &buf) {
+void IndexWBCache::load_buf(IndexBufferPtr const& buf) {
     if (buf->m_bytes == nullptr) {
         buf->m_bytes = hs_utils::iobuf_alloc(m_node_size, sisl::buftag::btree_node, m_vdev->align_size());
         m_vdev->sync_read(r_cast< char* >(buf->m_bytes), m_node_size, buf->blkid());
         buf->m_dirtied_cp_id = BtreeNode::get_modified_cp_id(buf->m_bytes);
     }
+}
+
+struct DagNode {
+    IndexBufferPtr buffer;
+    std::vector< shared< DagNode > > children;
+};
+
+using DagPtr = std::shared_ptr< DagNode >;
+using DagMap = std::map< IndexBufferPtr, DagPtr >;
+
+static DagMap generate_dag_buffers(std::map< BlkId, IndexBufferPtr >& bufmap) {
+    std::vector< IndexBufferPtr > bufs;
+    std::ranges::transform(bufmap, std::back_inserter(bufs), [](const auto& pair) { return pair.second; });
+
+    auto buildReverseMapping = [](const std::vector< IndexBufferPtr >& buffers) {
+        std::unordered_map< IndexBufferPtr, std::vector< IndexBufferPtr > > parentToChildren;
+        for (const auto& buffer : buffers) {
+            if (buffer->m_up_buffer) { parentToChildren[buffer->m_up_buffer].push_back(buffer); }
+        }
+        return parentToChildren;
+    };
+
+    std::function< DagPtr(IndexBufferPtr, std::unordered_map< IndexBufferPtr, std::vector< IndexBufferPtr > >&) >
+        buildDag;
+    buildDag =
+        [&buildDag](IndexBufferPtr buffer,
+                    std::unordered_map< IndexBufferPtr, std::vector< IndexBufferPtr > >& parentToChildren) -> DagPtr {
+        auto dagNode = std::make_shared< DagNode >();
+        dagNode->buffer = buffer;
+        if (parentToChildren.count(buffer)) {
+            for (const auto& child : parentToChildren[buffer]) {
+                dagNode->children.push_back(buildDag(child, parentToChildren));
+            }
+        }
+        return dagNode;
+    };
+
+    auto generateDagMap = [&](const std::vector< IndexBufferPtr >& buffers) {
+        DagMap dagMap;
+        auto parentToChildren = buildReverseMapping(buffers);
+        for (const auto& buffer : buffers) {
+            if (!buffer->m_up_buffer) { // This is a root buffer
+                auto dagRoot = buildDag(buffer, parentToChildren);
+                dagMap[buffer] = dagRoot;
+            }
+        }
+        return dagMap;
+    };
+
+    return generateDagMap(bufs);
+}
+
+static std::string to_string_dag_bufs(DagMap& dags, cp_id_t cp_id = 0) {
+    std::string str{fmt::format("#_of_dags={}\n", dags.size())};
+    int cnt = 1;
+    for (const auto& [_, dag] : dags) {
+        std::vector< std::tuple< std::shared_ptr< DagNode >, int, int > > stack;
+        stack.emplace_back(dag, 0, cnt++);
+        while (!stack.empty()) {
+            auto [node, level, index] = stack.back();
+            stack.pop_back();
+            auto snew = node->buffer->m_created_cp_id == cp_id ? "NEW" : "";
+            auto sfree = node->buffer->m_node_freed ? "FREED" : "";
+            fmt::format_to(std::back_inserter(str), "{}{}-{} {} {}\n", std::string(level * 4, ' '), index,
+                           node->buffer->to_string(), snew, sfree);
+            int c = node->children.size();
+            for (const auto& d : node->children) {
+                stack.emplace_back(d, level + 1, c--);
+            }
+        }
+    }
+    return str;
 }
 
 void IndexWBCache::recover(sisl::byte_view sb) {
@@ -452,9 +524,9 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
 #ifdef _PRERELEASE
     auto detailed_log = [this](std::map< BlkId, IndexBufferPtr > const& bufs,
-                               std::vector<IndexBufferPtr> const &pending_bufs) {
+                               std::vector< IndexBufferPtr > const& pending_bufs) {
         std::string log = fmt::format("\trecovered bufs (#of bufs = {})\n", bufs.size());
-        for (auto const &[_, buf]: bufs) {
+        for (auto const& [_, buf] : bufs) {
             load_buf(buf);
             fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
         }
@@ -462,7 +534,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         // list of new_bufs
         if (!pending_bufs.empty()) {
             fmt::format_to(std::back_inserter(log), "\n\tpending_bufs (#of bufs = {})\n", pending_bufs.size());
-            for (auto const &buf: pending_bufs) {
+            for (auto const& buf : pending_bufs) {
                 fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
             }
         }
@@ -471,6 +543,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
     std::string log = fmt::format("Recovering bufs (#of bufs = {}) before processing them\n", bufs.size());
     LOGTRACEMOD(wbcache, "{}\n{}", log, detailed_log(bufs, {}));
+    auto dags = generate_dag_buffers(bufs);
+    LOGTRACEMOD(wbcache, "Before recovery: {}", to_string_dag_bufs(dags, icp_ctx->id()));
 #endif
 
     // At this point, we have the DAG structure (up/down dependency graph), exactly the same as prior to crash, with one
@@ -484,15 +558,15 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     // the same blkid which could clash with the blkid next in the buf list.
     //
     // On the second pass, we only take part of the parents/siblings and then repair them, if needed.
-    std::vector<IndexBufferPtr> pending_bufs;
-    std::vector<IndexBufferPtr> deleted_bufs;
-    for (auto const &[_, buf]: bufs) {
+    std::vector< IndexBufferPtr > pending_bufs;
+    std::vector< IndexBufferPtr > deleted_bufs;
+    for (auto const& [_, buf] : bufs) {
         if (buf->m_node_freed) {
             // Freed node
             load_buf(buf);
             if (was_node_committed(buf)) {
                 // Mark this buffer as deleted, so that we can avoid using it anymore when repairing its parent's link
-                r_cast<persistent_hdr_t *>(buf->m_bytes)->node_deleted = true;
+                r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = true;
                 write_buf(nullptr, buf, icp_ctx);
                 deleted_bufs.push_back(buf);
                 pending_bufs.push_back(buf->m_up_buffer);
@@ -513,9 +587,13 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 m_vdev->commit_blk(buf->m_blkid);
                 pending_bufs.push_back(buf->m_up_buffer);
             } else {
-                // Just ignore it
+                // Up buffer is not committed, we need to repair it first
                 buf->m_up_buffer->remove_down_buffer(buf);
-                buf->m_up_buffer = nullptr;
+                // buf->m_up_buffer = nullptr;
+                if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
+                    // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
+                    update_up_buffer_counters(buf->m_up_buffer);
+                }
             }
         }
     }
@@ -524,25 +602,44 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
                pending_bufs.size(), bufs.size(), icp_ctx->id());
     LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log(bufs, pending_bufs));
+    LOGTRACEMOD(wbcache, "After recovery: {}", to_string_dag_bufs(dags, icp_ctx->id()));
 #endif
 
-    for (auto const &buf: pending_bufs) {
+    for (auto const& buf : pending_bufs) {
         recover_buf(buf);
-        if (buf->m_bytes != nullptr && r_cast<persistent_hdr_t *>(buf->m_bytes)->node_deleted) {
+        if (buf->m_bytes != nullptr && r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted) {
             // This buffer was marked as deleted during repair, so we also need to free it
             deleted_bufs.push_back(buf);
         }
     }
 
-    for (auto const &buf: deleted_bufs) {
-        m_vdev->free_blk(buf->m_blkid, s_cast<VDevCPContext *>(icp_ctx));
+    for (auto const& buf : deleted_bufs) {
+        m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(icp_ctx));
     }
 
     m_in_recovery = false;
     m_vdev->recovery_completed();
 }
 
-void IndexWBCache::recover_buf(IndexBufferPtr const &buf) {
+// if buf->m_wait_for_down_buffers.testz() is true (which means that it has  no dependency on any other buffer) then we
+// can decrement the wait_for_down_buffers of its up buffer. If the up buffer has up buffer, then we need to decrement
+// its wait_for_down_buffers. If the up buffer of up buffer has wait_for_down_buffers as 0, then we need to decrement
+// its wait_for_down_buffers. This process continues until we reach the root buffer. If the root buffer has
+// wait_for_down_buffers as 0, then we need to decrement its wait_for_down_buffers.
+void IndexWBCache::update_up_buffer_counters(IndexBufferPtr const& buf) {
+    if (buf == nullptr || !buf->m_wait_for_down_buffers.testz() || buf->m_up_buffer == nullptr) {
+        LOGINFOMOD(wbcache, "Finish decrementing wait_for_down_buffers");
+        return;
+    }
+    auto grand_buf = buf->m_up_buffer;
+    grand_buf->remove_down_buffer(buf);
+    LOGINFOMOD(wbcache,
+               "Decrementing wait_for_down_buffers for buffer {} due to zero dependency of child {}, Keep going up",
+               grand_buf->to_string(), buf->to_string());
+    update_up_buffer_counters(grand_buf);
+}
+
+void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
     if (!buf->m_wait_for_down_buffers.decrement_testz()) {
         // TODO: remove the buf_>m_up_buffer from down_buffers list of buf->m_up_buffer
         return;
@@ -557,6 +654,12 @@ void IndexWBCache::recover_buf(IndexBufferPtr const &buf) {
     } else {
         LOGTRACEMOD(wbcache, "Index Recovery detected up node [{}] as committed no need to repair that",
                     buf->to_string());
+        if (buf->m_up_buffer && buf->m_up_buffer->is_meta_buf()) {
+            // Our up buffer is a meta buffer, which means old root is dirtied and may need no repair but possible of
+            // new root on upper level so needs to be retore the edge
+            LOGTRACEMOD(wbcache, "check root change for without repairing {}", buf->to_string());
+            index_service().update_root(buf->m_index_ordinal, buf);
+        }
     }
 
     if (buf->m_up_buffer) { recover_buf(buf->m_up_buffer); }
@@ -656,10 +759,8 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     if (buf->is_meta_buf()) {
         LOGTRACEMOD(wbcache, "Flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
                     buf->to_string());
-        auto const &sb = r_cast<MetaIndexBuffer *>(buf.get())->m_sb;
-        if (!sb.is_empty()) {
-            meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk());
-        }
+        auto const& sb = r_cast< MetaIndexBuffer* >(buf.get())->m_sb;
+        if (!sb.is_empty()) { meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk()); }
         process_write_completion(cp_ctx, buf);
     } else if (buf->m_node_freed) {
         LOGTRACEMOD(wbcache, "Not flushing buf {} as it was freed, its here for merely dependency", cp_ctx->id(),
@@ -667,15 +768,13 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
         process_write_completion(cp_ctx, buf);
     } else {
         LOGTRACEMOD(wbcache, "Flushing cp {} buf {}", cp_ctx->id(), buf->to_string());
-        m_vdev->async_write(r_cast<const char *>(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
-                .thenValue([buf, cp_ctx](auto) {
-                    try {
-                        auto &pthis = s_cast<IndexWBCache &>(wb_cache());
-                        pthis.process_write_completion(cp_ctx, buf);
-                    } catch (const std::runtime_error &e) {
-                        LOGERROR("Failed to access write-back cache: {}", e.what());
-                    }
-                });
+        m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
+            .thenValue([buf, cp_ctx](auto) {
+                try {
+                    auto& pthis = s_cast< IndexWBCache& >(wb_cache());
+                    pthis.process_write_completion(cp_ctx, buf);
+                } catch (const std::runtime_error& e) { LOGERROR("Failed to access write-back cache: {}", e.what()); }
+            });
 
         if (!part_of_batch) { m_vdev->submit_batch(); }
     }

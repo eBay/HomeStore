@@ -37,29 +37,29 @@ SISL_LOGGING_DECL(test_index_crash_recovery)
 SISL_OPTION_GROUP(
     test_index_crash_recovery,
     (num_iters, "", "num_iters", "number of iterations for rand ops",
-        ::cxxopts::value<uint32_t>()->default_value("500"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
-        ::cxxopts::value<uint32_t>()->default_value("5000"), "number"),
-    (run_time, "", "run_time", "run time for io", ::cxxopts::value<uint32_t>()->default_value("360000"), "seconds"),
+     ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
     (num_rounds, "", "num_rounds", "number of rounds to test with",
-        ::cxxopts::value<uint32_t>()->default_value("100"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
     (num_entries_per_rounds, "", "num_entries_per_rounds", "number of entries per rounds",
-        ::cxxopts::value<uint32_t>()->default_value("40"), "number"),
-    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node",
-        ::cxxopts::value<uint32_t>()->default_value("20"), ""),
-    (min_keys_in_node, "", "min_keys_in_node", "min_keys_in_node",
-        ::cxxopts::value<uint32_t>()->default_value("6"), ""),
+     ::cxxopts::value< uint32_t >()->default_value("40"), "number"),
+    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("20"),
+     ""),
+    (min_keys_in_node, "", "min_keys_in_node", "min_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("6"),
+     ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
-        ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
+     ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
-        ::cxxopts::value<uint32_t>()->default_value("1000"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
     (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
     (load_from_file, "", "load_from_file", "load from file", ::cxxopts::value< bool >()->default_value("0"), ""),
     (save_to_file, "", "save_to_file", "save to file", ::cxxopts::value< bool >()->default_value("0"), ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
-        ::cxxopts::value< bool >()->default_value("1"), ""),
+     ::cxxopts::value< bool >()->default_value("1"), ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
-        ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
+     ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 void log_obj_life_counter() {
     std::string str;
@@ -249,7 +249,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
             m_test->m_cfg.m_int_node_type = T::interior_node_type;
             m_test->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
-            m_test->m_cfg.m_min_keys_in_node = SISL_OPTIONS["min_keys_in_node"].as<uint32_t>();
+            m_test->m_cfg.m_min_keys_in_node = SISL_OPTIONS["min_keys_in_node"].as< uint32_t >();
             m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
@@ -277,7 +277,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
         this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
-        this->m_cfg.m_min_keys_in_node = SISL_OPTIONS["min_keys_in_node"].as<uint32_t>();
+        this->m_cfg.m_min_keys_in_node = SISL_OPTIONS["min_keys_in_node"].as< uint32_t >();
         LOGINFO("Node size {}, max_keys_in_node {}, min_keys_in_node {}", this->m_cfg.node_size(),
                 this->m_cfg.m_max_keys_in_node, this->m_cfg.m_min_keys_in_node);
         auto uuid = boost::uuids::random_generator()();
@@ -338,7 +338,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     void reapply_after_crash() {
         ShadowMap< K, V > snapshot_map{this->m_shadow_map.max_keys()};
         snapshot_map.load(m_shadow_filename);
-        LOGINFO("\tSnapshot before crash\n{}", snapshot_map.to_string());
+        // LOGINFO("\tSnapshot before crash\n{}", snapshot_map.to_string());
         auto diff = this->m_shadow_map.diff(snapshot_map);
 
         // visualize tree after crash
@@ -346,13 +346,14 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         // this->visualize_keys(recovered_tree_filename);
         // LOGINFO(" tree after recovered stored in {}", recovered_tree_filename);
 
-        std::string dif_str = "KEY \tADDITION\n";
-        for (const auto& [k, addition] : diff) {
-            dif_str += fmt::format(" {} \t{}\n", k.key(), addition);
+        std::string dif_str = "Keys[";
+        for (const auto& [k, _] : diff) {
+            dif_str += fmt::format("{} ", k.key());
         }
+        dif_str += "]";
         LOGINFO("Diff between shadow map and snapshot map\n{}\n", dif_str);
 
-        for (const auto &[k, addition]: diff) {
+        for (const auto& [k, addition] : diff) {
             // this->print_keys(fmt::format("reapply: before inserting key {}", k.key()));
             //  this->visualize_keys(recovered_tree_filename);
             if (addition) {
@@ -401,15 +402,15 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     }
 
     void crash_and_recover(uint32_t s_key, uint32_t e_key) {
-        this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
+        // this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
         trigger_cp(false);
         this->wait_for_crash_recovery();
         // this->visualize_keys("tree_after_crash_" + std::to_string(s_key) + "_" + std::to_string(e_key) + ".dot");
 
-        this->print_keys("Post crash and recovery, btree structure: ");
+        // this->print_keys("Post crash and recovery, btree structure: ");
         this->reapply_after_crash();
 
-        this->print_keys("Post reapply, btree structure: ");
+        // this->print_keys("Post reapply, btree structure: ");
 
         this->get_all();
         LOGINFO("Expect to have [{},{}) in tree and it is actually{} ", s_key, e_key, tree_key_count());
@@ -420,24 +421,28 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         std::set< uint64_t > new_keys;
         std::transform(operations.begin(), operations.end(), std::inserter(new_keys, new_keys.end()),
                        [](const Operation& operation) { return operation.first; });
-        uint32_t count = 1;
+        uint32_t count = 0;
         this->m_shadow_map.foreach ([this, new_keys, &count](K key, V value) {
             // discard the new keys to check
             if (new_keys.find(key.key()) != new_keys.end()) { return; }
+            count++;
             auto copy_key = std::make_unique< K >();
             *copy_key = key;
             auto out_v = std::make_unique< V >();
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
             req.enable_route_tracing();
             const auto ret = this->m_bt->get(req);
+            if (ret != btree_status_t::success) {
+                this->print_keys(fmt::format("Sanity check: key {}", key.key()));
+                this->dump_to_file("sanity_fail.txt");
+            }
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
         });
         LOGINFO("Sanity check passed for {} keys!", count);
-
     }
 
     void crash_and_recover(OperationList& operations, std::string filename = "") {
-        this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
+         // this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
 
@@ -456,7 +461,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree file after recovery : {}", rec_filename);
             this->visualize_keys(rec_filename);
         }
-        this->print_keys("Post crash and recovery, btree structure: ");
+         // this->print_keys("Post crash and recovery, btree structure: ");
         sanity_check(operations);
         //        Added to the index service right after recovery. Not needed here
         //        test_common::HSTestHelper::trigger_cp(true);
@@ -468,7 +473,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree after reapply {}", re_filename);
             this->visualize_keys(re_filename);
         }
-        this->print_keys("Post reapply, btree structure: ");
+         // this->print_keys("Post reapply, btree structure: ");
 
         this->get_all();
         LOGINFO("After reapply: {} keys in shadow map and actually {} in tress", this->m_shadow_map.size(),
@@ -629,7 +634,7 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     test_common::HSTestHelper::trigger_cp(true);
     this->get_all();
     this->m_shadow_map.save(this->m_shadow_filename);
-    this->print_keys("reapply: after preload");
+    // this->print_keys("reapply: after preload");
     this->visualize_keys("tree_after_preload.dot");
 
     for (uint32_t round = 1;
@@ -716,28 +721,27 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
                     elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
                     this->tree_key_count() * 100.0 / num_entries);
         }
-        this->print_keys(fmt::format("reapply: after round {}", round));
+        // this->print_keys(fmt::format("reapply: after round {}", round));
         if (renew_btree_after_crash) { this->reset_btree(); };
     }
 }
 
 // Basic reverse and forward order remove with different flip points
 TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
-    vector<std::string> flip_points = {
-        "crash_flush_on_merge_at_parent",
-        "crash_flush_on_merge_at_left_child",
+    vector< std::string > flip_points = {
+        "crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child",
         // "crash_flush_on_freed_child",
     };
 
     for (size_t i = 0; i < flip_points.size(); ++i) {
         this->reset_btree();
 
-        auto &flip_point = flip_points[i];
+        auto& flip_point = flip_points[i];
         LOGINFO("=== Testing flip point: {} - {} ===", i + 1, flip_point);
 
         // Populate some keys [1,num_entries) and trigger cp to persist
-        LOGINFO("Step {}-1: Populate some keys and flush", i+1);
-        auto const num_entries = SISL_OPTIONS["num_entries"].as<uint32_t>();
+        LOGINFO("Step {}-1: Populate some keys and flush", i + 1);
+        auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
         for (auto k = 0u; k < num_entries; ++k) {
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
@@ -748,7 +752,8 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
 
         // Split keys into batches and remove the last one in reverse order
         LOGINFO("Step {}-2: Set crash flag, remove some keys in reverse order", i + 1);
-        int batch_num = 4; {
+        int batch_num = 4;
+        {
             int n = batch_num;
             auto r = num_entries * n / batch_num - 1;
             auto l = num_entries * (n - 1) / batch_num;
@@ -759,8 +764,7 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             LOGINFO("Step {}-2-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, r, l);
 
             this->set_basic_flip(flip_point);
-            for (auto [k, _]: ops) {
-                LOGINFO("Removing key {}", k);
+            for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
             this->visualize_keys("tree_merge_before_first_crash.dot");
@@ -781,8 +785,7 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             LOGINFO("Step {}-3-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
 
             this->set_basic_flip(flip_point);
-            for (auto [k, _]: ops) {
-                LOGINFO("Removing key {}", k);
+            for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
             this->visualize_keys("tree_merge_before_second_crash.dot");
@@ -803,8 +806,7 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             LOGINFO("Step {}-4-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
 
             this->set_basic_flip(flip_point);
-            for (auto [k, _]: ops) {
-                LOGINFO("Removing key {}", k);
+            for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
             this->visualize_keys("tree_merge_before_third_crash.dot");
@@ -828,9 +830,8 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
 //     vector<std::string> flips = {
 //         "crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child",
 //     };
-//     SequenceGenerator generator(0 /*putFreq*/, 100 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
-//     OperationList operations;
-//     for (size_t i = 0; i < flips.size(); ++i) {
+//     SequenceGenerator generator(0 /*putFreq*/, 100 /* removeFreq*/, 0 /*start_range*/, num_entries - 1
+//     /*end_range*/); OperationList operations; for (size_t i = 0; i < flips.size(); ++i) {
 //         this->reset_btree();
 //         LOGINFO("Step {}-1: Init btree", i + 1);
 //         for (auto k = 0u; k < num_entries; ++k) {

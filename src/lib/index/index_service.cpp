@@ -132,6 +132,15 @@ void IndexService::repair_index_node(uint32_t ordinal, IndexBufferPtr const& nod
     }
 }
 
+void IndexService::update_root(uint32_t ordinal, IndexBufferPtr const& node_buf) {
+    auto tbl = get_index_table(ordinal);
+    if (tbl) {
+        tbl->repair_root_node(node_buf);
+    } else {
+        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", ordinal);
+    }
+}
+
 uint32_t IndexService::node_size() const { return m_vdev->atomic_page_size(); }
 
 uint64_t IndexService::used_size() const {
@@ -154,31 +163,39 @@ IndexBuffer::~IndexBuffer() {
 }
 
 std::string IndexBuffer::to_string() const {
-    if (m_is_meta_buf) {
-        return fmt::format("Buf={} [Meta] index={} state={} create/dirty_cp={}/{} down_wait#={} freed={}",
-                           voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, int_cast(state()),
-                           m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(), m_node_freed);
-    } else {
-        // store m_down_buffers in a string
-        std::string down_bufs = "";
+    static std::vector< std::string > state_str = {"CLEAN", "DIRTY", "FLUSHING"};
+    // store m_down_buffers in a string
+    std::string down_bufs = "";
 #ifndef NDEBUG
-        {
-            std::lock_guard lg(m_down_buffers_mtx);
-            for (auto const &down_buf: m_down_buffers) {
+    {
+        std::lock_guard lg(m_down_buffers_mtx);
+        if (m_down_buffers.empty()) {
+            fmt::format_to(std::back_inserter(down_bufs), "EMPTY");
+        } else {
+            for (auto const& down_buf : m_down_buffers) {
                 if (auto ptr = down_buf.lock()) {
                     fmt::format_to(std::back_inserter(down_bufs), "[{}]", voidptr_cast(ptr.get()));
                 }
             }
+            fmt::format_to(std::back_inserter(down_bufs), "  #down bufs={}", m_down_buffers.size());
         }
+    }
 #endif
 
-        return fmt::format("Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} up={} node=[{}] down=[{}]",
-                           voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, int_cast(state()),
-                           m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(),
-                           m_node_freed ? " Freed" : "", voidptr_cast(const_cast< IndexBuffer* >(m_up_buffer.get())),
-                           (m_bytes == nullptr) ? "not attached yet"
-                                                : r_cast< persistent_hdr_t const* >(m_bytes)->to_compact_string(),
-                           down_bufs);
+    if (m_is_meta_buf) {
+        return fmt::format("[Meta] Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} down={{{}}}",
+                           voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal,
+                           state_str[int_cast(state())], m_created_cp_id, m_dirtied_cp_id,
+                           m_wait_for_down_buffers.get(), m_node_freed ? " Freed" : "", down_bufs);
+    } else {
+
+        return fmt::format(
+            "Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} up={} node=[{}] down={{{}}}",
+            voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, state_str[int_cast(state())],
+            m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(), m_node_freed ? " Freed" : "",
+            voidptr_cast(const_cast< IndexBuffer* >(m_up_buffer.get())),
+            (m_bytes == nullptr) ? "not attached yet" : r_cast< persistent_hdr_t const* >(m_bytes)->to_compact_string(),
+            down_bufs);
     }
 }
 
@@ -194,7 +211,7 @@ std::string IndexBuffer::to_string_dot() const {
     return str;
 }
 
-void IndexBuffer::add_down_buffer(const IndexBufferPtr &buf) {
+void IndexBuffer::add_down_buffer(const IndexBufferPtr& buf) {
     m_wait_for_down_buffers.increment();
 #ifndef NDEBUG
     {
@@ -204,10 +221,11 @@ void IndexBuffer::add_down_buffer(const IndexBufferPtr &buf) {
 #endif
 }
 
-void IndexBuffer::remove_down_buffer(const IndexBufferPtr &buf) {
+void IndexBuffer::remove_down_buffer(const IndexBufferPtr& buf) {
     m_wait_for_down_buffers.decrement();
 #ifndef NDEBUG
-    bool found{false}; {
+    bool found{false};
+    {
         std::lock_guard lg(m_down_buffers_mtx);
         for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
             if (it->lock() == buf) {
@@ -222,12 +240,10 @@ void IndexBuffer::remove_down_buffer(const IndexBufferPtr &buf) {
 }
 
 #ifndef NDEBUG
-bool IndexBuffer::is_in_down_buffers(const IndexBufferPtr &buf) {
-    std::lock_guard<std::mutex> lg(m_down_buffers_mtx);
-    for (auto const &dbuf: m_down_buffers) {
-        if (dbuf.lock() == buf) {
-            return true;
-        }
+bool IndexBuffer::is_in_down_buffers(const IndexBufferPtr& buf) {
+    std::lock_guard< std::mutex > lg(m_down_buffers_mtx);
+    for (auto const& dbuf : m_down_buffers) {
+        if (dbuf.lock() == buf) { return true; }
     }
     return false;
 }
