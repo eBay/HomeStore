@@ -147,8 +147,11 @@ nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::last_entry() const {
         auto log_bytes = m_log_store->read_sync(max_seq);
         nle = to_nuraft_log_entry(log_bytes);
     } catch (const std::exception& e) {
-        REPL_STORE_LOG(ERROR, "last_entry() out_of_range={}", max_seq);
-        throw e;
+        // all the log entries are truncated, so we should return a dummy log entry.
+        REPL_STORE_LOG(ERROR, "last_entry() out_of_range={}, {}", max_seq, e.what());
+        // according to the contract, we should return a dummy log entry if the index is out of range.
+        // https://github.com/eBay/NuRaft/blob/50e2f949503081262cb21923e633eaa8dacad8fa/include/libnuraft/log_store.hxx#L56
+        nle = m_dummy_log_entry;
     }
 
     return nle;

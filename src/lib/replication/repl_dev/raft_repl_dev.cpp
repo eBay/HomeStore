@@ -39,7 +39,10 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_data_journal = std::make_shared< ReplLogStore >(
             *this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id,
             [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); },
-            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; });
+            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) {
+                m_log_store_replay_done = true;
+                set_log_store_last_durable_lsn(hs->tail_lsn());
+            });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -292,9 +295,10 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         }
     }
 
-    auto status = rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
-               data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */,
-               header, key, data.size, m_listener);
+    auto status = rreq->init(
+        repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+        data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
+        key, data.size, m_listener);
 
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
     auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
@@ -627,9 +631,7 @@ bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rre
     if (!all_futs_ready && timeout_rreqs != nullptr) {
         timeout_rreqs->clear();
         for (size_t i{0}; i < futs.size(); ++i) {
-            if (!futs[i].isReady()) {
-                timeout_rreqs->emplace_back(only_wait_reqs[i]);
-            }
+            if (!futs[i].isReady()) { timeout_rreqs->emplace_back(only_wait_reqs[i]); }
         }
         all_futs_ready = timeout_rreqs->empty();
     }
@@ -925,7 +927,7 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
     }
 }
 
-    void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
+void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     if (!rreq->has_state(repl_req_state_t::DATA_COMMITTED)) { commit_blk(rreq); }
 
     // Remove the request from repl_key map.
@@ -971,8 +973,8 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
     // Ensure non-volatile lsn not exist because handle_error should not be called after append entries.
     auto exist_rreq = m_state_machine->lsn_to_req(rreq->lsn());
     if (exist_rreq != nullptr && !exist_rreq->is_volatile()) {
-        HS_REL_ASSERT(false, "Unexpected: LSN={} is already ready to commit, exist_rreq=[{}]",
-                      rreq->lsn(), exist_rreq->to_string());
+        HS_REL_ASSERT(false, "Unexpected: LSN={} is already ready to commit, exist_rreq=[{}]", rreq->lsn(),
+                      exist_rreq->to_string());
     }
     if (err == ReplServiceError::DATA_DUPLICATED) {
         RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
@@ -1456,6 +1458,8 @@ void RaftReplDev::gc_repl_reqs() {
         }
     }
 }
+
+void RaftReplDev::set_log_store_last_durable_lsn(store_lsn_t lsn) { m_data_journal->set_last_durable_lsn(lsn); }
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto repl_lsn = to_repl_lsn(lsn);
