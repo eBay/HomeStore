@@ -313,9 +313,10 @@ private:
      */
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
 
-    bool wait_for_data_receive(std::vector < repl_req_ptr_t > const &rreqs, uint64_t timeout_ms,
-                               std::vector < repl_req_ptr_t > *timeout_rreqs = nullptr);
+    bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms,
+                               std::vector< repl_req_ptr_t >* timeout_rreqs = nullptr);
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
+    void set_log_store_last_durable_lsn(store_lsn_t lsn);
     void commit_blk(repl_req_ptr_t rreq);
     void replace_member(repl_req_ptr_t rreq);
     void reset_quorum_size(uint32_t commit_quorum);
