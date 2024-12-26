@@ -966,11 +966,9 @@ void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config
     // keep this variable in case it is needed later
     (void) new_conf;
     auto prev_lsn = m_commit_upto_lsn.load(std::memory_order_relaxed);
-    RD_DBG_ASSERT_GT(lsn, prev_lsn,
-                     "Out of order commit of lsns, it is not expected in RaftReplDev. cur_lsns={}, prev_lsns={}",
-                     lsn, prev_lsn);
-    RD_DBG_ASSERT(m_commit_upto_lsn.compare_exchange_strong(prev_lsn, lsn),
-                  "Raft Channel: unexpected log {} commited before config {} committed", prev_lsn, lsn);
+    if (prev_lsn >= lsn || !m_commit_upto_lsn.compare_exchange_strong(prev_lsn, lsn)) {
+        RD_LOGE("Raft Channel: unexpected log {} commited before config {} committed", prev_lsn, lsn);
+    }
 }
 
 void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
