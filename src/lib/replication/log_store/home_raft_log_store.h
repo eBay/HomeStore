@@ -204,6 +204,7 @@ public:
      */
     ulong last_index() const;
 
+#if 0
     /**
      * Truncates the log store
      *
@@ -212,6 +213,7 @@ public:
      * LSN;
      */
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
+#endif
 
     void wait_for_log_store_ready();
     void set_last_durable_lsn(repl_lsn_t lsn);

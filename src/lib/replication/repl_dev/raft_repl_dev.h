@@ -250,6 +250,7 @@ public:
      */
     void on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done);
 
+#if 0
     /**
      * Truncates the replication log by providing a specified number of reserved entries.
      *
@@ -258,6 +259,7 @@ public:
     void truncate(uint32_t num_reserved_entries) {
         m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
     }
+#endif
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 

@@ -49,6 +49,9 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
     return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
+#if 0
+// Since truncate_lsn can not accross compact_lsn passed down by raft server
+// and compact will truncate logs upto compact_lsn, we don't need to re-truncate in this function now.
 void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn) {
     auto const last_lsn = last_index();
     auto const start_lsn = start_index();
@@ -79,6 +82,7 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
         m_log_store->truncate(truncate_lsn);
     }
 }
+#endif
 
 HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore_id, log_found_cb_t const& log_found_cb,
                                    log_replay_done_cb_t const& log_replay_done_cb) :

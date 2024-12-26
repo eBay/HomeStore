@@ -47,14 +47,16 @@ void ResourceMgr::stop() {
 //
 void ResourceMgr::trigger_truncate() {
     if (hs()->has_repl_data_service()) {
-        // first make sure all repl dev's underlying raft log store make corresponding reservation during
-        // truncate -- set the safe truncate boundary for each raft log store;
-        hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
-            // lock is already taken by repl service layer;
-            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
-                HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold));
-        });
-
+        /*
+         * DO NOT NEED : raft will truncate logs.
+         * // first make sure all repl dev's underlying raft log store make corresponding reservation during
+         * // truncate -- set the safe truncate boundary for each raft log store;
+         * hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
+         *     // lock is already taken by repl service layer;
+         *     std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
+         *     HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold));
+         *  });
+         */
         // next do device truncate which go through all logdevs and truncate them;
         hs()->logstore_service().device_truncate();
     }

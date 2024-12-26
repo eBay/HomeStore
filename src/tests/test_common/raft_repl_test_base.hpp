@@ -420,7 +420,7 @@ public:
 
     void truncate(int num_reserved_entries) {
         auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
-        raft_repl_dev->truncate(num_reserved_entries);
+        // raft_repl_dev->truncate(num_reserved_entries);
         LOGINFO("Manually truncated");
     }
 

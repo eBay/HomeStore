@@ -409,7 +409,7 @@ TEST_F(RaftReplDevTest, BaselineTest) {
             // Leader does manual snapshot and truncate
             LOGINFO("Leader create snapshot and truncate");
             this->create_snapshot();
-            this->truncate(0);
+            // this->truncate(0);
         }
     }
 

@@ -201,8 +201,12 @@ public:
         read_all_verify(log_store);
     }
 
-    void truncate_validate(std::shared_ptr< HomeLogStore > log_store) {
+    void truncate_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t* last_lsn = nullptr) {
         auto upto = log_store->get_contiguous_completed_seq_num(-1);
+        if (last_lsn) {
+            ASSERT_EQ(upto, *last_lsn);
+        }
+
         LOGINFO("truncate_validate upto {}", upto);
         log_store->truncate(upto);
         read_all_verify(log_store);
@@ -303,6 +307,34 @@ TEST_F(LogDevTest, Rollback) {
 
     LOGINFO("Step 15: Validate if there are no rollback records");
     rollback_records_validate(log_store, 0 /* expected_count */);
+}
+
+TEST_F(LogDevTest, ReTruncate) {
+    LOGINFO("Step 1: Create a single logstore to start re-truncate test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+    auto store_id = log_store->get_store_id();
+
+    LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
+    logstore_seq_num_t cur_lsn = 0;
+    kickstart_inserts(log_store, cur_lsn, 500);
+
+    LOGINFO("Step 3: Truncate all entries");
+    logstore_seq_num_t ls_last_lsn = 499;
+    truncate_validate(log_store, &ls_last_lsn);
+    ASSERT_EQ(log_store->start_lsn(), ls_last_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), ls_last_lsn);
+    ASSERT_EQ(log_store->truncated_upto(), ls_last_lsn);
+
+    LOGINFO("Step 4: Truncate again");
+    truncate_validate(log_store, &ls_last_lsn);
+    ASSERT_EQ(log_store->start_lsn(), ls_last_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), ls_last_lsn);
+    ASSERT_EQ(log_store->truncated_upto(), ls_last_lsn);
+
+    LOGINFO("Step 5: Read and verify all entries again");
+    read_all_verify(log_store);
 }
 
 TEST_F(LogDevTest, CreateRemoveLogDev) {
