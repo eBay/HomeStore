@@ -191,7 +191,7 @@ public:
     bool is_destroy_pending() const;
     bool is_destroyed() const;
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
-    bool is_ready_for_traffic() const {
+    bool is_ready_for_traffic() const override {
         auto committed_lsn = m_commit_upto_lsn.load();
         auto gate = m_traffic_ready_lsn.load();
         bool ready = committed_lsn >= gate;
