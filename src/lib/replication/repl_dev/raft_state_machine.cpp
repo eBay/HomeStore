@@ -230,6 +230,8 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
     RD_LOG(INFO, "Raft channel: server ids in new cluster conf : {}, my_id {}, group_id {}", oss.str(), my_id,
            m_rd.group_id_str());
 #endif
+
+    m_rd.handle_config_commit(s_cast< repl_lsn_t >(log_idx), new_conf);
 }
 
 void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
