@@ -154,15 +154,9 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
 
     auto rreq = m_rd.repl_key_to_req(rkey);
     if ((rreq == nullptr) || (rreq->is_localize_pending())) {
-        rreq = localize_journal_entry_prepare(lentry);
-        if (rreq == nullptr) {
-            RELEASE_ASSERT(rreq != nullptr,
-                           "We get an linked data for rkey=[{}], jentry=[{}] not as part of Raft Append but "
-                           "indirectly through possibly unpack() and in those cases, if we are not able to alloc "
-                           "location to write the data, there is no recourse. So we must crash this system ",
-                           rkey.to_string(), jentry->to_string());
-            return nullptr;
-        }
+        // This path is for log pack apply only.
+        // Now we fully disabled log pack/unpack with the new_learner opt, should not reaching here.
+        RELEASE_ASSERT(false, "rreq should have already localized for rkey=[{}]", rkey.to_string());
     }
 
     if (rreq->is_proposer()) {
