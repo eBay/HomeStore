@@ -135,6 +135,7 @@ void LogDev::stop() {
     m_log_idx.store(0);
     m_pending_flush_size.store(0);
     m_last_flush_idx = -1;
+    m_last_flush_ld_key = logdev_key{0, 0};
     m_last_truncate_idx = -1;
     m_last_crc = INVALID_CRC32_VALUE;
 
@@ -501,6 +502,7 @@ void LogDev::on_flush_completion(LogGroup* lg) {
     free_log_group(lg);
     m_log_records->truncate(upto_indx);
     m_last_flush_idx = upto_indx;
+    m_last_flush_ld_key = logdev_key{from_indx, dev_offset};
 
     // since we support out-of-order lsn write, so no need to guarantee the order of logstore write completion
     for (auto const& [idx, req] : req_map) {
@@ -530,20 +532,18 @@ uint64_t LogDev::truncate() {
         auto lstore = store.log_store;
         if (lstore == nullptr) { continue; }
         auto const [trunc_lsn, trunc_ld_key, tail_lsn] = lstore->truncate_info();
-        if (trunc_lsn == tail_lsn) {
-            THIS_LOGDEV_LOG(DEBUG, "Store_id={} didn't have any writes since last truncation, skipping ", store_id);
-            m_logdev_meta.remove_all_rollback_records(store_id, m_stopped /* persist_now */);
-            continue;
-        }
-        HS_DBG_ASSERT_GE(trunc_ld_key.idx, m_last_truncate_idx, "Trying to truncate logid which is already truncated");
         m_logdev_meta.update_store_superblk(store_id, logstore_superblk(trunc_lsn + 1), m_stopped /* persist_now */);
-
         // We found a new minimum logdev_key that we can truncate to
-        if (trunc_ld_key.idx > 0 && trunc_ld_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = trunc_ld_key; }
+        if (trunc_ld_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = trunc_ld_key; }
+    }
+
+    // All log stores are empty, we can truncate logs depends on the last flushed logdev_key
+    if (min_safe_ld_key == logdev_key::out_of_bound_ld_key()) {
+        min_safe_ld_key = m_last_flush_ld_key;
     }
 
     // There are no writes or no truncation called for any of the store, so we can't truncate anything
-    if (min_safe_ld_key == logdev_key::out_of_bound_ld_key() || min_safe_ld_key.idx <= m_last_truncate_idx) return 0;
+    if (min_safe_ld_key.idx <= 0 || min_safe_ld_key.idx <= m_last_truncate_idx) return 0;
 
     uint64_t const num_records_to_truncate = uint64_cast(min_safe_ld_key.idx - m_last_truncate_idx);
 

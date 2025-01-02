@@ -189,12 +189,27 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate
 
 #endif
 
+    // In normal write and compact path, upto_lsn is expected to be no larger than m_tail_lsn after the flush.
+    // So upto_lsn > m_tail_lsn is expected to exist only in baseline resync path.
+    // In baseline resync path, we truncate all entries up to upto_lsn, and update m_tail_lsn and m_next_lsn
+    // to make sure logstore's idx is always = raft's idx - 1.
     if (upto_lsn > m_tail_lsn) {
         THIS_LOGSTORE_LOG(WARN,
-                          "Truncating issued on lsn={} which is greater than tail_lsn={}, truncating upto tail_lsn",
+                          "Truncating issued on lsn={} which is greater than tail_lsn={}",
                           upto_lsn, m_tail_lsn.load(std::memory_order_relaxed));
-        m_trunc_ld_key = m_records.at(m_tail_lsn).m_trunc_key;
-        upto_lsn = m_tail_lsn;
+        // update m_tail_lsn if it is less than upto_lsn
+        auto current_tail_lsn = m_tail_lsn.load(std::memory_order_relaxed);
+        while (current_tail_lsn < upto_lsn &&
+               !m_tail_lsn.compare_exchange_weak(current_tail_lsn, upto_lsn, std::memory_order_relaxed)) {}
+
+        // update m_next_lsn if it is less than upto_lsn + 1
+        auto current_next_lsn = m_next_lsn.load(std::memory_order_relaxed);
+        while (current_next_lsn < upto_lsn + 1 &&
+               !m_next_lsn.compare_exchange_weak(current_next_lsn, upto_lsn + 1, std::memory_order_relaxed)) {}
+
+        // insert an empty record to make sure m_records has enough size to truncate
+        logdev_key empty_ld_key;
+        m_records.create_and_complete(upto_lsn, logstore_record(empty_ld_key, empty_ld_key));
     } else {
         m_trunc_ld_key = m_records.at(upto_lsn).m_trunc_key;
         THIS_LOGSTORE_LOG(TRACE, "Truncating logstore upto lsn={} , m_trunc_ld_key index {} offset {}", upto_lsn,
@@ -207,7 +222,12 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate
 
 std::tuple< logstore_seq_num_t, logdev_key, logstore_seq_num_t > HomeLogStore::truncate_info() const {
     auto const trunc_lsn = m_start_lsn.load(std::memory_order_relaxed) - 1;
-    return std::make_tuple(trunc_lsn, m_trunc_ld_key, m_tail_lsn.load(std::memory_order_relaxed));
+    auto const tail_lsn = m_tail_lsn.load(std::memory_order_relaxed);
+
+    // If the store is empty, return out_of_bound_ld_key as trunc_ld_key, allowing the caller to truncate freely.
+    // Otherwise, return the actual trunc_ld_key.
+    return (trunc_lsn == tail_lsn) ? std::make_tuple(trunc_lsn, logdev_key::out_of_bound_ld_key(), tail_lsn)
+                                   : std::make_tuple(trunc_lsn, m_trunc_ld_key, tail_lsn);
 }
 
 void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
@@ -277,10 +297,7 @@ void HomeLogStore::flush(logstore_seq_num_t upto_lsn) {
         return;
     }
 
-    if (upto_lsn == invalid_lsn()) { upto_lsn = m_records.active_upto(); }
-
-    // if we have flushed already, we are done, else issue a flush
-    if (m_records.status(upto_lsn).is_active) m_logdev->flush_under_guard();
+    m_logdev->flush_under_guard();
 }
 
 bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {

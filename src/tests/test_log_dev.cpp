@@ -201,10 +201,11 @@ public:
         read_all_verify(log_store);
     }
 
-    void truncate_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t* last_lsn = nullptr) {
+    void truncate_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t* trunc_lsn = nullptr) {
         auto upto = log_store->get_contiguous_completed_seq_num(-1);
-        if (last_lsn) {
-            ASSERT_EQ(upto, *last_lsn);
+        if (trunc_lsn && *trunc_lsn != upto) {
+            LOGWARN("Truncate issued upto {} but real upto lsn in log store is {}", *trunc_lsn, upto);
+            upto = *trunc_lsn;
         }
 
         LOGINFO("truncate_validate upto {}", upto);
@@ -216,6 +217,24 @@ public:
     void rollback_records_validate(std::shared_ptr< HomeLogStore > log_store, uint32_t expected_count) {
         auto actual_count = log_store->get_logdev()->log_dev_meta().num_rollback_records(log_store->get_store_id());
         ASSERT_EQ(actual_count, expected_count);
+    }
+
+    logid_t get_last_truncate_idx(logdev_id_t logdev_id) {
+        auto status = logstore_service().get_logdev(logdev_id)->get_status(0);
+        if (status.contains("last_truncate_log_idx")) {
+            return s_cast<logid_t>(status["last_truncate_log_idx"]);
+        }
+        LOGERROR("Failed to get last_truncate_log_idx from logdev status for logdev_id {}", logdev_id);
+        return static_cast<logid_t>(-1);
+    }
+
+    logid_t get_current_log_idx(logdev_id_t logdev_id) {
+        auto status = logstore_service().get_logdev(logdev_id)->get_status(0);
+        if (status.contains("current_log_idx")) {
+            return s_cast<logid_t>(status["current_log_idx"]);
+        }
+        LOGERROR("Failed to get current_log_idx from logdev status for logdev_id {}", logdev_id);
+        return static_cast<logid_t>(-1);
     }
 };
 
@@ -314,7 +333,6 @@ TEST_F(LogDevTest, ReTruncate) {
     auto logdev_id = logstore_service().create_new_logdev();
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
-    auto store_id = log_store->get_store_id();
 
     LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
     logstore_seq_num_t cur_lsn = 0;
@@ -335,6 +353,268 @@ TEST_F(LogDevTest, ReTruncate) {
 
     LOGINFO("Step 5: Read and verify all entries again");
     read_all_verify(log_store);
+}
+
+TEST_F(LogDevTest, TruncateWithExceedingLSN) {
+    LOGINFO("Step 1: Create a single logstore to start truncate with exceeding LSN test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+
+    LOGINFO("Step 2: Insert 500 entries");
+    logstore_seq_num_t cur_lsn = 0;
+    kickstart_inserts(log_store, cur_lsn, 500);
+
+    LOGINFO("Step 3: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 4: Truncate 100 entries");
+    logstore_seq_num_t trunc_lsn = 99;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), 499);
+    ASSERT_EQ(log_store->next_lsn(), 500);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+
+    LOGINFO("Step 5: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 6: Truncate all with exceeding lsn");
+    trunc_lsn = 1999999;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), trunc_lsn);
+    ASSERT_EQ(log_store->next_lsn(), 2000000);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+
+    LOGINFO("Step 7 Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 8: Append 500 entries");
+    cur_lsn = log_store->next_lsn();
+    kickstart_inserts(log_store, cur_lsn, 500);
+    ASSERT_EQ(log_store->next_lsn(), 2000500);
+
+    LOGINFO("Step 9: Read and verify all entries");
+    read_all_verify(log_store);
+}
+
+TEST_F(LogDevTest, TruncateAfterRestart) {
+    LOGINFO("Step 1: Create a single logstore to start truncate with overlapping LSN test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+    auto store_id = log_store->get_store_id();
+
+    auto restart = [&]() {
+        std::promise< bool > p;
+        auto starting_cb = [&]() {
+            logstore_service().open_logdev(logdev_id);
+            logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
+                log_store = store;
+                p.set_value(true);
+            });
+        };
+        start_homestore(true /* restart */, starting_cb);
+        p.get_future().get();
+    };
+
+    LOGINFO("Step 2: Insert 500 entries");
+    logstore_seq_num_t cur_lsn = 0;
+    kickstart_inserts(log_store, cur_lsn, 500);
+
+    LOGINFO("Step 3: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 4: Truncate 100 entries");
+    logstore_seq_num_t trunc_lsn = 99;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), 499);
+    ASSERT_EQ(log_store->next_lsn(), 500);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+
+    LOGINFO("Step 5: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 6: Restart and verify all entries");
+    restart();
+    read_all_verify(log_store);
+    auto const [last_trunc_lsn, trunc_ld_key, tail_lsn] = log_store->truncate_info();
+    ASSERT_EQ(last_trunc_lsn, trunc_lsn);
+    ASSERT_EQ(trunc_ld_key.idx, 0);
+    ASSERT_EQ(tail_lsn, log_store->tail_lsn());
+
+    LOGINFO("Step 7: call log dev truncate again and read verify")
+    logstore_service().device_truncate();
+    read_all_verify(log_store);
+}
+
+TEST_F(LogDevTest, TruncateAcrossMultipleStores) {
+    LOGINFO("Step 1: Create 3 log stores to start truncate across multiple stores test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto store1 = logstore_service().create_new_log_store(logdev_id, false);
+    auto store2 = logstore_service().create_new_log_store(logdev_id, false);
+    auto store3 = logstore_service().create_new_log_store(logdev_id, false);
+
+
+    LOGINFO("Step 2: Insert 100 entries to store {}", store1->get_store_id());
+    logstore_seq_num_t cur_lsn = 0;
+    kickstart_inserts(store1, cur_lsn, 100);
+    ASSERT_EQ(get_current_log_idx(logdev_id), 100);
+
+    LOGINFO("Step 3: Insert 200 entries to store {}", store2->get_store_id());
+    cur_lsn = 0;
+    kickstart_inserts(store2, cur_lsn, 200);
+    ASSERT_EQ(get_current_log_idx(logdev_id), 300);
+
+    LOGINFO("Step 4: Insert 200 entries to store {}", store3->get_store_id());
+    cur_lsn = 0;
+    kickstart_inserts(store3, cur_lsn, 200);
+    ASSERT_EQ(get_current_log_idx(logdev_id), 500);
+
+    LOGINFO("Step 5: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 0);
+    ASSERT_EQ(store1->tail_lsn(), 99);
+    ASSERT_EQ(store1->truncated_upto(), -1);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 0);
+    ASSERT_EQ(store2->tail_lsn(), 199);
+    ASSERT_EQ(store2->truncated_upto(), -1);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 0);
+    ASSERT_EQ(store3->tail_lsn(), 199);
+    ASSERT_EQ(store3->truncated_upto(), -1);
+    // log dev should not truncate any logs due to no truncate in log stores happened
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), -1);
+
+    LOGINFO("Step 6: Truncate 100 entries in store {}", store2->get_store_id());
+    logstore_seq_num_t trunc_lsn = 99;
+    truncate_validate(store2, &trunc_lsn);
+
+    LOGINFO("Step 7: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 0);
+    ASSERT_EQ(store1->tail_lsn(), 99);
+    ASSERT_EQ(store1->truncated_upto(), -1);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 100);
+    ASSERT_EQ(store2->tail_lsn(), 199);
+    ASSERT_EQ(store2->truncated_upto(), 99);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 0);
+    ASSERT_EQ(store3->tail_lsn(), 199);
+    ASSERT_EQ(store3->truncated_upto(), -1);
+    // log dev should not truncate any logs due to store1 has valid logs
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), -1);
+
+    LOGINFO("Step 8: Truncate 500 entries in store {}", store3->get_store_id());
+    trunc_lsn = 499;
+    truncate_validate(store3, &trunc_lsn);
+
+    LOGINFO("Step 9: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 0);
+    ASSERT_EQ(store1->tail_lsn(), 99);
+    ASSERT_EQ(store1->truncated_upto(), -1);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 100);
+    ASSERT_EQ(store2->tail_lsn(), 199);
+    ASSERT_EQ(store2->truncated_upto(), 99);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 500);
+    ASSERT_EQ(store3->tail_lsn(), 499);
+    ASSERT_EQ(store3->truncated_upto(), 499);
+
+    // log dev should truncate not truncate any logs due to store1 has valid logs
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), -1);
+
+    LOGINFO("Step 10: Truncate 100 entries in store {}", store1->get_store_id());
+    trunc_lsn = 99;
+    truncate_validate(store1, &trunc_lsn);
+
+    LOGINFO("Step 11: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 100);
+    ASSERT_EQ(store1->tail_lsn(), 99);
+    ASSERT_EQ(store1->truncated_upto(), 99);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 100);
+    ASSERT_EQ(store2->tail_lsn(), 199);
+    ASSERT_EQ(store2->truncated_upto(), 99);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 500);
+    ASSERT_EQ(store3->tail_lsn(), 499);
+    ASSERT_EQ(store3->truncated_upto(), 499);
+
+    // log dev should truncate logs upto 199, as store2 has valid logs
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), 199);
+
+    LOGINFO("Step 12: Truncate 300 entries in store {}", store2->get_store_id());
+    trunc_lsn = 299;
+    truncate_validate(store2, &trunc_lsn);
+
+    LOGINFO("Step 13: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 100);
+    ASSERT_EQ(store1->tail_lsn(), 99);
+    ASSERT_EQ(store1->truncated_upto(), 99);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 300);
+    ASSERT_EQ(store2->tail_lsn(), 299);
+    ASSERT_EQ(store2->truncated_upto(), 299);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 500);
+    ASSERT_EQ(store3->tail_lsn(), 499);
+    ASSERT_EQ(store3->truncated_upto(), 499);
+
+    // log dev should truncate all logs as all stores are empty
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), 499);
+
+    LOGINFO("Step 14: Insert 100 entries in store {}", store1->get_store_id());
+    cur_lsn = 100;
+    kickstart_inserts(store1, cur_lsn, 100);
+    ASSERT_EQ(get_current_log_idx(logdev_id), 600);
+
+    LOGINFO("Step 15: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 100);
+    ASSERT_EQ(store1->tail_lsn(), 199);
+    ASSERT_EQ(store1->truncated_upto(), 99);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 300);
+    ASSERT_EQ(store2->tail_lsn(), 299);
+    ASSERT_EQ(store2->truncated_upto(), 299);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 500);
+    ASSERT_EQ(store3->tail_lsn(), 499);
+    ASSERT_EQ(store3->truncated_upto(), 499);
+
+    // log dev should not truncate since no new truncate happened
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), 499);
+
+    LOGINFO("Step 16: Truncate 500 entries in store {}", store1->get_store_id());
+    trunc_lsn = 499;
+    truncate_validate(store1, &trunc_lsn);
+
+    LOGINFO("Step 17: Read and verify all stores");
+    read_all_verify(store1);
+    ASSERT_EQ(store1->start_lsn(), 500);
+    ASSERT_EQ(store1->tail_lsn(), 499);
+    ASSERT_EQ(store1->truncated_upto(), 499);
+    read_all_verify(store2);
+    ASSERT_EQ(store2->start_lsn(), 300);
+    ASSERT_EQ(store2->tail_lsn(), 299);
+    ASSERT_EQ(store2->truncated_upto(), 299);
+    read_all_verify(store3);
+    ASSERT_EQ(store3->start_lsn(), 500);
+    ASSERT_EQ(store3->tail_lsn(), 499);
+    ASSERT_EQ(store3->truncated_upto(), 499);
+
+    // make sure new logs can truncate successfully when there are empty log stores
+    ASSERT_EQ(get_last_truncate_idx(logdev_id), 599);
 }
 
 TEST_F(LogDevTest, CreateRemoveLogDev) {

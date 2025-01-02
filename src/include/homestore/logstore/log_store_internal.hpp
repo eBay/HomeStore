@@ -85,7 +85,8 @@ struct logdev_key {
     std::string to_string() const { return fmt::format("Logid={} devoffset={}", idx, dev_offset); }
 
     static const logdev_key& out_of_bound_ld_key() {
-        static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
+        static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(),
+                                                          std::numeric_limits< off_t >::max()};
         return s_out_of_bound_ld_key;
     }
 };
