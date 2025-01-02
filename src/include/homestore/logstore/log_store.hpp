@@ -173,6 +173,15 @@ public:
 
     logdev_key get_trunc_ld_key() const { return m_trunc_ld_key; }
 
+    /**
+     * @brief Get the truncation information for this log store. It is called during log device truncation
+     *
+     * @return tuple of (start_lsn, trunc_ld_key, tail_lsn) If the log store is empty, it will return
+     * an out_of_bound_ld_key as trunc_ld_key.
+     *
+     * @note ensure that no new logs are flushed between calling this function and completing the truncation,
+     * as this could result in an inaccurate out_of_bound_ld_key.
+     * */
     std::tuple< logstore_seq_num_t, logdev_key, logstore_seq_num_t > truncate_info() const;
 
     sisl::StreamTracker< logstore_record >& log_records() { return m_records; }
@@ -232,6 +241,7 @@ public:
 
     auto start_lsn() const { return m_start_lsn.load(std::memory_order_acquire); }
     auto tail_lsn() const { return m_tail_lsn.load(std::memory_order_acquire); }
+    auto next_lsn() const { return m_next_lsn.load(std::memory_order_acquire); }
 
     nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 

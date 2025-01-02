@@ -795,8 +795,9 @@ private:
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
-    logid_t m_last_flush_idx{-1}; // Track last flushed, last device offset and truncated log idx
-    logid_t m_last_truncate_idx{std::numeric_limits< logid_t >::min()}; // logdev truncate up to this idx
+    logid_t m_last_flush_idx{-1};           // Track last flushed, last device offset and truncated log idx
+    logdev_key m_last_flush_ld_key{0,0};    // Left interval of the last flush, 0 indicates the very beginning of logdev
+    logid_t m_last_truncate_idx{-1};        // Logdev truncate up to this idx
     crc32_t m_last_crc{INVALID_CRC32_VALUE};
 
     // LogDev Info block related fields
