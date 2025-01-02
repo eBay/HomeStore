@@ -530,9 +530,10 @@ uint64_t LogDev::truncate() {
         auto lstore = store.log_store;
         if (lstore == nullptr) { continue; }
         auto const [trunc_lsn, trunc_ld_key, tail_lsn] = lstore->truncate_info();
-        if (trunc_lsn == tail_lsn) {
-            THIS_LOGDEV_LOG(DEBUG, "Store_id={} didn't have any writes since last truncation, skipping ", store_id);
-            m_logdev_meta.remove_all_rollback_records(store_id, m_stopped /* persist_now */);
+        if (trunc_ld_key.idx <= m_last_truncate_idx) {
+            THIS_LOGDEV_LOG(DEBUG,
+                            "Store_id={} didn't need to truncate since last truncation, skipping. last_truncate_idx={}",
+                            store_id, m_last_truncate_idx);
             continue;
         }
         HS_DBG_ASSERT_GE(trunc_ld_key.idx, m_last_truncate_idx, "Trying to truncate logid which is already truncated");

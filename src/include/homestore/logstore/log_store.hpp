@@ -232,6 +232,7 @@ public:
 
     auto start_lsn() const { return m_start_lsn.load(std::memory_order_acquire); }
     auto tail_lsn() const { return m_tail_lsn.load(std::memory_order_acquire); }
+    auto next_lsn() const { return m_next_lsn.load(std::memory_order_acquire); }
 
     nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
