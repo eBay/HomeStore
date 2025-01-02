@@ -158,6 +158,31 @@ public:
         }
     }
 
+    void insert_batch_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& lsn, int64_t batch, uint32_t fixed_size = 0) {
+        bool io_memory{false};
+        std::vector<test_log_data*> data_vector;
+
+        for (int64_t i = 0; i < batch; ++i) {
+            auto* d = prepare_data(lsn + i, io_memory, fixed_size);
+            data_vector.push_back(d); // Store the pointer in the vector
+            log_store->write_async(lsn + i, {uintptr_cast(d), d->total_size(), false}, nullptr, nullptr);
+            LOGINFO("Written async data for LSN -> {}:{}", log_store->get_store_id(), lsn + i);
+        }
+
+        log_store->flush();
+        LOGINFO("Flush data from {} to {}", lsn, lsn + batch);
+        lsn += batch;
+
+        // Free all the allocated memory after the batch insert
+        for (auto* d : data_vector) {
+            if (io_memory) {
+                iomanager.iobuf_free(uintptr_cast(d));
+            } else {
+                std::free(voidptr_cast(d));
+            }
+        }
+    }
+
     void kickstart_inserts(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& cur_lsn, int64_t batch,
                            uint32_t fixed_size = 0) {
         auto last = cur_lsn + batch;
@@ -615,6 +640,63 @@ TEST_F(LogDevTest, TruncateAcrossMultipleStores) {
 
     // make sure new logs can truncate successfully when there are empty log stores
     ASSERT_EQ(get_last_truncate_idx(logdev_id), 599);
+}
+
+TEST_F(LogDevTest, TruncateLogsAfterFlushAndRestart) {
+    LOGINFO("Step 1: Create a single logstore to start truncate-logs-after-flush-and-restart test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+    auto store_id = log_store->get_store_id();
+
+    auto restart = [&]() {
+        std::promise < bool > p;
+        auto starting_cb = [&]() {
+            logstore_service().open_logdev(logdev_id);
+            logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
+                log_store = store;
+                p.set_value(true);
+            });
+        };
+        start_homestore(true /* restart */, starting_cb);
+        p.get_future().get();
+    };
+
+    LOGINFO("Step 2: Insert 100 entries");
+    logstore_seq_num_t cur_lsn = 0;
+    insert_batch_sync(log_store, cur_lsn, 100, 0);
+
+    LOGINFO("Step 3: Read and verify all entries");
+    read_all_verify(log_store);
+    ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), 99);
+
+    LOGINFO("Step 4: Append 100 entries");
+    insert_batch_sync(log_store, cur_lsn, 100, 0);
+    ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), 199);
+
+    LOGINFO("Step 5: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 6: restart and verify");
+    restart();
+    read_all_verify(log_store);
+    ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), 199);
+
+    LOGINFO("Step 7: Truncate 50 entries");
+    logstore_seq_num_t trunc_lsn = 49;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), 199);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+    ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), 199);
+
+    LOGINFO("Step 8: restart and verify");
+    restart();
+    read_all_verify(log_store);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), 199);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+    ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), 199);
 }
 
 TEST_F(LogDevTest, CreateRemoveLogDev) {

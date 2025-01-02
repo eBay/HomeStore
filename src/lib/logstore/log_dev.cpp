@@ -205,8 +205,7 @@ void LogDev::do_load(off_t device_cursor) {
         // Loop through each record within the log group and do a callback
         decltype(header->nrecords()) i{0};
         HS_REL_ASSERT_GT(header->nrecords(), 0, "nrecords greater then zero");
-        const auto flush_ld_key =
-            logdev_key{header->start_idx() + header->nrecords(), group_dev_offset + header->total_size()};
+        const auto flush_ld_key = logdev_key{header->start_idx(), group_dev_offset};
         while (i < header->nrecords()) {
             const auto* rec = header->nth_record(i);
             const uint32_t data_offset = (rec->offset + (rec->get_inlined() ? 0 : header->oob_data_offset));
