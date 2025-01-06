@@ -110,6 +110,7 @@ void RaftReplService::start() {
     // There is no callback available for handling and localizing the log entries within the pack, which could
     // result in data corruption.
     r_params.use_new_joiner_type_ = true;
+    r_params.use_bg_thread_for_snapshot_io_ = HS_DYNAMIC_CONFIG(consensus.use_bg_thread_for_snapshot_io_);
     r_params.return_method_ = nuraft::raft_params::async_handler;
     m_msg_mgr->register_mgr_type(params.default_group_type_, r_params);
 
