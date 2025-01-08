@@ -6,9 +6,7 @@ pipeline {
         HUB_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'oss'
-        TARGET_BRANCH = 'master'
         STABLE_BRANCH = 'stable/v*'
-        LAST_COMMITS = ''
     }
 
     stages {
@@ -19,7 +17,6 @@ pipeline {
             steps {
                 script {
                     sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
-                    LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
                 }
             }
         }
@@ -77,16 +74,7 @@ pipeline {
                     stage("Build") {
                         steps {
                             script {
-                                def PRERELEASE = 'True'
-                                def BUILD_PROFILE = "${BUILD_TYPE}"
-                                def SANITIZE = 'False'
-
-                                if ("${BUILD_TYPE}" == "release") {
-                                    PRERELEASE = 'False'
-                                    BUILD_PROFILE = "test"
-                                }
-
-                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
+                                sh "conan create --lockfile locks/${BUILD_TYPE}_deps.lock . ${PROJECT}/${TAG} ; \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\; ;                    \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\; ;                \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\; ;                \
@@ -101,12 +89,14 @@ pipeline {
                     }
 
                    stage("Deploy Package") {
+                        when { branch "${STABLE_BRANCH}" }
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
                             sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
                     stage("Image") {
+                        when { branch "${STABLE_BRANCH}" }
                         steps {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
                                 sh "docker build -t ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
