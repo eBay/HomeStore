@@ -1477,7 +1477,7 @@ void RaftReplDev::set_log_store_last_durable_lsn(store_lsn_t lsn) { m_data_journ
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto repl_lsn = to_repl_lsn(lsn);
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (repl_lsn < m_rd_sb->checkpoint_lsn) { return; }
+    if (repl_lsn <= m_rd_sb->checkpoint_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
     auto const lentry = to_nuraft_log_entry(buf);
@@ -1489,8 +1489,8 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOGT("Raft Channel: Applying Raft log_entry upon recovery: server_id={}, term={}, journal_entry=[{}] ",
-            jentry->server_id, lentry->get_term(), jentry->to_string());
+    RD_LOGT("Raft Channel: Applying Raft log_entry upon recovery: server_id={}, term={}, lsn={}, journal_entry=[{}] ",
+            jentry->server_id, lentry->get_term(), repl_lsn, jentry->to_string());
 
     auto entry_to_hdr = [](repl_journal_entry* jentry) {
         return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
