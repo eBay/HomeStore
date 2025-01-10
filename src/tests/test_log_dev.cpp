@@ -201,10 +201,11 @@ public:
         read_all_verify(log_store);
     }
 
-    void truncate_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t* last_lsn = nullptr) {
+    void truncate_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t* trunc_lsn = nullptr) {
         auto upto = log_store->get_contiguous_completed_seq_num(-1);
-        if (last_lsn) {
-            ASSERT_EQ(upto, *last_lsn);
+        if (trunc_lsn && *trunc_lsn != upto) {
+            LOGWARN("Truncate issued upto {} but real upto lsn in log store is {}", *trunc_lsn, upto);
+            upto = *trunc_lsn;
         }
 
         LOGINFO("truncate_validate upto {}", upto);
@@ -314,7 +315,6 @@ TEST_F(LogDevTest, ReTruncate) {
     auto logdev_id = logstore_service().create_new_logdev();
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
-    auto store_id = log_store->get_store_id();
 
     LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
     logstore_seq_num_t cur_lsn = 0;
@@ -334,6 +334,50 @@ TEST_F(LogDevTest, ReTruncate) {
     ASSERT_EQ(log_store->truncated_upto(), ls_last_lsn);
 
     LOGINFO("Step 5: Read and verify all entries again");
+    read_all_verify(log_store);
+}
+
+TEST_F(LogDevTest, TruncateWithOverlappingLSN) {
+    LOGINFO("Step 1: Create a single logstore to start truncate with overlapping LSN test");
+    auto logdev_id = logstore_service().create_new_logdev();
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+
+    LOGINFO("Step 2: Insert 500 entries");
+    logstore_seq_num_t cur_lsn = 0;
+    kickstart_inserts(log_store, cur_lsn, 500);
+
+    LOGINFO("Step 3: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 4: Truncate 100 entries");
+    logstore_seq_num_t trunc_lsn = 99;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), 499);
+    ASSERT_EQ(log_store->next_lsn(), 500);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+
+    LOGINFO("Step 5: Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 6: Truncate all with overlapping lsn");
+    trunc_lsn = 1999999;
+    truncate_validate(log_store, &trunc_lsn);
+    ASSERT_EQ(log_store->start_lsn(), trunc_lsn + 1);
+    ASSERT_EQ(log_store->tail_lsn(), trunc_lsn);
+    ASSERT_EQ(log_store->next_lsn(), 2000000);
+    ASSERT_EQ(log_store->truncated_upto(), trunc_lsn);
+
+    LOGINFO("Step 7 Read and verify all entries");
+    read_all_verify(log_store);
+
+    LOGINFO("Step 8: Append 500 entries")
+    cur_lsn = log_store->next_lsn();
+    kickstart_inserts(log_store, cur_lsn, 500);
+    ASSERT_EQ(log_store->next_lsn(), 2000500);
+
+    LOGINFO("Step 9: Read and verify all entries");
     read_all_verify(log_store);
 }
 
