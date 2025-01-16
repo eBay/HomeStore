@@ -297,8 +297,12 @@ void CPManager::start_cp_thread() {
     };
     auto ctx = std::make_shared< Context >();
 
-    // Start a reactor with 9 fibers (8 for sync io)
-    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 8u, [this, ctx](bool is_started) {
+    // Start a reactor with 2 fibers (1 for sync io)
+    // Prevent deadlock with sync_io fibers.
+    // Multiple sync_io fibers may acquire a thread-level mutex and perform synchronous I/O using io_uring.
+    // This can block the fiber and allow other fibers to be scheduled.
+    // If another fiber tries to acquire the same mutex, a deadlock can occur.
+    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 2u, [this, ctx](bool is_started) {
         if (is_started) {
             {
                 std::unique_lock< std::mutex > lk{ctx->mtx};
