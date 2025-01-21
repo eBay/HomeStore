@@ -367,11 +367,14 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
     snp_data->is_last_obj = is_last_obj;
 
     // We are doing a copy here.
-    sisl::io_blob_safe blob{s_cast< size_t >(data.size())};
+    sisl::io_blob_safe blob{static_cast<uint32_t>(data.size())};
     std::memcpy(blob.bytes(), data.data_begin(), data.size());
     snp_data->blob = std::move(blob);
 
     m_rd.m_listener->write_snapshot_obj(snp_ctx, snp_data);
+    if (is_last_obj) {
+        hs()->cp_mgr().trigger_cp_flush(true).wait(); // ensure DSN is flushed to disk
+    }
 
     // Update the object offset.
     obj_id = snp_data->offset;
@@ -380,17 +383,19 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
     if (iomgr_flip::instance()->test_flip("baseline_resync_restart_new_follower")) {
         LOGINFO("Hit flip baseline_resync_restart_new_follower crashing");
         hs()->crash_simulator().crash();
-        return;
     }
 #endif
 }
 
 bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
+    // NOTE: Currently, NuRaft considers the snapshot applied once compaction and truncation are completed, even if a
+    // crash occurs before apply_snapshot() is called. Therefore, the LSN must be updated here to ensure it is
+    // persisted AFTER log truncation.
     m_rd.set_last_commit_lsn(s.get_last_log_idx());
     m_rd.m_data_journal->set_last_durable_lsn(s.get_last_log_idx());
+
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto res = m_rd.m_listener->apply_snapshot(snp_ctx);
-    // make sure the changes are flushed.
     hs()->cp_mgr().trigger_cp_flush(true /* force */).get();
     return res;
 }
