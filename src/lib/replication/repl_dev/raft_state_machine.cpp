@@ -354,9 +354,9 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
                                             bool is_last_obj) {
     if (is_hs_snp_obj(obj_id)) {
         // Homestore preserved msg
-        if (m_rd.apply_snp_resync_data(data)) {
+        if (m_rd.save_snp_resync_data(data)) {
             obj_id = snp_obj_id_type_app;
-            LOGDEBUG("apply_snp_resync_data success, next obj_id={}", obj_id);
+            LOGDEBUG("save_snp_resync_data success, next obj_id={}", obj_id);
         }
         return;
     }

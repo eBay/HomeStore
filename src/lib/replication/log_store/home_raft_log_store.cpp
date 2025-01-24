@@ -366,7 +366,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
         // we directly compact and truncate up to compact_lsn assuming there are dummy logs.
         REPL_STORE_LOG(DEBUG, "Compact with log holes from {} to={}", cur_max_lsn + 1, to_store_lsn(compact_lsn));
     }
-    m_log_store->truncate(to_store_lsn(compact_lsn));
+    m_log_store->truncate(to_store_lsn(compact_lsn), false);
     return true;
 }
 

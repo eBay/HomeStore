@@ -1570,7 +1570,7 @@ void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
     std::memcpy(data_out->data_begin(), &msg, msg_size);
 }
 
-bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
+bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data) {
     auto msg = r_cast< snp_repl_dev_data* >(data.data_begin());
     if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC ||
         msg->protocol_version != HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
