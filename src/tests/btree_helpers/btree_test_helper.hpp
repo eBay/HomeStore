@@ -167,6 +167,31 @@ public:
         do_put(k, put_type, V::generate_rand(), expect);
     }
 
+    void move_to_tombstone(uint64_t k, btree_status_t expected_status=btree_status_t::success) {
+        auto existing_v = std::make_unique< V >();
+        K key = K{k};
+        V value = V{uint32_t(0)};
+        put_filter_cb_t filter_cb = [](BtreeKey const& key, BtreeValue const& existing_value, BtreeValue const& value) {
+            LOGINFO("Filter callback called for key={} existing existing {} new value {}", key.to_string(),
+                    existing_value.to_string(), value.to_string());
+            if (existing_value.to_string() == V{uint32_t(0)}.to_string()) {
+                return put_filter_decision::keep;
+            }else {
+                return put_filter_decision::replace;
+            }
+        };
+        auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPDATE, existing_v.get(), filter_cb};
+        sreq.enable_route_tracing();
+
+        auto const ret = m_bt->put(sreq);
+        if(expected_status != btree_status_t::success) {
+            ASSERT_EQ(ret, expected_status) << "UPDATING key=" << k << " failed with error=" << enum_name(ret);
+        }
+
+
+    }
+
+
     void put_random() {
         auto [start_k, end_k] = m_shadow_map.pick_random_non_existing_keys(1);
         RELEASE_ASSERT_EQ(start_k, end_k, "Range scheduler pick_random_non_existing_keys issue");

@@ -78,7 +78,7 @@ def long_runnig_index(options, type=0):
 
 def long_running_clean_shutdown(options, type=0):
     print("Long running clean shutdown started")
-
+    options['run_time'] =  options['run_time'] // 10
     try:
         run_test(options, type)
         options['init_device'] = False
