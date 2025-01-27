@@ -47,8 +47,6 @@ LogDev::LogDev(logdev_id_t id, flush_mode_t flush_mode) : m_logdev_id{id}, m_flu
     m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_logdev);
 }
 
-LogDev::~LogDev() = default;
-
 void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
     // Each logdev has one journal descriptor.
     m_vdev = vdev;
@@ -62,7 +60,6 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
         m_log_group_pool[i].start(m_flush_size_multiple, m_vdev->align_size());
     }
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
-    m_stopped = false;
 
     // First read the info block
     if (format) {
@@ -106,13 +103,12 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
     }
 }
 
-void LogDev::stop() {
+LogDev::~LogDev() {
     THIS_LOGDEV_LOG(INFO, "Logdev stopping id {}", m_logdev_id);
     HS_LOG_ASSERT((m_pending_flush_size.load() == 0),
                   "LogDev stop attempted while writes to logdev are pending completion");
     {
         std::unique_lock lg = flush_guard();
-        m_stopped = true;
         // waiting under lock to make sure no new flush is started
         while (m_pending_callback.load() > 0) {
             THIS_LOGDEV_LOG(INFO, "Waiting for pending callbacks to complete, pending callbacks {}",
@@ -147,9 +143,17 @@ void LogDev::stop() {
     m_hs.reset();
 }
 
-bool LogDev::is_stopped() {
-    std::unique_lock lg = flush_guard();
-    return m_stopped;
+void LogDev::stop() {
+    // Walk through all the stores and find the least logdev_key that we can truncate
+    for (auto& [_, store] : m_id_logstore_map)
+        store.log_store->stop();
+
+    start_stopping();
+    while (true) {
+        if (!get_pending_request_num()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
 }
 
 void LogDev::destroy() {
@@ -256,14 +260,19 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 
 int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* cb_context) {
+    if (is_stopping()) return -1;
+    incr_pending_request_num();
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     m_pending_flush_size.fetch_add(data.size(), std::memory_order_relaxed);
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
     if (allow_inline_flush()) flush_if_necessary();
+    decr_pending_request_num();
     return idx;
 }
 
 log_buffer LogDev::read(const logdev_key& key) {
+    if (is_stopping()) return -1;
+    incr_pending_request_num();
     std::unique_lock lg = flush_guard();
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
     auto ec = m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
@@ -288,11 +297,13 @@ log_buffer LogDev::read(const logdev_key& key) {
         m_vdev_jd->sync_pread(new_buf->bytes(), rounded_size, key.dev_offset + rounded_data_offset);
         ret_view = sisl::byte_view{new_buf, s_cast< uint32_t >(data_offset - rounded_data_offset), record_header->size};
     }
-
+    decr_pending_request_num();
     return ret_view;
 }
 
 void LogDev::read_record_header(const logdev_key& key, serialized_log_record& return_record_header) {
+    if (is_stopping()) return;
+    incr_pending_request_num();
     std::unique_lock lg = flush_guard();
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
     auto ec = m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
@@ -305,6 +316,7 @@ void LogDev::read_record_header(const logdev_key& key, serialized_log_record& re
     return_record_header =
         serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
                               record_header->store_seq_num, record_header->store_id);
+    decr_pending_request_num();
 }
 
 void LogDev::verify_log_group_header(const logid_t idx, const log_group_header* header) {
@@ -342,7 +354,9 @@ void LogDev::unreserve_store_id(logstore_id_t store_id) {
     m_garbage_store_ids.emplace(log_id, store_id);
 }
 
-void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage) {
+bool LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     std::unique_lock lg{m_meta_mutex};
     for (const auto& id : m_logdev_meta.reserved_store_ids()) {
         registered.push_back(id);
@@ -352,6 +366,8 @@ void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, 
     for (const auto& elem : m_garbage_store_ids) {
         garbage.push_back(elem.second);
     }
+    decr_pending_request_num();
+    return true;
 }
 
 /*
@@ -389,9 +405,12 @@ bool LogDev::can_flush_in_this_thread() {
 }
 
 bool LogDev::flush_if_necessary(int64_t threshold_size) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     if (!can_flush_in_this_thread()) {
         iomanager.run_on_forget(logstore_service().flush_thread(),
                                 [this, threshold_size]() { flush_if_necessary(threshold_size); });
+        decr_pending_request_num();
         return false;
     }
 
@@ -407,10 +426,11 @@ bool LogDev::flush_if_necessary(int64_t threshold_size) {
     if (flush_by_size || flush_by_time) {
         std::unique_lock lck(m_flush_mtx, std::try_to_lock);
         if (lck.owns_lock()) {
-            if (m_stopped) return false;
+            decr_pending_request_num();
             return flush();
         }
     }
+    decr_pending_request_num();
     return false;
 }
 
@@ -437,9 +457,9 @@ bool LogDev::flush() {
         return false;
     }
 
-    // the amount of logs which one logGroup can flush has a upper limit. here we want to make sure all the logs that
-    // need to be flushed will definitely be flushed to physical dev, so we need this loop to create multiple log groups
-    // if necessary
+    // the amount of logs which one logGroup can flush has a upper limit. here we want to make sure all the logs
+    // that need to be flushed will definitely be flushed to physical dev, so we need this loop to create multiple
+    // log groups if necessary
     for (; m_last_flush_idx < new_idx;) {
         LogGroup* lg =
             prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
@@ -517,6 +537,9 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 }
 
 uint64_t LogDev::truncate() {
+    auto stopping = is_stopping();
+    if (stopping) return 0;
+    incr_pending_request_num();
     // Order of this lock has to be preserved. We take externally visible lock which is flush lock first. This
     // prevents any further update to tail_lsn and also flushes conurrently with truncation. Then we take the store
     // map lock, which is contained in this class and then meta_mutex. Reason for this is, we take meta_mutex under
@@ -531,18 +554,19 @@ uint64_t LogDev::truncate() {
         auto lstore = store.log_store;
         if (lstore == nullptr) { continue; }
         auto const [trunc_lsn, trunc_ld_key, tail_lsn] = lstore->truncate_info();
-        m_logdev_meta.update_store_superblk(store_id, logstore_superblk(trunc_lsn + 1), m_stopped /* persist_now */);
+        m_logdev_meta.update_store_superblk(store_id, logstore_superblk(trunc_lsn + 1), stopping /* persist_now */);
         // We found a new minimum logdev_key that we can truncate to
         if (trunc_ld_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = trunc_ld_key; }
     }
 
     // All log stores are empty, we can truncate logs depends on the last flushed logdev_key
-    if (min_safe_ld_key == logdev_key::out_of_bound_ld_key()) {
-        min_safe_ld_key = m_last_flush_ld_key;
-    }
+    if (min_safe_ld_key == logdev_key::out_of_bound_ld_key()) { min_safe_ld_key = m_last_flush_ld_key; }
 
     // There are no writes or no truncation called for any of the store, so we can't truncate anything
-    if (min_safe_ld_key.idx <= 0 || min_safe_ld_key.idx <= m_last_truncate_idx) return 0;
+    if (min_safe_ld_key.idx <= 0 || min_safe_ld_key.idx <= m_last_truncate_idx) {
+        decr_pending_request_num();
+        return 0;
+    }
 
     uint64_t const num_records_to_truncate = uint64_cast(min_safe_ld_key.idx - m_last_truncate_idx);
 
@@ -551,7 +575,7 @@ uint64_t LogDev::truncate() {
 
     // Update the start offset to be read upon restart
     m_last_truncate_idx = min_safe_ld_key.idx;
-    m_logdev_meta.set_start_dev_offset(min_safe_ld_key.dev_offset, min_safe_ld_key.idx, m_stopped /* persist_now */);
+    m_logdev_meta.set_start_dev_offset(min_safe_ld_key.dev_offset, min_safe_ld_key.idx, stopping /* persist_now */);
 
     // When a logstore is removed, it unregisteres the store and keeps the store id in garbage list. We can capture
     // these store_ids upto the log_idx which is truncated and then unreserve those. Now on we can re-use the
@@ -561,22 +585,27 @@ uint64_t LogDev::truncate() {
 
         HS_PERIODIC_LOG(DEBUG, logstore, "Garbage collecting log_store={} in log_dev={} log_idx={}", it->second,
                         m_logdev_id, it->first);
-        m_logdev_meta.unreserve_store(it->second, m_stopped /* persist_now */);
+        m_logdev_meta.unreserve_store(it->second, stopping /* persist_now */);
         it = m_garbage_store_ids.erase(it);
     }
 
     // We can remove the rollback records of those upto which logid is getting truncated
-    m_logdev_meta.remove_rollback_record_upto(min_safe_ld_key.idx, m_stopped /* persist_now */);
+    m_logdev_meta.remove_rollback_record_upto(min_safe_ld_key.idx, stopping /* persist_now */);
     THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate remove rollback {}", min_safe_ld_key.idx);
 
     // All logdev meta information is updated in-memory, persist now
     m_logdev_meta.persist();
+    decr_pending_request_num();
     return num_records_to_truncate;
 }
 
-void LogDev::rollback(logstore_id_t store_id, logid_range_t id_range) {
+bool LogDev::rollback(logstore_id_t store_id, logid_range_t id_range) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     std::unique_lock lg{m_meta_mutex};
     m_logdev_meta.add_rollback_record(store_id, id_range, true);
+    decr_pending_request_num();
+    return true;
 }
 
 /////////////////////////////// LogStore Section ///////////////////////////////////////
@@ -604,6 +633,8 @@ void LogDev::handle_unopened_log_stores(bool format) {
 }
 
 std::shared_ptr< HomeLogStore > LogDev::create_new_log_store(bool append_mode) {
+    if (is_stopping()) return nullptr;
+    incr_pending_request_num();
     auto const store_id = reserve_store_id();
     std::shared_ptr< HomeLogStore > lstore;
     lstore = std::make_shared< HomeLogStore >(shared_from_this(), store_id, append_mode, 0);
@@ -615,6 +646,7 @@ std::shared_ptr< HomeLogStore > LogDev::create_new_log_store(bool append_mode) {
         m_id_logstore_map.insert(std::pair(store_id, logstore_info{.log_store = lstore, .append_mode = append_mode}));
     }
     HS_LOG(DEBUG, logstore, "Created log store log_dev={} log_store={}", m_logdev_id, store_id);
+    decr_pending_request_num();
     return lstore;
 }
 
@@ -637,17 +669,22 @@ folly::Future< shared< HomeLogStore > > LogDev::open_log_store(logstore_id_t sto
     return it->second.promise.getFuture();
 }
 
-void LogDev::remove_log_store(logstore_id_t store_id) {
+bool LogDev::remove_log_store(logstore_id_t store_id) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     LOGINFO("Removing log_dev={} log_store={}", m_logdev_id, store_id);
     {
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
         auto ret = m_id_logstore_map.erase(store_id);
         if (ret == 0) {
             LOGWARN("try to remove invalid store_id {}-{}", m_logdev_id, store_id);
-            return;
+            decr_pending_request_num();
+            return false;
         }
     }
     unreserve_store_id(store_id);
+    decr_pending_request_num();
+    return true;
 }
 
 void LogDev::on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb) {
@@ -723,7 +760,7 @@ nlohmann::json LogDev::get_status(int verbosity) const {
     js["last_truncate_log_idx"] = m_last_truncate_idx;
     js["time_since_last_log_flush_ns"] = get_elapsed_time_ns(m_last_flush_time);
     if (verbosity == 2) {
-        js["logdev_stopped?"] = m_stopped;
+        js["logdev_stopped?"] = is_stopping();
         js["logdev_sb_start_offset"] = m_logdev_meta.get_start_dev_offset();
         js["logdev_sb_num_stores_reserved"] = m_logdev_meta.num_stores_reserved();
     }

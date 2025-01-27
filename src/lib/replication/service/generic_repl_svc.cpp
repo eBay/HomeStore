@@ -45,11 +45,9 @@ GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) : m
         nullptr);
 }
 
-void GenericReplService::stop() {
-    {
-        std::unique_lock lg{m_rd_map_mtx};
-        m_rd_map.clear();
-    }
+GenericReplService::~GenericReplService() {
+    std::unique_lock lg{m_rd_map_mtx};
+    m_rd_map.clear();
 }
 
 ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
@@ -95,8 +93,7 @@ void SoloReplService::start() {
 }
 
 void SoloReplService::stop() {
-    GenericReplService::stop();
-    hs()->logstore_service().stop();
+    // TODO: Implement graceful shutdown for soloReplService
 }
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,

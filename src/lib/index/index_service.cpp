@@ -39,7 +39,9 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
 
     meta_service().register_handler(
         "wb_cache",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { m_wbcache_sb = std::pair{mblk, std::move(buf)}; },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            m_wbcache_sb = std::pair{mblk, std::move(buf)};
+        },
         nullptr);
 }
 
@@ -92,35 +94,62 @@ void IndexService::start() {
     hs()->cp_mgr().trigger_cp_flush(true /* force */);
 }
 
-void IndexService::stop() { m_wb_cache.reset(); }
+IndexService::~IndexService() { m_wb_cache.reset(); }
+
+void IndexService::stop() {
+    start_stopping();
+    while (true) {
+        if (!get_pending_request_num()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    std::unique_lock lg(m_index_map_mtx);
+    for (auto& [_, table] : m_index_map)
+        table->stop();
+}
 
 uint64_t IndexService::num_tables() {
     std::unique_lock lg(m_index_map_mtx);
     return m_index_map.size();
 }
 
-void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
+bool IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     std::unique_lock lg(m_index_map_mtx);
     m_index_map.insert(std::make_pair(tbl->uuid(), tbl));
     m_ordinal_index_map.insert(std::make_pair(tbl->ordinal(), tbl));
+    decr_pending_request_num();
+    return true;
 }
 
-void IndexService::remove_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
+bool IndexService::remove_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
+    if (is_stopping()) return false;
+    incr_pending_request_num();
     std::unique_lock lg(m_index_map_mtx);
     m_index_map.erase(tbl->uuid());
     m_ordinal_index_map.erase(tbl->ordinal());
+    decr_pending_request_num();
+    return true;
 }
 
 std::shared_ptr< IndexTableBase > IndexService::get_index_table(uuid_t uuid) const {
+    if (is_stopping()) return nullptr;
+    incr_pending_request_num();
     std::unique_lock lg(m_index_map_mtx);
     auto const it = m_index_map.find(uuid);
-    return (it != m_index_map.cend()) ? it->second : nullptr;
+    auto ret = (it != m_index_map.cend()) ? it->second : nullptr;
+    decr_pending_request_num();
+    return ret;
 }
 
 std::shared_ptr< IndexTableBase > IndexService::get_index_table(uint32_t ordinal) const {
+    if (is_stopping()) return nullptr;
+    incr_pending_request_num();
     std::unique_lock lg(m_index_map_mtx);
     auto const it = m_ordinal_index_map.find(ordinal);
-    return (it != m_ordinal_index_map.cend()) ? it->second : nullptr;
+    auto ret = (it != m_ordinal_index_map.cend()) ? it->second : nullptr;
+    decr_pending_request_num();
+    return ret;
 }
 
 void IndexService::repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf) {

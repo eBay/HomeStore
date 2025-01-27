@@ -175,7 +175,7 @@ public:
                            repl_req_ptr_t ctx) override;
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                 bool part_of_batch = false) override;
-    void async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
+    folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
     AsyncReplResult<> become_leader() override;
     bool is_leader() const override;
     replica_id_t get_leader_id() const override;
@@ -192,6 +192,7 @@ public:
     bool is_destroyed() const;
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
     bool is_ready_for_traffic() const override {
+        if (is_stopping()) return false;
         auto committed_lsn = m_commit_upto_lsn.load();
         auto gate = m_traffic_ready_lsn.load();
         bool ready = committed_lsn >= gate;
