@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.7.5"
+    version = "3.7.6"
 
     homepage = "https://github.corp.ebay.com/SDS/homestore"
     description = "HomeStore"
@@ -28,6 +28,7 @@ class HomestoreConan(ConanFile):
                 'testing': 'epoll_mode',
                 'skip_testing': False,
                 'sisl:prerelease': True,
+                "pistache:with_ssl": True,
             }
 
 
@@ -54,8 +55,8 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.12.1")
 
     def requirements(self):
-        self.requires("iomgr/[~=8]")
-        self.requires("sisl/[~=8]")
+        self.requires("iomgr/8.8.1")
+        self.requires("sisl/8.9.1")
 
         # FOSS, rarely updated
         self.requires("boost/1.79.0")

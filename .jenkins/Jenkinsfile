@@ -6,50 +6,19 @@ pipeline {
         HUB_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'oss'
-        TARGET_BRANCH = 'master'
         STABLE_BRANCH = 'stable/v*'
-        LAST_COMMITS = ''
     }
 
     stages {
-        stage('Adjust Tag for Master') {
-            when { not {
-                branch "${STABLE_BRANCH}"
-            } }
-            steps {
-                script {
-                    sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
-                    LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
-                }
-            }
-        }
-        stage('Include build missing') {
-            steps {
-                script {
-                    BUILD_MISSING = "--build missing"
-                }
-            }
-        }
-
         stage('Get Version') {
             steps {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
+                    SANITIZED_BRANCH = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     HUB_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
-                    TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
-                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
-                    env.pkg_version = "${PROJECT}/${TAG}"
-                }
-            }
-        }
-
-        stage('Tag Stable Build') {
-            when { branch "${STABLE_BRANCH}" }
-            steps {
-                script {
-                    TAG = "${VER}@"
+                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${SANITIZED_BRANCH}* is building."
                 }
             }
         }
@@ -66,36 +35,33 @@ pipeline {
                 }
 
                 stages {
-                    stage('Adjust Tag for Master') {
+                    stage("Refresh Locks") {
                         when { not {
                             branch "${STABLE_BRANCH}"
                         } }
                         steps {
-                            sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
+                            script {
+                                sh "./update_locks.sh"
+                            }
                         }
                     }
+
                     stage("Build") {
                         steps {
                             script {
-                                def PRERELEASE = 'True'
-                                def BUILD_PROFILE = "${BUILD_TYPE}"
-                                def SANITIZE = 'False'
-
-                                if ("${BUILD_TYPE}" == "release") {
-                                    PRERELEASE = 'False'
-                                    BUILD_PROFILE = "test"
+                                sh "conan create --lockfile locks/${BUILD_TYPE}_deps.lock ."
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;"
+                                sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                                sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
+                                    sh "docker build -t ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
                                 }
-
-                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\; ;                    \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\; ;                \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\; ;                \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\; ;          \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\; ;    \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\; ;               \
-                                    find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\; ;                     \
-                                    find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\; ;                     \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                             }
                         }
                     }
@@ -103,13 +69,12 @@ pipeline {
                    stage("Deploy Package") {
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
+                            sh "conan upload ${PROJECT}/${VER}@ -c --all -r ebay-local"
                         }
                     }
                     stage("Image") {
                         steps {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
-                                sh "docker build -t ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
                                 sh "docker push ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
                             }
                         }
@@ -126,10 +91,10 @@ pipeline {
 
     post {
         failure {
-            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
+            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${SANITIZED_BRANCH}* has had a failure : ${BUILD_URL}"
         }
         success {
-            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
+            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${SANITIZED_BRANCH}* has completed successfully."
         }
     }
 }
