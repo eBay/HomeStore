@@ -54,7 +54,6 @@ public:
     LogStoreFamily& operator=(const LogStoreFamily&) = delete;
     LogStoreFamily& operator=(LogStoreFamily&&) noexcept = delete;
 
-    void meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
     void start(const bool format, JournalVirtualDev* blk_store);
     void stop();
 
@@ -69,7 +68,6 @@ public:
     void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    std::string metablk_name() const { return m_metablk_name; }
     std::shared_ptr< HomeLogStore > find_logstore_by_id(logstore_id_t store_id);
 
     LogDev& logdev() { return m_log_dev; }
@@ -77,7 +75,7 @@ public:
     sisl::status_response get_status(const sisl::status_request& request) const;
     sisl::sobject_ptr sobject() { return m_sobject; }
 
-    std::string get_name() const { return m_metablk_name; }
+    std::string get_name() const { return m_name; }
 
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
 
@@ -98,7 +96,7 @@ public:
     std::unordered_set< logstore_id_t > m_unopened_store_id;
     std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;
     logstore_family_id_t m_family_id;
-    std::string m_metablk_name;
+    std::string m_name;
     LogDev m_log_dev;
     sisl::sobject_ptr m_sobject;
 };

@@ -149,8 +149,6 @@ public:
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
     [[nodiscard]] static HomeLogStoreMgr& instance();
-    static void data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-    static void ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
     static void fake_reboot();
 
     /**
@@ -262,6 +260,9 @@ struct truncate_req {
     std::array< logdev_key, HomeLogStoreMgr::num_log_families > m_trunc_upto_result;
     int trunc_outstanding{0};
 };
+
+static constexpr logstore_seq_num_t invalid_lsn() { return std::numeric_limits< logstore_seq_num_t >::min(); }
+typedef std::function< void(logstore_seq_num_t) > on_rollback_cb_t;
 
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
@@ -486,15 +487,13 @@ public:
     }
 
     /**
-     * @brief Sync the log store to disk
+     * @brief Flush this log store (write/sync to disk) up to the sequence number
      *
-     * @param
+     * @param seq_num Sequence number upto which logs are to be flushed. If not provided, will wait to flush all seq
+     * numbers issued prior.
      * @return True on success
      */
-    bool sync() {
-        // TODO: Implement this method
-        return true;
-    }
+    void flush_sync(logstore_seq_num_t upto_seq_num = invalid_lsn());
 
     /**
      * @brief Rollback the given instance to the given sequence number
@@ -502,10 +501,7 @@ public:
      * @param seq_num Sequence number back which logs are to be rollbacked
      * @return True on success
      */
-    bool rollback(const logstore_seq_num_t seq_num) {
-        // TODO: Implement this method
-        return true;
-    }
+    uint64_t rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb);
 
     [[nodiscard]] LogStoreFamily& get_family() { return m_logstore_family; }
 
@@ -539,6 +535,11 @@ private:
     // seq_ld_key_pair m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed
     // batch
     logstore_seq_num_t m_flush_batch_max_lsn{std::numeric_limits< logstore_seq_num_t >::min()};
+
+    // Sync flush sections
+    std::atomic< logstore_seq_num_t > m_sync_flush_waiter_lsn{invalid_lsn()};
+    std::mutex m_sync_flush_mtx;
+    std::condition_variable m_sync_flush_cv;
 
     std::vector< seq_ld_key_pair > m_truncation_barriers; // List of truncation barriers
     truncation_info m_safe_truncation_boundary;

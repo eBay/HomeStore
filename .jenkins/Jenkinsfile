@@ -16,9 +16,8 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    SANITIZED_BRANCH = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     HUB_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
-                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${SANITIZED_BRANCH}* is building."
+                    slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${env.BRANCH_NAME}* is building."
                 }
             }
         }
@@ -36,12 +35,13 @@ pipeline {
 
                 stages {
                     stage("Refresh Locks") {
-                        when { not {
-                            branch "${STABLE_BRANCH}"
-                        } }
                         steps {
                             script {
-                                sh "./update_locks.sh"
+                                if ((env.BRANCH_NAME.startsWith('PR') && !env.CHANGE_TARGET.startsWith('stable')) ||
+                                    !env.BRANCH_NAME.startsWith('stable')) {
+                                    sh "./update_locks.sh"
+                                    sh "git diff -w -- locks"
+                                }
                             }
                         }
                     }
@@ -66,7 +66,7 @@ pipeline {
                         }
                     }
 
-                   stage("Deploy Package") {
+                   stage("Deploy Runnable") {
                         when { allOf {
                             branch "${STABLE_BRANCH}"
                             expression { "${BUILD_TYPE}" != 'coverage' }
@@ -75,17 +75,13 @@ pipeline {
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
                             sh "conan upload ${PROJECT}/${VER}@ -c --all -r ebay-local"
-                        }
-                    }
-                    stage("Image") {
-                        steps {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
                                 sh "docker push ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
                             }
                         }
                         post {
                             success {
-                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${HUB_PATH}:${VER}-${BUILD_TYPE}* has been published."
                             }
                         }
                     }
@@ -96,10 +92,10 @@ pipeline {
 
     post {
         failure {
-            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${SANITIZED_BRANCH}* has had a failure : ${BUILD_URL}"
+            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${env.BRANCH_NAME}* has had a failure : ${BUILD_URL}"
         }
         success {
-            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${SANITIZED_BRANCH}* has completed successfully."
+            slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${env.BRANCH_NAME}* has completed successfully."
         }
     }
 }
