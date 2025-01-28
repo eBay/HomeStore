@@ -73,7 +73,6 @@ void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
         [[maybe_unused]] auto* const superblock{m_logdev_meta.create()};
         m_blkstore->update_data_start_offset(0);
     } else {
-        HS_LOG_ASSERT(!m_logdev_meta.is_empty(), "Expected meta data to be read already before loading");
         const auto store_list{m_logdev_meta.load()};
 
         // Notify to the caller that a new log store was reserved earlier and it is being loaded, with its meta info
@@ -694,6 +693,30 @@ void LogDevMetadata::rollback_super_blk_found(const sisl::byte_view& buf, void* 
 }
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
+    if (!m_sb) {
+        /// This code block is purely to make the UT work. The UT does not fully
+        // destruct the application, but does unregister the callbacks. We need
+        // to re-register here on the simulated "reboot"
+        MetaBlkMgrSI()->register_handler(
+            m_name,
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
+            },
+            nullptr);
+
+        MetaBlkMgrSI()->register_handler(
+            m_name + "_rollback_sb",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
+            },
+            nullptr);
+        homestore::MetaBlkMgr::instance()->read_sub_sb(m_name);
+        homestore::MetaBlkMgr::instance()->read_sub_sb(m_name + "_rollback_sb");
+    }
+
+    HS_REL_ASSERT_NE(m_raw_logdev_buf->bytes, nullptr, "Load called without getting metadata");
+    HS_REL_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
+
     std::vector< std::pair< logstore_id_t, logstore_superblk > > ret_list;
     ret_list.reserve(1024);
     if (store_capacity()) {
@@ -702,9 +725,6 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         // use default value (1024) if store_capacity is zero
         m_id_reserver = std::make_unique< sisl::IDReserver >();
     }
-
-    HS_REL_ASSERT_NE(m_raw_logdev_buf->bytes, nullptr, "Load called without getting metadata");
-    HS_REL_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
 
     const logstore_superblk* const store_sb{m_sb->get_logstore_superblk()};
     logstore_id_t idx{0};
