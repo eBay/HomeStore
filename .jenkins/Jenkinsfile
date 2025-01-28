@@ -67,6 +67,11 @@ pipeline {
                     }
 
                    stage("Deploy Package") {
+                        when { allOf {
+                            branch "${STABLE_BRANCH}"
+                            expression { "${BUILD_TYPE}" != 'coverage' }
+                            expression { "${BUILD_TYPE}" != 'sanitize' }
+                        } }
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
                             sh "conan upload ${PROJECT}/${VER}@ -c --all -r ebay-local"
