@@ -1,6 +1,7 @@
 name: Homestore v3 PR Build
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - stable/v3.**

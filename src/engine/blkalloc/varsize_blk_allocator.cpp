@@ -368,7 +368,9 @@ void VarsizeBlkAllocator::fill_cache_in_portion(const blk_num_t portion_num, blk
             HS_DBG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be smaller than portion end bit");
             HS_DBG_ASSERT_GE(end_blk_id, (b.start_bit + b.nbits - 1),
                              "Expected end bit to be smaller than portion end bit");
+#ifndef NDEBUG
             HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, 100 / (static_cast< double >(b.nbits)));
+#endif
 
             // Fill the blk cache and keep accounting of number of blks added
             fill_req.start_blk_num = b.start_bit;

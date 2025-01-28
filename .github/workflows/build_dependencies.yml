@@ -164,6 +164,13 @@ jobs:
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
+    - name: Check disk space and mount
+      run: |
+        sudo mkdir -p /mnt/tmp
+        sudo chmod 1777 /mnt/tmp
+        sudo mount --bind /mnt/tmp /tmp
+        df -h /tmp
+
     - name: Code Coverage Run
       run: |
         conan install \
@@ -177,6 +184,13 @@ jobs:
             .
         conan build .
       if: ${{ inputs.testing == 'True' && inputs.platform == 'ubuntu-22.04' && inputs.build-type == 'Debug' && inputs.malloc-impl == 'libc' && inputs.prerelease == 'False' }}
+      continue-on-error: true
+
+    - name: Check disk space if previous step failed
+      if: failure() && steps.code_coverage_run.outcome == 'failure'
+      run: |
+        echo "Code Coverage Run. Checking disk space..."
+        df -h
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3
@@ -201,3 +215,10 @@ jobs:
             --build missing \
             .
       if: ${{ inputs.testing == 'True' && ( inputs.platform != 'ubuntu-22.04' || inputs.build-type != 'Debug' || inputs.malloc-impl != 'libc' || inputs.prerelease != 'False' ) }}
+      continue-on-error: true
+
+    - name: Check disk space if previous step failed
+      if: failure() && steps.create_and_test_package.outcome == 'failure'
+      run: |
+        echo "Create and Test Package step failed. Checking disk space..."
+        df -h

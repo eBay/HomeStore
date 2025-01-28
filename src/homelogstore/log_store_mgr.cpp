@@ -37,20 +37,7 @@ HomeLogStoreMgr& HomeLogStoreMgr::instance() {
 
 HomeLogStoreMgr::HomeLogStoreMgr() :
         m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
-                            std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {
-    MetaBlkMgrSI()->register_handler(data_log_family()->metablk_name(), HomeLogStoreMgr::data_meta_blk_found_cb,
-                                     nullptr);
-    MetaBlkMgrSI()->register_handler(ctrl_log_family()->metablk_name(), HomeLogStoreMgr::ctrl_meta_blk_found_cb,
-                                     nullptr);
-}
-
-void HomeLogStoreMgr::data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
-    HomeLogStoreMgrSI().m_logstore_families[DATA_LOG_FAMILY_IDX]->meta_blk_found_cb(mblk, buf, size);
-}
-
-void HomeLogStoreMgr::ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
-    HomeLogStoreMgrSI().m_logstore_families[CTRL_LOG_FAMILY_IDX]->meta_blk_found_cb(mblk, buf, size);
-}
+                            std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
 void HomeLogStoreMgr::start(const bool format) {
     m_hb = HomeStoreBase::safe_instance();
@@ -76,12 +63,7 @@ void HomeLogStoreMgr::stop() {
     m_hb.reset();
 }
 
-void HomeLogStoreMgr::fake_reboot() {
-    MetaBlkMgrSI()->register_handler(HomeLogStoreMgrSI().data_log_family()->metablk_name(),
-                                     HomeLogStoreMgr::data_meta_blk_found_cb, nullptr);
-    MetaBlkMgrSI()->register_handler(HomeLogStoreMgrSI().ctrl_log_family()->metablk_name(),
-                                     HomeLogStoreMgr::ctrl_meta_blk_found_cb, nullptr);
-}
+void HomeLogStoreMgr::fake_reboot() {}
 
 std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(const logstore_family_id_t family_id,
                                                                       const bool append_mode) {
@@ -156,7 +138,7 @@ void HomeLogStoreMgr::start_threads() {
     }
 }
 
-LogStoreFamily* HomeLogStoreMgr::get_family(std::string family_name){
+LogStoreFamily* HomeLogStoreMgr::get_family(std::string family_name) {
     for (auto& l : m_logstore_families) {
         if (l->get_name() == family_name) { return l.get(); }
     }
@@ -167,20 +149,18 @@ nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
         for (auto& family : m_logstore_families) {
-            json_dump[family->metablk_name()] = family->dump_log_store(dump_req);
+            json_dump[family->get_name()] = family->dump_log_store(dump_req);
         }
     } else {
         auto& family = dump_req.log_store->get_family();
         // must use operator= construction as copy construction results in error
         nlohmann::json val = family.dump_log_store(dump_req);
-        json_dump[family.metablk_name()] = std::move(val);
+        json_dump[family.get_name()] = std::move(val);
     }
     return json_dump;
 }
 
-sisl::status_response HomeLogStoreMgr::get_status(const sisl::status_request& request) const {
-    return {};
-}
+sisl::status_response HomeLogStoreMgr::get_status(const sisl::status_request& request) const { return {}; }
 
 HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
     REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
@@ -188,8 +168,8 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                      {"op", "write"});
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
-    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
-    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
+    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
+    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"}, HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
@@ -198,7 +178,7 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
-                       "Logdev post flush processing (including callbacks) latency");
+                       "Logdev post flush processing (including callbacks) latency", HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_fsync_time_us, "Logdev fsync completion time in us");
 
     register_me_to_farm();
