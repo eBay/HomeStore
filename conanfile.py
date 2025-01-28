@@ -55,8 +55,8 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.12.1")
 
     def requirements(self):
-        self.requires("iomgr/[~=8]")
-        self.requires("sisl/[~=8.9]")
+        self.requires("iomgr/8.8.1")
+        self.requires("sisl/8.9.1")
 
         # FOSS, rarely updated
         self.requires("boost/1.79.0")
