@@ -37,7 +37,7 @@
     "context": "host"
    },
    "2": {
-    "ref": "sisl/8.9.0#2ef8e21ac5a5aef86f09adf6bf419074",
+    "ref": "sisl/8.9.1#d34959852676c40004e648a349435015",
     "requires": [
      "3",
      "7",
