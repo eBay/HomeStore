@@ -108,10 +108,10 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         if (thread_started) {
             instance->m_init_thread_id = iomanager.iothread_self();
             if (instance->is_safe_mode()) {
-                std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
+                auto lk = std::unique_lock< std::mutex >{instance->m_cv_mtx};
                 /* we wait for gdb to attach in safe mode */
                 LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
-                instance->m_cv_wakeup_init.wait(lk);
+                instance->m_cv_wakeup_init.wait(lk, [instance]() { return instance->woke_up; });
             }
             instance->init_devices();
         }
@@ -186,7 +186,13 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     }
 }
 
-void HomeBlks::wakeup_init() { m_cv_wakeup_init.notify_one(); }
+void HomeBlks::wakeup_init() {
+    if (is_safe_mode() && !woke_up) {
+        auto lk = std::scoped_lock< std::mutex >{m_cv_mtx};
+        woke_up = true;
+    }
+    m_cv_wakeup_init.notify_one();
+}
 
 void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                       std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,
@@ -1071,7 +1077,7 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
         m_rdy = true;
         iomanager.run_on(m_init_thread_id, ([this](io_thread_addr_t addr) { this->init_done(); }));
         {
-            std::unique_lock< std::mutex > lk{m_cv_mtx};
+            auto lk = std::scoped_lock< std::mutex >{m_cv_mtx};
             m_init_finished = true;
             m_cv_init_cmplt.notify_all();
         }
@@ -1166,7 +1172,13 @@ nlohmann::json HomeBlks::dump_disk_metablks(const std::string& client) {
 
 bool HomeBlks::verify_metablk_store() { return MetaBlkMgrSI()->verify_metablk_store(); }
 
-bool HomeBlks::is_safe_mode() { return HB_DYNAMIC_CONFIG(general_config->boot_safe_mode); }
+bool HomeBlks::is_safe_mode() {
+    {
+        auto lk = std::scoped_lock< std::mutex >(m_cv_mtx);
+        if (woke_up) return false;
+    }
+    return HB_DYNAMIC_CONFIG(general_config->boot_safe_mode);
+}
 
 void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) {}
 
