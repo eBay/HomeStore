@@ -206,7 +206,6 @@ folly::Future< std::error_code > BlkDataService::async_write(sisl::sg_list const
         decr_pending_request_num();
         return collect_all_futures(s_futs);
     }
-    decr_pending_request_num();
 }
 
 BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints, MultiBlkId& out_blkids) {
@@ -226,8 +225,9 @@ BlkAllocStatus BlkDataService::commit_blk(MultiBlkId const& blkid) {
 
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        m_vdev->commit_blk(blkid);
+        auto ret = m_vdev->commit_blk(blkid);
         decr_pending_request_num();
+        return ret;
     }
     auto it = blkid.iterate();
     while (auto const bid = it.next()) {

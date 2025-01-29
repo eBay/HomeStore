@@ -187,7 +187,7 @@ void RaftReplService::stop() {
 
     // stop all repl_devs
     std::unique_lock lg(m_rd_map_mtx);
-    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end(); ++it) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         rdev->stop();
     }

@@ -132,10 +132,8 @@ void LogStoreService::stop() {
 }
 
 LogStoreService::~LogStoreService() {
-    {
-        folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
-        m_id_logdev_map.clear();
-    }
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+    m_id_logdev_map.clear();
 }
 
 logdev_id_t LogStoreService::get_next_logdev_id() {

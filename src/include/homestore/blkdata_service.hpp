@@ -228,7 +228,6 @@ private:
     uint32_t m_blk_size;
 
 private:
-    // graceful shutdown
     // graceful shutdown related
     std::atomic_bool m_stopping{false};
     mutable std::atomic_uint64_t pending_request_num{0};

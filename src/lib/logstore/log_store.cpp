@@ -244,8 +244,8 @@ bool HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate
     m_records.truncate(upto_lsn);
     m_start_lsn.store(upto_lsn + 1);
     if (!in_memory_truncate_only) { m_logdev->truncate(); }
-    return true;
     decr_pending_request_num();
+    return true;
 }
 
 std::tuple< logstore_seq_num_t, logdev_key, logstore_seq_num_t > HomeLogStore::truncate_info() const {
@@ -325,8 +325,8 @@ bool HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstor
         auto log_buf = m_logdev->read(record.m_dev_key);
         return cb(cur_idx, log_buf);
     });
-    return true;
     decr_pending_request_num();
+    return true;
 }
 
 logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) const {

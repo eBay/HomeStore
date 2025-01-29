@@ -107,26 +107,9 @@ LogDev::~LogDev() {
     THIS_LOGDEV_LOG(INFO, "Logdev stopping id {}", m_logdev_id);
     HS_LOG_ASSERT((m_pending_flush_size.load() == 0),
                   "LogDev stop attempted while writes to logdev are pending completion");
-    {
-        std::unique_lock lg = flush_guard();
-        // waiting under lock to make sure no new flush is started
-        while (m_pending_callback.load() > 0) {
-            THIS_LOGDEV_LOG(INFO, "Waiting for pending callbacks to complete, pending callbacks {}",
-                            m_pending_callback.load());
-            std::this_thread::sleep_for(std::chrono::milliseconds{1000});
-        }
-    }
-    // after we call stop, we need to do any pending device truncations
-    truncate();
 
     if (allow_timer_flush()) stop_timer();
-
-    {
-        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
-        m_id_logstore_map.clear();
-    }
-
-    m_log_records = nullptr;
+    m_log_records.reset(nullptr);
     m_logdev_meta.reset();
     m_log_idx.store(0);
     m_pending_flush_size.store(0);
@@ -144,16 +127,28 @@ LogDev::~LogDev() {
 }
 
 void LogDev::stop() {
-    // Walk through all the stores and find the least logdev_key that we can truncate
-    for (auto& [_, store] : m_id_logstore_map)
-        store.log_store->stop();
-
     start_stopping();
     while (true) {
         if (!get_pending_request_num()) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
+    {
+        std::unique_lock lg = flush_guard();
+        // waiting under lock to make sure no new flush is started
+        while (m_pending_callback.load() > 0) {
+            THIS_LOGDEV_LOG(INFO, "Waiting for pending callbacks to complete, pending callbacks {}",
+                            m_pending_callback.load());
+            std::this_thread::sleep_for(std::chrono::milliseconds{1000});
+        }
+    }
+
     folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+    for (auto& [_, store] : m_id_logstore_map)
+        store.log_store->stop();
+
+    // after we call stop, we need to do any pending device truncations
+    truncate();
+    m_id_logstore_map.clear();
 }
 
 void LogDev::destroy() {
@@ -538,7 +533,6 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
 uint64_t LogDev::truncate() {
     auto stopping = is_stopping();
-    if (stopping) return 0;
     incr_pending_request_num();
     // Order of this lock has to be preserved. We take externally visible lock which is flush lock first. This
     // prevents any further update to tail_lsn and also flushes conurrently with truncation. Then we take the store
