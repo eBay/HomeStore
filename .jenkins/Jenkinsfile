@@ -39,6 +39,8 @@ pipeline {
                             script {
                                 if ((env.BRANCH_NAME.startsWith('PR') && !env.CHANGE_TARGET.startsWith('stable')) ||
                                     !env.BRANCH_NAME.startsWith('stable')) {
+                                    sh "conan install --lockfile locks/${BUILD_TYPE}_deps.lock ."
+                                    sh "git clean -fdx"
                                     sh "./update_locks.sh"
                                     sh "git diff -w -- locks"
                                 }
