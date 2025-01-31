@@ -440,10 +440,6 @@ public:
                     shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
 
-                    // we are done with this wb_req
-                    HS_REL_ASSERT_EQ(wb_req, wb_req->bn->req[cp_id]);
-                    wb_req->bn->req[cp_id] = nullptr;
-
                     if (wb_cache_outstanding_cnt > ResourceMgrSI().get_dirty_buf_qd()) {
                         CP_PERIODIC_LOG(
                             DEBUG, bt_cp_id,
