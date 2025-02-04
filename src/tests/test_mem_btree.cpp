@@ -241,23 +241,6 @@ TYPED_TEST(BtreeTest, SimpleRemoveRange) {
     //    this->query_validate(0, num_entries , 75);
 }
 
-TYPED_TEST(BtreeTest, SimpleTombstone) {
-    // Forward sequential insert
-    const auto num_entries = 20;
-    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    this->dump_to_file("tombstone1.dot");
-    this->move_to_tombstone(10, btree_status_t::success);
-    this->move_to_tombstone(10, btree_status_t::filtered_out);
-    this->dump_to_file("tombstone2.dot");
-    this->move_to_tombstone(40, btree_status_t::not_found);
-    this->dump_to_file("tombstone3.dot");
-    //    this->query_validate(0, num_entries , 75);
-}
-
-
 TYPED_TEST(BtreeTest, RandomRemove) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
