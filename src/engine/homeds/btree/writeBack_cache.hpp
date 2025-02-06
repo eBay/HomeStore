@@ -533,6 +533,11 @@ public:
             queue_flush_buffers(nullptr);
         }
         ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
+
+        // we are done with this wb_req
+        HS_REL_ASSERT_EQ(wb_req, wb_req->bn->req[cp_id]);
+        wb_req->bn->req[cp_id] = nullptr;
+        
         /* req and btree node are pointing to each other which is preventing neither of them to be freed */
         wb_req->bn = nullptr;
 
