@@ -54,7 +54,7 @@ private:
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
-    ~RaftReplService();
+    ~RaftReplService() override;
 
     static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
 

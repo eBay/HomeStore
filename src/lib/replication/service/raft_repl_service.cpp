@@ -192,6 +192,14 @@ void RaftReplService::stop() {
         rdev->stop();
     }
 
+    // this will stop and shutdown all the repl_dev and grpc server(data channel).
+    // for each raft_repl_dev:
+    // 1 Cancel snapshot requests if exist.
+    // 2 Terminate background commit thread.
+    // 3 Cancel all scheduler tasks.
+    // after m_msg_mgr is reset , no further data will hit data service and no futher log will hit log store.
+    m_msg_mgr.reset();
+
     hs()->logstore_service().stop();
     hs()->data_service().stop();
 }
@@ -199,14 +207,7 @@ void RaftReplService::stop() {
 RaftReplService::~RaftReplService() {
     stop_reaper_thread();
 
-    // this will stop and shutdown all the repl_dev and grpc server(data channel).
-    // for each raft_repl_dev:
-    // 1 Cancel snapshot requests if exist.
-    // 2 Terminate background commit thread.
-    // 3 Cancel all scheduler tasks.
-    m_msg_mgr.reset();
-
-    // the father class destructor will clear the m_rd_map
+    // the base class destructor will clear the m_rd_map
 }
 
 void RaftReplService::monitor_cert_changes() {

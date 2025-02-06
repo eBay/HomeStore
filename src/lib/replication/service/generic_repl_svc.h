@@ -47,7 +47,7 @@ public:
     static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
 
     GenericReplService(cshared< ReplApplication >& repl_app);
-    ~GenericReplService();
+    virtual ~GenericReplService();
     virtual void start() = 0;
     meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
 
@@ -81,6 +81,7 @@ protected:
 class SoloReplService : public GenericReplService {
 public:
     SoloReplService(cshared< ReplApplication >& repl_app);
+    ~SoloReplService() override;
     void start() override;
     void stop() override;
 
