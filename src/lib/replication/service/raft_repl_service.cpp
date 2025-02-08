@@ -105,12 +105,13 @@ void RaftReplService::start() {
                         .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
                         .with_leadership_expiry(HS_DYNAMIC_CONFIG(consensus.leadership_expiry_ms))
                         .with_reserved_log_items(HS_DYNAMIC_CONFIG(consensus.num_reserved_log_items))
+                        .with_snapshot_sync_ctx_timeout(HS_DYNAMIC_CONFIG(consensus.snapshot_sync_ctx_timeout_ms))
                         .with_auto_forwarding(false);
     // new_joiner_type fully disabled log pack behavior.
     // There is no callback available for handling and localizing the log entries within the pack, which could
     // result in data corruption.
     r_params.use_new_joiner_type_ = true;
-    r_params.use_bg_thread_for_snapshot_io_ = HS_DYNAMIC_CONFIG(consensus.use_bg_thread_for_snapshot_io_);
+    r_params.use_bg_thread_for_snapshot_io_ = HS_DYNAMIC_CONFIG(consensus.use_bg_thread_for_snapshot_io);
     r_params.return_method_ = nuraft::raft_params::async_handler;
     m_msg_mgr->register_mgr_type(params.default_group_type_, r_params);
 

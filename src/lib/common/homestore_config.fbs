@@ -259,6 +259,10 @@ table Consensus {
     // ReplDev Reqs timeout in seconds.
     repl_req_timeout_sec: uint32 = 300;
 
+    // Timeout for snapshot sync context in ms. If the follower doesn't response
+    // within this timeout during snapshot resync,  the leader will release snapshot sync context.
+    snapshot_sync_ctx_timeout_ms: int32 = 60000;
+
     // Frequency to flush durable commit LSN in millis
     flush_durable_commit_interval_ms: uint64 = 500;
 
@@ -271,7 +275,7 @@ table Consensus {
 
     // Reading snapshot objects will be done by a background thread asynchronously
     // instead of synchronous read by Raft worker threads
-    use_bg_thread_for_snapshot_io_: bool = true;
+    use_bg_thread_for_snapshot_io: bool = true;
 }
 
 table HomeStoreSettings {
