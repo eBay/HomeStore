@@ -542,7 +542,18 @@ uint64_t LogDev::truncate() {
     }
 
     // There are no writes or no truncation called for any of the store, so we can't truncate anything
-    if (min_safe_ld_key.idx <= 0 || min_safe_ld_key.idx <= m_last_truncate_idx) return 0;
+    if (min_safe_ld_key.idx <= 0 || min_safe_ld_key.idx <= m_last_truncate_idx) {
+        // Persist the logstore superblock to ensure correct start LSN during recovery. Avoid such scenario:
+        // 1. Follower1 appends logs up to 100, then is stopped by a sigkill.
+        // 2. Upon restart, a baseline resync is triggered using snapshot 2000.
+        // 3. Baseline resync completed with start_lsn=2001, but m_trunc_ld_key remains {0,0} since we cannot get a valid
+        //    device offset for LSN 2000 to update it.
+        // 4. Follower1 appends logs from 2001 to 2500, making tail_lsn > 2000.
+        // 5. Get m_trunc_ld_key={0,0}, goto here and return 0 without persist.
+        // 6. Follower1 is killed again, after restart, its start index remains 0, misinterpreting the range as [1,2500].
+        m_logdev_meta.persist();
+        return 0;
+    }
 
     uint64_t const num_records_to_truncate = uint64_cast(min_safe_ld_key.idx - m_last_truncate_idx);
 
