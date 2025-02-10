@@ -294,30 +294,39 @@ void HomeStore::shutdown() {
 
     LOGINFO("Homestore shutdown is started");
 
+    m_resource_mgr->stop();
+
+    // 1 stop all the services, after which all the upper layer api call are rejected and there is not on-going request.
+    // Note that, after stopping, all the service are alive.
+    if (has_repl_data_service())
+        // Log and Data services are stopped by repl service
+        s_cast< GenericReplService* >(m_repl_service.get())->stop();
+    else {
+        if (has_log_service()) m_log_service->stop();
+        if (has_data_service()) m_data_service->stop();
+    }
+
+    if (has_index_service()) m_index_service->stop();
+
+    // 2 call cp_manager shutdown, which will which trigger cp flush to make sure all the in-memory data of all the
+    // services are flushed to disk. since all the upper layer api call are rejected and there is not on-going request,
+    // so after cp flush is done, we can guarantee all the necessary data are persisted to disk.
     m_cp_mgr->shutdown();
     m_cp_mgr.reset();
 
-    m_resource_mgr->stop();
-
+    // 3 call reset/shutdown to clear all the services and after that all the services are dead, excluding metasevice
     if (has_repl_data_service()) {
-        // Log and Data services are stopped by repl service
-        s_cast< GenericReplService* >(m_repl_service.get())->stop();
         m_log_service.reset();
         m_data_service.reset();
         m_repl_service.reset();
     } else {
-        if (has_log_service()) {
-            m_log_service->stop();
-            m_log_service.reset();
-        }
-        if (has_data_service()) { m_data_service.reset(); }
+        if (has_log_service()) m_log_service.reset();
+        if (has_data_service()) m_data_service.reset();
     }
 
-    if (has_index_service()) {
-        m_index_service->stop();
-        // m_index_service.reset();
-    }
+    if (has_index_service()) m_index_service.reset();
 
+    // 4 close metaservice and device_manager.
     if (has_meta_service()) {
         m_meta_service->stop();
         m_meta_service.reset();

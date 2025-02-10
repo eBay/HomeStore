@@ -604,16 +604,10 @@ public:
     void start(bool format, std::shared_ptr< JournalVirtualDev > vdev);
 
     /**
-     * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
+     * @brief Stop the logdev. it waits for all the pending writes to be completed and reject new api calls.
      *
      */
     void stop();
-
-    /**
-     * @brief return whether the logdev is stopped or not
-     *
-     */
-    bool is_stopped();
 
     /**
      * @brief Destroy the logdev metablks.
@@ -678,7 +672,7 @@ public:
      * @param store_id : Store id whose logids are to be rolled back or invalidated
      * @param id_range : Log id range to rollback/invalidate
      */
-    void rollback(logstore_id_t store_id, logid_range_t id_range);
+    bool rollback(logstore_id_t store_id, logid_range_t id_range);
 
     /**
      * @brief This method get all the store ids that are registered already and out of them which are being garbaged
@@ -687,7 +681,7 @@ public:
      * @param registered out - Reference to the vector where all registered ids are pushed
      * @param garbage out - Reference to the vector where all garbage ids
      */
-    void get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
+    bool get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
     nlohmann::json get_status(int verbosity) const;
@@ -716,7 +710,7 @@ public:
 
     /// @brief Remove the log store and its associated resources
     /// @param store_id Store id that was created/opened
-    void remove_log_store(logstore_id_t store_id);
+    bool remove_log_store(logstore_id_t store_id);
 
     /// @return externally visible lock to avoid flush concurrently
     auto flush_guard() { return std::unique_lock(m_flush_mtx); }
@@ -781,7 +775,6 @@ private:
     std::unique_ptr< sisl::StreamTracker< log_record > > m_log_records; // Container stores all in-memory log records
     std::atomic< logid_t > m_log_idx{0};                                // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size{0};                     // How much flushable logs are pending
-    bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logdev_id_t m_logdev_id;
     std::shared_ptr< JournalVirtualDev > m_vdev;
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
@@ -795,9 +788,9 @@ private:
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
-    logid_t m_last_flush_idx{-1};           // Track last flushed, last device offset and truncated log idx
-    logdev_key m_last_flush_ld_key{0,0};    // Left interval of the last flush, 0 indicates the very beginning of logdev
-    logid_t m_last_truncate_idx{-1};        // Logdev truncate up to this idx
+    logid_t m_last_flush_idx{-1};         // Track last flushed, last device offset and truncated log idx
+    logdev_key m_last_flush_ld_key{0, 0}; // Left interval of the last flush, 0 indicates the very beginning of logdev
+    logid_t m_last_truncate_idx{-1};      // Logdev truncate up to this idx
     crc32_t m_last_crc{INVALID_CRC32_VALUE};
 
     // LogDev Info block related fields
@@ -816,6 +809,19 @@ private:
     // same thread.
     iomgr::FiberManagerLib::mutex m_flush_mtx;
     std::atomic_uint64_t m_pending_callback{0};
+
+private:
+    // graceful shutdown related fields
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 }; // LogDev
 
 } // namespace homestore

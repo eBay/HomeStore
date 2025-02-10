@@ -200,6 +200,8 @@ public:
 
     uint64_t get_used_capacity() const;
 
+    void stop();
+
 private:
     /**
      * @brief Initializes the block data service.
@@ -224,6 +226,19 @@ private:
     std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
     std::shared_ptr< ChunkSelector > m_custom_chunk_selector;
     uint32_t m_blk_size;
+
+private:
+    // graceful shutdown related
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 };
 
 extern BlkDataService& data_service();

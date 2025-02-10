@@ -41,7 +41,9 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
             write_journal(std::move(rreq));
         });
-    } else { write_journal(std::move(rreq)); }
+    } else {
+        write_journal(std::move(rreq));
+    }
 }
 
 void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
@@ -96,7 +98,9 @@ folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, 
     return data_service().async_read(bid, sgs, size, part_of_batch);
 }
 
-void SoloReplDev::async_free_blks(int64_t, MultiBlkId const& bid) { data_service().async_free_blk(bid); }
+folly::Future< std::error_code > SoloReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
+    return data_service().async_free_blk(bid);
+}
 
 uint32_t SoloReplDev::get_blk_size() const { return data_service().get_blk_size(); }
 

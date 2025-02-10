@@ -68,6 +68,7 @@ class LogStoreService {
 
 public:
     LogStoreService();
+    ~LogStoreService();
     LogStoreService(const LogStoreService&) = delete;
     LogStoreService(LogStoreService&&) noexcept = delete;
     LogStoreService& operator=(const LogStoreService&) = delete;
@@ -194,6 +195,19 @@ private:
     LogStoreServiceMetrics m_metrics;
     std::unordered_set< logdev_id_t > m_unopened_logdev;
     superblk< logstore_service_super_block > m_sb;
+
+private:
+    // graceful shutdown related
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 };
 
 extern LogStoreService& logstore_service();

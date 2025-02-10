@@ -56,6 +56,7 @@ private:
 
 public:
     IndexService(std::unique_ptr< IndexServiceCallbacks > cbs);
+    ~IndexService();
 
     // Creates the vdev that is needed to initialize the device
     void create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks);
@@ -63,7 +64,10 @@ public:
     // Open the existing vdev which is represnted by the vdev_info_block
     shared< VirtualDev > open_vdev(const vdev_info& vb, bool load_existing);
 
-    // Start the Index Service
+    // for now, we don't support start after stop and there is no use case for this.
+    // TODO: support start after stop if necessary
+
+    //  Start the Index Service
     void start();
 
     // Stop the Index Service
@@ -71,8 +75,8 @@ public:
 
     // Add/Remove Index Table to/from the index service
     uint64_t num_tables();
-    void add_index_table(const std::shared_ptr< IndexTableBase >& tbl);
-    void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
+    bool add_index_table(const std::shared_ptr< IndexTableBase >& tbl);
+    bool remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     std::shared_ptr< IndexTableBase > get_index_table(uuid_t uuid) const;
     std::shared_ptr< IndexTableBase > get_index_table(uint32_t ordinal) const;
 
@@ -81,6 +85,9 @@ public:
 
     uint64_t used_size() const;
     uint32_t node_size() const;
+
+    // the following methods are used wb_cache , which will not used by upper layer. so graceful shutdown just skips
+    // them for now.
     void repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf);
     void update_root(uint32_t ordinal, IndexBufferPtr const& node_buf);
 
@@ -88,6 +95,19 @@ public:
         if (!m_wb_cache) { throw std::runtime_error("Attempted to access a null pointer wb_cache"); }
         return *m_wb_cache;
     }
+
+private:
+    // graceful shutdown related
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 };
 
 extern IndexService& index_service();

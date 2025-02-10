@@ -36,8 +36,8 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
-      ERRORED = 1 << 5,        // Error has happened and cleaned up
-      DATA_COMMITTED = 1 << 6  // Data has already been committed, used in duplication handling, will skip commit_blk
+      ERRORED = 1 << 5,       // Error has happened and cleaned up
+      DATA_COMMITTED = 1 << 6 // Data has already been committed, used in duplication handling, will skip commit_blk
 )
 
 VENUM(journal_type_t, uint16_t,
@@ -144,7 +144,7 @@ public:
     repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
     ReplServiceError init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-              sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
+                          sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
 
     /////////////////////// All getters ///////////////////////
     repl_key const& rkey() const { return m_rkey; }
@@ -444,7 +444,7 @@ public:
     ///
     /// @param lsn - LSN of the old blkids that is being freed
     /// @param blkids - blkids to be freed.
-    virtual void async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
+    virtual folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
 
     /// @brief Try to switch the current replica where this method called to become a leader.
     /// @return True if it is successful, false otherwise.
@@ -486,8 +486,32 @@ public:
         }
     }
 
+    // we have no shutdown for repl_dev, since shutdown repl_dev is done by repl_service
+    void stop() {
+        start_stopping();
+        while (true) {
+            auto pending_request_num = get_pending_request_num();
+            if (!pending_request_num) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+    }
+
 protected:
     shared< ReplDevListener > m_listener;
+
+    // graceful shutdown related
+protected:
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 };
 
 } // namespace homestore

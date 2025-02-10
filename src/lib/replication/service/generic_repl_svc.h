@@ -47,8 +47,8 @@ public:
     static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
 
     GenericReplService(cshared< ReplApplication >& repl_app);
+    virtual ~GenericReplService();
     virtual void start() = 0;
-    virtual void stop();
     meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
 
     ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const override;
@@ -57,15 +57,31 @@ public:
     hs_stats get_cap_stats() const override;
     replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
     // void resource_audit() override;
+    virtual void stop() = 0;
 
 protected:
     virtual void add_repl_dev(group_id_t group_id, shared< ReplDev > rdev);
     virtual void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) = 0;
+
+    // graceful shutdown related
+protected:
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
 };
 
+// TODO: implement graceful shutdown for soloReplService
 class SoloReplService : public GenericReplService {
 public:
     SoloReplService(cshared< ReplApplication >& repl_app);
+    ~SoloReplService() override;
     void start() override;
     void stop() override;
 
