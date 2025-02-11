@@ -178,15 +178,6 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             RD_LOGI("Replace member added member={} to group_id={}", boost::uuids::to_string(member_in.id),
                     group_id_str());
 
-            // If enabled, create a snapshot here to ensure the new member will use the latest snapshot with itself in the config
-            if (raft_server()->get_current_params().snapshot_distance_ > 0) {
-                if (auto idx = raft_server()->create_snapshot(); idx > 0) {
-                    RD_LOGI("Created snapshot idx={} after adding member", idx);
-                } else {
-                    RD_LOGW("Failed to create snapshot after adding member");
-                }
-            }
-
             // Step 3. Append log entry to mark the old member is out and new member is added.
             auto rreq = repl_req_ptr_t(new repl_req_ctx{});
             replace_members_ctx members;
