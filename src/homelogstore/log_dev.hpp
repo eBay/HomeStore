@@ -559,6 +559,7 @@ private:
     uint32_t num_rollback_records(logstore_id_t store_id) const;
     bool is_rolled_back(logstore_id_t store_id, logid_t logid) const;
 
+    void initialize_rollback_sb();
     bool resize_rollback_sb_if_needed();
 
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
@@ -621,9 +622,7 @@ public:
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
-    [[nodiscard]] static bool flush_in_current_thread() {
-        return HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread);
-    }
+    [[nodiscard]] static bool flush_in_current_thread() { return HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread); }
 
     LogDev(const logstore_family_id_t f_id, const std::string& logdev_name);
     LogDev(const LogDev&) = delete;

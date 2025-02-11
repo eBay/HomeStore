@@ -641,7 +641,9 @@ LogDevMetadata::LogDevMetadata(const std::string& logdev_name) : m_name{logdev_n
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
             rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
         },
-        nullptr);
+        // If we have were previously <3.8.x we will not have a superblock
+        // to load, initialize one.
+        [this](bool) { initialize_rollback_sb(); });
 }
 
 logdev_superblk* LogDevMetadata::create() {
@@ -651,11 +653,7 @@ logdev_superblk* LogDevMetadata::create() {
                                                  sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
     m_sb = new (m_raw_logdev_buf->bytes) logdev_superblk();
 
-    req_sz = rollback_superblk::size_needed(1);
-    m_raw_rollback_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz),
-                                                   sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
-    m_rollback_sb = new (m_raw_rollback_buf->bytes) rollback_superblk();
-    m_rollback_info_dirty = true;
+    initialize_rollback_sb();
 
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
@@ -682,6 +680,15 @@ void LogDevMetadata::logdev_super_blk_found(const sisl::byte_view& buf, void* me
     HS_REL_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
 }
 
+void LogDevMetadata::initialize_rollback_sb() {
+    if (m_raw_rollback_buf) return;
+    auto const req_sz = rollback_superblk::size_needed(1);
+    m_raw_rollback_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz),
+                                                   sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
+    m_rollback_sb = new (m_raw_rollback_buf->bytes) rollback_superblk();
+    m_rollback_info_dirty = true;
+}
+
 void LogDevMetadata::rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     m_rollback_cookie = meta_cookie;
     m_raw_rollback_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
@@ -700,16 +707,18 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         MetaBlkMgrSI()->register_handler(
             m_name,
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
+                logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
             },
             nullptr);
 
         MetaBlkMgrSI()->register_handler(
             m_name + "_rollback_sb",
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
+                rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
             },
-            nullptr);
+            // If we have were previously <3.8.x we will not have a superblock
+            // to load, initialize one.
+            [this](bool) { initialize_rollback_sb(); });
         homestore::MetaBlkMgr::instance()->read_sub_sb(m_name);
         homestore::MetaBlkMgr::instance()->read_sub_sb(m_name + "_rollback_sb");
     }
@@ -739,6 +748,7 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         ++idx;
     }
 
+    if (!m_rollback_cookie) initialize_rollback_sb();
     for (uint32_t i{0}; i < m_rollback_sb->num_records; ++i) {
         const auto& rec = m_rollback_sb->at(i);
         m_rollback_info.insert({rec.store_id, rec.idx_range});
