@@ -127,33 +127,9 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
     }
 }
 
-//
-// free operation does:
-// 1. book keeping "total freeable" space
-// 2. if the blk being freed happens to be last block, move last_append_offset backwards accordingly;
-//
+// free operation books keeping "total freeable" space
 void AppendBlkAllocator::free(const BlkId& bid) {
-    // If we are freeing the last block, just move the offset back
-    blk_num_t cur_last_offset = m_last_append_offset.load();
-    auto const input_last_offset = bid.blk_num() + bid.blk_count();
-    blk_num_t new_last_offset;
-    bool freeing_in_middle{false};
-    do {
-        if (input_last_offset == cur_last_offset) {
-            new_last_offset = bid.blk_num();
-            freeing_in_middle = false;
-        } else {
-            new_last_offset = cur_last_offset;
-            freeing_in_middle = true;
-        }
-    } while (!m_last_append_offset.compare_exchange_weak(cur_last_offset, new_last_offset));
-
-    if (freeing_in_middle) {
-        // Freeing something in the middle, increment the count
-        m_freeable_nblks.fetch_add(bid.blk_count());
-    } else {
-        m_commit_offset.store(m_last_append_offset.load());
-    }
+    m_freeable_nblks.fetch_add(bid.blk_count());
     m_is_dirty.store(true);
 }
 
