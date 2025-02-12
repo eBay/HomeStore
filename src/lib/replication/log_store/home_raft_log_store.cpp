@@ -380,6 +380,13 @@ ulong HomeRaftLogStore::last_durable_index() {
     return to_repl_lsn(m_last_durable_lsn);
 }
 
+void HomeRaftLogStore::purge_all_logs() {
+    auto last_lsn = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
+    REPL_STORE_LOG(INFO, "Store={} LogDev={}: Purging all logs in the log store, last_lsn={}",
+                   m_logstore_id, m_logdev_id, last_lsn);
+    m_log_store->truncate(last_lsn, false /* in_memory_truncate_only */);
+}
+
 void HomeRaftLogStore::wait_for_log_store_ready() { m_log_store_future.wait(); }
 
 void HomeRaftLogStore::set_last_durable_lsn(repl_lsn_t lsn) { m_last_durable_lsn = to_store_lsn(lsn); }
