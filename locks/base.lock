@@ -2,7 +2,7 @@
  "graph_lock": {
   "nodes": {
    "0": {
-    "ref": "homestore/3.8.2",
+    "ref": "homestore/3.8.3",
     "requires": [
      "1",
      "2",
