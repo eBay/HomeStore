@@ -1088,13 +1088,17 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     uint64_t least_active_repl_idx = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
+    // peer's last log idx should also >= leader's start_index-1(ensure existence), otherwise leader can't append log entries to it
+    // and baseline resync will be triggerred. Try to avoid conflict between baseline resync and normal replication.
+    least_active_repl_idx = std::max(least_active_repl_idx, m_data_journal->start_index() - 1);
     for (auto p : repl_status) {
         if (p.id_ == m_my_repl_id) { continue; }
         if (p.replication_idx_ >= least_active_repl_idx) {
             res.insert(p.id_);
         } else {
-            RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}", p.id_,
-                    my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_);
+            RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}, least_active_repl_idx {}",
+                    p.id_,
+                    my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_, least_active_repl_idx);
         }
     }
     return res;
