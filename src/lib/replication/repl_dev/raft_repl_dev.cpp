@@ -187,16 +187,6 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             RD_LOGI("Replace member added member={} to group_id={}", boost::uuids::to_string(member_in.id),
                     group_id_str());
 
-            // If enabled, create a snapshot here to ensure the new member will use the latest snapshot with itself in
-            // the config
-            if (raft_server()->get_current_params().snapshot_distance_ > 0) {
-                if (auto idx = raft_server()->create_snapshot(); idx > 0) {
-                    RD_LOGI("Created snapshot idx={} after adding member", idx);
-                } else {
-                    RD_LOGW("Failed to create snapshot after adding member");
-                }
-            }
-
             // Step 3. Append log entry to mark the old member is out and new member is added.
             auto rreq = repl_req_ptr_t(new repl_req_ctx{});
             replace_members_ctx members;
@@ -805,32 +795,39 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& originator = req->blkid_originator();
         auto const& remote_blkid = req->remote_blkid();
 
-        // release this assert if in the future we want to fetch from non-originator;
-        RD_REL_ASSERT_EQ(originator, server_id(),
-                         "Not expect to receive fetch data from remote when I am not the originator of this request");
+        // Edit this check if in the future we want to fetch from non-originator;
+        if (originator != server_id()) {
+            auto const error_msg =
+                fmt::format("Did not expect to receive fetch data from "
+                            "remote when I am not the originator of this request, originator={}, my_server_id={}",
+                            originator, server_id());
+            RD_LOGW("{}", error_msg);
+            auto status = ::grpc::Status(::grpc::INVALID_ARGUMENT, error_msg);
+            rpc_data->set_status(status);
+            rpc_data->send_response();
+            return;
+        }
 
         // fetch data based on the remote_blkid
-        if (originator == server_id()) {
-            // We are the originator of the blkid, read data locally;
-            MultiBlkId local_blkid;
+        // We are the originator of the blkid, read data locally;
+        MultiBlkId local_blkid;
 
-            // convert remote_blkid serialized data to local blkid
-            local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
+        // convert remote_blkid serialized data to local blkid
+        local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
 
-            RD_LOGD("Data Channel: FetchData received: dsn={} lsn={} my_blkid={}", req->dsn(), lsn,
-                    local_blkid.to_string());
+        RD_LOGD("Data Channel: FetchData received: dsn={} lsn={} my_blkid={}", req->dsn(), lsn,
+                local_blkid.to_string());
 
-            // prepare the sgs data buffer to read into;
-            auto const total_size = local_blkid.blk_count() * get_blk_size();
-            sisl::sg_list sgs;
-            sgs.size = total_size;
-            sgs.iovs.emplace_back(
-                iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
+        // prepare the sgs data buffer to read into;
+        auto const total_size = local_blkid.blk_count() * get_blk_size();
+        sisl::sg_list sgs;
+        sgs.size = total_size;
+        sgs.iovs.emplace_back(
+            iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
 
-            // accumulate the sgs for later use (send back to the requester));
-            sgs_vec.push_back(sgs);
-            futs.emplace_back(async_read(local_blkid, sgs, total_size));
-        }
+        // accumulate the sgs for later use (send back to the requester));
+        sgs_vec.push_back(sgs);
+        futs.emplace_back(async_read(local_blkid, sgs, total_size));
     }
 
     folly::collectAllUnsafe(futs).thenValue(
@@ -1135,13 +1132,18 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     uint64_t least_active_repl_idx = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
+    // peer's last log idx should also >= leader's start_index-1(ensure existence), otherwise leader can't append log
+    // entries to it and baseline resync will be triggerred. Try to avoid conflict between baseline resync and normal
+    // replication.
+    least_active_repl_idx = std::max(least_active_repl_idx, m_data_journal->start_index() - 1);
     for (auto p : repl_status) {
         if (p.id_ == m_my_repl_id) { continue; }
         if (p.replication_idx_ >= least_active_repl_idx) {
             res.insert(p.id_);
         } else {
-            RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}", p.id_,
-                    my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_);
+            RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}, least_active_repl_idx {}",
+                    p.id_, my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_,
+                    least_active_repl_idx);
         }
     }
     return res;

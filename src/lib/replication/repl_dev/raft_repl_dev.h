@@ -199,6 +199,10 @@ public:
         if (!ready) { RD_LOGD("Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate); }
         return ready;
     }
+    void purge() override {
+        // clean up existing logs in log store
+        m_data_journal->purge_all_logs();
+    }
 
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();

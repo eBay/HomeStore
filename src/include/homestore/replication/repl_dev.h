@@ -477,6 +477,9 @@ public:
     /// @return true if ready, false otherwise
     virtual bool is_ready_for_traffic() const = 0;
 
+    /// @brief Clean up resources on this repl dev.
+    virtual void purge() = 0;
+
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 
     virtual void detach_listener() {

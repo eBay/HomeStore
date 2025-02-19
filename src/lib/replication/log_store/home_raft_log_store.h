@@ -215,6 +215,12 @@ public:
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 #endif
 
+    /**
+     * Purge all logs in the log store
+     * It is a dangerous operation and is only used in baseline resync now (purge all logs and restore by snapshot).
+     */
+    void purge_all_logs();
+
     void wait_for_log_store_ready();
     void set_last_durable_lsn(repl_lsn_t lsn);
 
