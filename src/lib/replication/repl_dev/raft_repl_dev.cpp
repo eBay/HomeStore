@@ -135,6 +135,13 @@ bool RaftReplDev::join_group() {
 
 AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_out,
                                               const replica_member_info& member_in, uint32_t commit_quorum) {
+
+    if (is_stopping()) {
+        LOGINFO("repl dev is being shutdown!");
+        return make_async_error<>(ReplServiceError::STOPPING);
+    }
+    incr_pending_request_num();
+
     LOGINFO("Replace member group_id={} member_out={} member_in={}", group_id_str(),
             boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
 
@@ -150,6 +157,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
         raft_server()->yield_leadership(true /* immediate */, -1 /* successor */);
         RD_LOGI("Replace member leader is the member_out so yield leadership");
         reset_quorum_size(0);
+        decr_pending_request_num();
         return make_async_error<>(ReplServiceError::NOT_LEADER);
     }
 
@@ -171,6 +179,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
                 } else {
                     RD_LOGE("Replace member error in add member : {}", e.error());
                     reset_quorum_size(0);
+                    decr_pending_request_num();
                     return make_async_error<>(RaftReplService::to_repl_error(e.error()));
                 }
             }
@@ -193,6 +202,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             if (err != ReplServiceError::OK) {
                 LOGERROR("Replace member propose to raft failed {}", err);
                 reset_quorum_size(0);
+                decr_pending_request_num();
                 return make_async_error<>(std::move(err));
             }
 
@@ -214,6 +224,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
                             // of replace member is idempotent.
                             RD_LOGE("Replace member failed to remove member : {}", e.error());
                             reset_quorum_size(0);
+                            decr_pending_request_num();
                             return make_async_error<>(ReplServiceError::RETRY_REQUEST);
                         }
                     } else {
@@ -223,6 +234,7 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
 
                     // Revert the quorum size back to 0.
                     reset_quorum_size(0);
+                    decr_pending_request_num();
                     return make_async_success<>();
                 });
         });
@@ -280,6 +292,12 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
     if (when_done) { when_done(ret_val, null_except); }
 }
 
+// 1 before repl_dev.stop() is called, the upper layer should make sure that there is no pending request. so graceful
+// shutdown can consider when stopping repl_dev, there is no pending request.
+// 2 before the log is appended to log store, repl_dev will guarantee the corresponding data is persisted on disk. so
+// even if we do not care about this when stop, it will be ok, since log will replayed after restart.
+
+// we do not have shutdown for async_alloc_write according to the two points above.
 void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& data,
                                     repl_req_ptr_t rreq) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
@@ -493,7 +511,8 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
     auto rreq = it->second;
 
     if (!happened) {
-        // We already have the entry in the map, reset its start time to prevent it from being incorrectly gc during use.
+        // We already have the entry in the map, reset its start time to prevent it from being incorrectly gc during
+        // use.
         rreq->set_created_time();
         // Check if we are already allocated the blk by previous caller, in that case we need to return the req.
         if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
@@ -778,9 +797,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
         // Edit this check if in the future we want to fetch from non-originator;
         if (originator != server_id()) {
-            auto const error_msg = fmt::format("Did not expect to receive fetch data from "
-                "remote when I am not the originator of this request, originator={}, my_server_id={}"
-                , originator, server_id());
+            auto const error_msg =
+                fmt::format("Did not expect to receive fetch data from "
+                            "remote when I am not the originator of this request, originator={}, my_server_id={}",
+                            originator, server_id());
             RD_LOGW("{}", error_msg);
             auto status = ::grpc::Status(::grpc::INVALID_ARGUMENT, error_msg);
             rpc_data->set_status(status);
@@ -970,7 +990,7 @@ void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config
     // since we didn't create repl req for config change, we just need to update m_commit_upto_lsn here.
 
     // keep this variable in case it is needed later
-    (void) new_conf;
+    (void)new_conf;
     auto prev_lsn = m_commit_upto_lsn.load(std::memory_order_relaxed);
     if (prev_lsn >= lsn || !m_commit_upto_lsn.compare_exchange_strong(prev_lsn, lsn)) {
         RD_LOGE("Raft Channel: unexpected log {} commited before config {} committed", prev_lsn, lsn);
@@ -1047,23 +1067,41 @@ repl_req_ptr_t RaftReplDev::repl_key_to_req(repl_key const& rkey) const {
     return it->second;
 }
 
+// async_read and async_free_blks graceful shutdown will be handled by data_service.
+
 folly::Future< std::error_code > RaftReplDev::async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
                                                          bool part_of_batch) {
+    if (is_stopping()) {
+        LOGINFO("repl dev is being shutdown!");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    }
     return data_service().async_read(bid, sgs, size, part_of_batch);
 }
 
-void RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
+folly::Future< std::error_code > RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
     // TODO: For timeline consistency required, we should retain the blkid that is changed and write that to another
     // journal.
-    data_service().async_free_blk(bid);
+    if (is_stopping()) {
+        LOGINFO("repl dev is being shutdown!");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    }
+    return data_service().async_free_blk(bid);
 }
 
 AsyncReplResult<> RaftReplDev::become_leader() {
+    if (is_stopping()) {
+        LOGINFO("repl dev is being shutdown!");
+        return make_async_error<>(ReplServiceError::STOPPING);
+    }
+    incr_pending_request_num();
+
     return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this](auto&& e) {
         if (e.hasError()) {
             RD_LOGE("Error in becoming leader: {}", e.error());
+            decr_pending_request_num();
             return make_async_error<>(RaftReplService::to_repl_error(e.error()));
         }
+        decr_pending_request_num();
         return make_async_success<>();
     });
 }
@@ -1094,8 +1132,9 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     uint64_t least_active_repl_idx = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
-    // peer's last log idx should also >= leader's start_index-1(ensure existence), otherwise leader can't append log entries to it
-    // and baseline resync will be triggerred. Try to avoid conflict between baseline resync and normal replication.
+    // peer's last log idx should also >= leader's start_index-1(ensure existence), otherwise leader can't append log
+    // entries to it and baseline resync will be triggerred. Try to avoid conflict between baseline resync and normal
+    // replication.
     least_active_repl_idx = std::max(least_active_repl_idx, m_data_journal->start_index() - 1);
     for (auto p : repl_status) {
         if (p.id_ == m_my_repl_id) { continue; }
@@ -1103,8 +1142,8 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
             res.insert(p.id_);
         } else {
             RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}, least_active_repl_idx {}",
-                    p.id_,
-                    my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_, least_active_repl_idx);
+                    p.id_, my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_,
+                    least_active_repl_idx);
         }
     }
     return res;

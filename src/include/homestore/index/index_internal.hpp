@@ -71,7 +71,8 @@ public:
     virtual void recovery_completed() = 0;
     virtual uint32_t ordinal() const = 0;
     virtual uint64_t used_size() const = 0;
-    virtual void destroy() = 0;
+    virtual btree_status_t destroy() = 0;
+    virtual void stop() = 0;
     virtual void repair_node(IndexBufferPtr const& buf) = 0;
     virtual void repair_root_node(IndexBufferPtr const& buf) = 0;
 };

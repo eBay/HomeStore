@@ -36,7 +36,28 @@ private:
     superblk< index_table_sb > m_sb;
     shared< MetaIndexBuffer > m_sb_buffer;
 
+    // graceful shutdown
+private:
+    std::atomic_bool m_stopping{false};
+    mutable std::atomic_uint64_t pending_request_num{0};
+
+    bool is_stopping() const { return m_stopping.load(); }
+    void start_stopping() { m_stopping = true; }
+
+    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
+
+    void incr_pending_request_num() const { pending_request_num++; }
+    void decr_pending_request_num() const { pending_request_num--; }
+
 public:
+    void stop() {
+        start_stopping();
+        while (true) {
+            if (!get_pending_request_num()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+    }
+
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg) :
             Btree< K, V >{cfg}, m_sb{"index"} {
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
@@ -77,10 +98,14 @@ public:
         }
     }
 
-    void destroy() override {
+    btree_status_t destroy() override {
+        if (is_stopping()) return btree_status_t::stopping;
+        incr_pending_request_num();
         auto cpg = cp_mgr().cp_guard();
         Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
         m_sb.destroy();
+        decr_pending_request_num();
+        return btree_status_t::success;
     }
 
     uuid_t uuid() const override { return m_sb->uuid; }
@@ -92,6 +117,8 @@ public:
 
     template < typename ReqT >
     btree_status_t put(ReqT& put_req) {
+        if (is_stopping()) return btree_status_t::stopping;
+        incr_pending_request_num();
         auto ret = btree_status_t::success;
         do {
             auto cpg = cp_mgr().cp_guard();
@@ -99,11 +126,14 @@ public:
             ret = Btree< K, V >::put(put_req);
             if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying put"); }
         } while (ret == btree_status_t::cp_mismatch);
+        decr_pending_request_num();
         return ret;
     }
 
     template < typename ReqT >
     btree_status_t remove(ReqT& remove_req) {
+        if (is_stopping()) return btree_status_t::stopping;
+        incr_pending_request_num();
         auto ret = btree_status_t::success;
         do {
             auto cpg = cp_mgr().cp_guard();
@@ -111,6 +141,16 @@ public:
             ret = Btree< K, V >::remove(remove_req);
             if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove"); }
         } while (ret == btree_status_t::cp_mismatch);
+        decr_pending_request_num();
+        return ret;
+    }
+
+    template < typename ReqT >
+    btree_status_t get(ReqT& greq) const {
+        if (is_stopping()) return btree_status_t::stopping;
+        incr_pending_request_num();
+        auto ret = Btree< K, V >::get(greq);
+        decr_pending_request_num();
         return ret;
     }
 
@@ -260,8 +300,7 @@ protected:
     btree_status_t on_root_changed(BtreeNodePtr const& new_root, void* context) override {
         // todo: if(m_sb->root_node == new_root->node_id() && m_sb->root_link_version == new_root->link_version()){
         // return btree_status_t::success;}
-        LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node,
-                    new_root->node_id());
+        LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node, new_root->node_id());
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
 
