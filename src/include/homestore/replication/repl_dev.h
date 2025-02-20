@@ -72,49 +72,18 @@ struct repl_key {
 using repl_snapshot = nuraft::snapshot;
 using repl_snapshot_ptr = nuraft::ptr< nuraft::snapshot >;
 
-// Consumers of the ReplDevListener dont have to know what underlying
-// snapshot implementation is used. Consumers can export and save the state
-// of the snapshot using serialize and load the state using deserialize.
+// Consumers of ReplDevListener don't have to know what underlying snapshot context implementation is used by the
+// ReplDev. The state of the snapshot can be exported with serialize() and loaded with
+// repl_dev.deserialize_snapshot_context().
 class snapshot_context {
 public:
     snapshot_context(int64_t lsn) : lsn_(lsn) {}
     virtual ~snapshot_context() = default;
-    virtual void deserialize(const sisl::io_blob_safe& snp_ctx) = 0;
     virtual sisl::io_blob_safe serialize() = 0;
     int64_t get_lsn() { return lsn_; }
 
 protected:
     int64_t lsn_;
-};
-
-class nuraft_snapshot_context : public snapshot_context {
-public:
-    nuraft_snapshot_context(nuraft::snapshot& snp) : snapshot_context(snp.get_last_log_idx()) {
-        auto snp_buf = snp.serialize();
-        snapshot_ = nuraft::snapshot::deserialize(*snp_buf);
-    }
-
-    void deserialize(const sisl::io_blob_safe& snp_ctx) override {
-        // Load the context from the io blob to nuraft buffer.
-        auto snp_buf = nuraft::buffer::alloc(snp_ctx.size());
-        nuraft::buffer_serializer bs(snp_buf);
-        bs.put_raw(snp_ctx.cbytes(), snp_ctx.size());
-        snapshot_ = nuraft::snapshot::deserialize(bs);
-        lsn_ = snapshot_->get_last_log_idx();
-    }
-
-    sisl::io_blob_safe serialize() override {
-        // Dump the context from nuraft buffer to the io blob.
-        auto snp_buf = snapshot_->serialize();
-        sisl::io_blob_safe blob{s_cast< size_t >(snp_buf->size())};
-        std::memcpy(blob.bytes(), snp_buf->data_begin(), snp_buf->size());
-        return blob;
-    }
-
-    nuraft::ptr< nuraft::snapshot > nuraft_snapshot() { return snapshot_; }
-
-private:
-    nuraft::ptr< nuraft::snapshot > snapshot_;
 };
 
 struct snapshot_obj {
@@ -479,6 +448,8 @@ public:
 
     /// @brief Clean up resources on this repl dev.
     virtual void purge() = 0;
+
+    virtual std::shared_ptr<snapshot_context> deserialize_snapshot_context(sisl::io_blob_safe &snp_ctx) = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 

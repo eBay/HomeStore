@@ -58,6 +58,10 @@ public:
     bool is_ready_for_traffic() const override { return true; }
     void purge() override {}
 
+    std::shared_ptr<snapshot_context> deserialize_snapshot_context(sisl::io_blob_safe &snp_ctx) override {
+        return nullptr;
+    }
+
     uuid_t group_id() const override { return m_group_id; }
 
     repl_lsn_t get_last_commit_lsn() const override { return 0; }
