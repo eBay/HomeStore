@@ -20,6 +20,7 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <boost/uuid/uuid_hash.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/fds/utils.hpp>
