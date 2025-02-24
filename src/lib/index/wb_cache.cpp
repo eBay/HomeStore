@@ -312,11 +312,10 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
     // log new nodes and freed nodes and parent and child
     static uint32_t txn_id = 0;
     static int last_cp_id = -2;
-    static std::string txn = "";
+    std::string txn = "";
     if (last_cp_id != icp_ctx->id()) {
         last_cp_id = icp_ctx->id();
         txn_id = 0;
-        txn = "";
     }
 
     if (new_node_bufs.empty() && freed_node_bufs.empty()) {

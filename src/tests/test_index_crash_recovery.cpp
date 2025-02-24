@@ -728,6 +728,148 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     }
 }
 
+TYPED_TEST(IndexCrashTest, long_running_remove_crash) {
+
+    // Define the lambda function
+    auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    auto const rounds = SISL_OPTIONS["num_rounds"].as< uint32_t >();
+    auto const num_entries_per_rounds = SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >();
+    bool load_mode = SISL_OPTIONS.count("load_from_file");
+    bool save_mode = SISL_OPTIONS.count("save_to_file");
+    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
+    vector< std::string > flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"/*,
+                                   "crash_flush_on_freed_child"*/};
+
+    std::string flip = "";
+    OperationList operations;
+    auto m_start_time = Clock::now();
+    auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
+    double elapsed_time, progress_percent, last_progress_time = 0;
+    bool renew_btree_after_crash = false;
+    auto cur_flip_idx = 0;
+    std::uniform_int_distribution<> dis(1, 100);
+    int flip_percentage = 90; // Set the desired percentage here
+    bool normal_execution = true;
+    bool clean_shutdown = true;
+    // if it is safe then delete all previous save files
+    if (save_mode) {
+        std::filesystem::remove_all("/tmp/operations_*.txt");
+        std::filesystem::remove_all("/tmp/flips_history.txt");
+    }
+    // init tree
+    LOGINFO("Step 0: Fill up the tree with {} entries", num_entries);
+    if (load_mode) {
+        operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
+    } else {
+        operations = generator.generateOperations(num_entries, true /* reset */);
+        if (save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
+    }
+    auto opstr = SequenceGenerator::printOperations(operations);
+    LOGINFO("Lets before crash print operations\n{}", opstr);
+
+    for (auto [k, _] : operations) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    generator.setPutFrequency(0);
+    generator.setRemoveFrequency(100);
+
+    // Trigger the cp to make sure middle part is successful
+    LOGINFO("Step 0-1: Flush all the entries so far");
+    test_common::HSTestHelper::trigger_cp(true);
+    this->get_all();
+    this->m_shadow_map.save(this->m_shadow_filename);
+    // this->print_keys("reapply: after preload");
+    this->visualize_keys("tree_after_preload.dot");
+
+    for (uint32_t round = 1;
+         round <= rounds && !time_to_stop() && this->tree_key_count() > num_entries_per_rounds; round++) {
+        LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, rounds);
+        bool print_time = false;
+        elapsed_time = get_elapsed_time_sec(m_start_time);
+        if (load_mode) {
+            std::ifstream file("/tmp/flips_history.txt");
+            std::string line;
+            bool found = false;
+            for (uint32_t i = 0; i < round && std::getline(file, line); i++) {
+                if (i == round - 1) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found && !line.empty()) {
+                if (line == "normal") {
+                    normal_execution = true;
+                } else {
+                    normal_execution = false;
+                    flip = line;
+                    LOGINFO("Step 1-{}: Set flag {}", round, flip);
+                    this->set_basic_flip(flip, 1, 100);
+                }
+            }
+            file.close();
+        } else {
+            if (dis(g_re) <= flip_percentage) {
+                flip = flips[cur_flip_idx++ % flips.size()];
+                LOGINFO("Step 1-{}: Set flag {}", round, flip);
+                this->set_basic_flip(flip, 1, 100);
+                normal_execution = false;
+            } else {
+                normal_execution = true;
+                LOGINFO("Step 1-{}: No flip set", round);
+            }
+            if (save_mode) {
+                // save the filp name to a file for later use
+                std::ofstream file("/tmp/flips_history.txt", std::ios::app);
+                if (file.is_open()) { file << (normal_execution ? "normal" : flip) << "\n"; }
+                file.close();
+            }
+        }
+        if (load_mode) {
+            operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
+        } else {
+            operations = generator.generateOperations(num_entries_per_rounds, renew_btree_after_crash /* reset */);
+            if (save_mode) {
+                SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
+            }
+        }
+        LOGINFO("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
+        for (auto [k, _] : operations) {
+            this->remove_one(k, true /* expect_success */);
+            if (!time_to_stop()) {
+                static bool print_alert = false;
+                if (print_alert) {
+                    LOGINFO("It is time to stop but let's finish this round and then stop!");
+                    print_alert = false;
+                }
+            }
+        }
+        if (normal_execution) {
+            if (clean_shutdown) {
+                this->m_shadow_map.save(this->m_shadow_filename);
+                this->restart_homestore();
+            } else {
+                test_common::HSTestHelper::trigger_cp(true);
+                this->get_all();
+            }
+        } else {
+            this->crash_and_recover(operations, fmt::format("long_tree_{}", round));
+        }
+        if (elapsed_time - last_progress_time > 30) {
+            last_progress_time = elapsed_time;
+            print_time = true;
+        }
+        if (print_time) {
+            LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
+                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
+                    round, rounds, round * 100.0 / rounds, elapsed_time, this->m_run_time,
+                    elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
+                    this->tree_key_count() * 100.0 / num_entries);
+        }
+        // this->print_keys(fmt::format("reapply: after round {}", round));
+        if (renew_btree_after_crash) { this->reset_btree(); };
+    }
+}
+
 // Basic reverse and forward order remove with different flip points
 TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
     vector< std::string > flip_points = {
