@@ -99,7 +99,8 @@ void DeviceManager::format_devices() {
     ++m_first_blk_hdr.gen_number;
     m_first_blk_hdr.version = first_block_header::CURRENT_SUPERBLOCK_VERSION;
     std::strncpy(m_first_blk_hdr.product_name, first_block_header::PRODUCT_NAME,
-                 first_block_header::s_product_name_size);
+                 first_block_header::s_product_name_size - 1);
+    m_first_blk_hdr.product_name[first_block_header::s_product_name_size - 1] = '\0';
     m_first_blk_hdr.num_pdevs = uint32_cast(m_dev_infos.size());
     m_first_blk_hdr.max_vdevs = hs_super_blk::MAX_VDEVS_IN_SYSTEM;
     m_first_blk_hdr.max_system_chunks = hs_super_blk::MAX_CHUNKS_IN_SYSTEM;

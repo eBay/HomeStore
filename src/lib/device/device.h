@@ -36,6 +36,7 @@ VENUM(vdev_multi_pdev_opts_t, uint8_t, // Indicates the style of vdev when multi
 struct vdev_info {
     static constexpr size_t size = 512;
     static constexpr size_t user_private_size = 256;
+    static constexpr size_t max_name_len = 64;
 
     uint64_t vdev_size{0};                     // 0: Size of the vdev
     uint32_t vdev_id{0};                       // 8: Id for this vdev. It is unique per homestore instance
@@ -48,7 +49,7 @@ struct vdev_info {
     uint8_t failed{0};                         // 30: set to true if disk is replaced
     uint8_t hs_dev_type{0};                    // 31: PDev dev type (as in fast or data)
     uint8_t multi_pdev_choice{0};              // 32: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
-    char name[64];                             // 33: Name of the vdev
+    char name[max_name_len];                   // 33: Name of the vdev
     uint16_t checksum{0};                      // 97: Checksum of this entire Block
     uint8_t alloc_type;                        // 98: Allocator type of this vdev
     uint8_t chunk_sel_type;                    // 99: Chunk Selector type of this vdev_id
@@ -59,7 +60,10 @@ struct vdev_info {
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return vdev_size; }
 
-    void set_name(const std::string& n) { std::strncpy(charptr_cast(name), n.c_str(), 63); }
+    void set_name(const std::string& n) {
+        std::strncpy(charptr_cast(name), n.c_str(), max_name_len - 1);
+        name[max_name_len - 1] = '\0';
+    }
     std::string get_name() const { return std::string{c_charptr_cast(name)}; }
 
     void set_allocated() { slot_allocated = s_cast< uint8_t >(0x01); };
