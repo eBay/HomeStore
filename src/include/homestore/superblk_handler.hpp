@@ -80,6 +80,11 @@ public:
         } else {
             m_raw_buf = sisl::make_byte_array(size, 0, sisl::buftag::metablk);
         }
+        // Initialize m_raw_buf with zero to prevent data errors during partial writes.
+        // This ensures that any uninitialized memory does not affect the data being written or loaded.
+        // For example, if a variable in superblk is `char name[50]` and the real name length is 10,
+        // uninitialized memory may cause the name read from the superblk to be longer than 10 characters.
+        std::memset(m_raw_buf->bytes(), 0, m_raw_buf->size());
         m_sb = new (m_raw_buf->bytes()) T();
         return m_sb;
     }
