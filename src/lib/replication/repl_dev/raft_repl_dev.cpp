@@ -1117,10 +1117,14 @@ replica_id_t RaftReplDev::get_leader_id() const {
 std::vector< peer_info > RaftReplDev::get_replication_status() const {
     std::vector< peer_info > pi;
     auto rep_status = m_repl_svc_ctx->get_raft_status();
+    auto srv_cfg = raft_server()->get_config()->get_server(raft_server()->get_id());
     for (auto const& pinfo : rep_status) {
-        pi.emplace_back(peer_info{.id_ = boost::lexical_cast< replica_id_t >(pinfo.id_),
-                                  .replication_idx_ = pinfo.last_log_idx_,
-                                  .last_succ_resp_us_ = pinfo.last_succ_resp_us_});
+        auto peer = peer_info{.id_ = boost::lexical_cast< replica_id_t >(pinfo.id_),
+                              .replication_idx_ = pinfo.last_log_idx_,
+                              .last_succ_resp_us_ = pinfo.last_succ_resp_us_};
+        if (pinfo.id_ == my_replica_id_str()) { peer.is_new_joiner = srv_cfg->is_new_joiner(); }
+
+        pi.emplace_back(peer);
     }
     return pi;
 }
@@ -1152,7 +1156,7 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
 uint32_t RaftReplDev::get_blk_size() const { return data_service().get_blk_size(); }
 
 nuraft_mesg::repl_service_ctx* RaftReplDev::group_msg_service() { return m_repl_svc_ctx.get(); }
-nuraft::raft_server* RaftReplDev::raft_server() { return m_repl_svc_ctx->_server; }
+nuraft::raft_server* RaftReplDev::raft_server() const { return m_repl_svc_ctx->_server; }
 
 ///////////////////////////////////  Config Serialize/Deserialize Section ////////////////////////////////////
 static nlohmann::json serialize_server_config(std::list< nuraft::ptr< nuraft::srv_config > > const& server_list) {
