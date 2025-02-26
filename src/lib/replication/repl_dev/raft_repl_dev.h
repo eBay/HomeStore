@@ -243,7 +243,7 @@ public:
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx *group_msg_service();
 
-    nuraft::raft_server* raft_server();
+    nuraft::raft_server* raft_server() const;
     RaftReplDevMetrics& metrics() { return m_metrics; }
 
     //////////////// Methods needed for other Raft classes to access /////////////////
