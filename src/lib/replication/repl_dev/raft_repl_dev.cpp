@@ -1238,7 +1238,10 @@ void RaftReplDev::save_config(const nuraft::cluster_config& config) {
 
 void RaftReplDev::save_state(const nuraft::srv_state& state) {
     std::unique_lock lg{m_config_mtx};
-    (*m_raft_config_sb)["state"] = nlohmann::json{{"term", state.get_term()}, {"voted_for", state.get_voted_for()}};
+    (*m_raft_config_sb)["state"] = nlohmann::json{
+        {"term", state.get_term()}, {"voted_for", state.get_voted_for()},
+        {"election_timer_allowed", state.is_election_timer_allowed()}, {"catching_up", state.is_catching_up()}
+    };
     m_raft_config_sb.write();
     RD_LOGI("Saved state {}", (*m_raft_config_sb)["state"].dump());
 }
@@ -1248,11 +1251,17 @@ nuraft::ptr< nuraft::srv_state > RaftReplDev::read_state() {
     auto& js = *m_raft_config_sb;
     auto state = nuraft::cs_new< nuraft::srv_state >();
     if (js["state"].empty()) {
-        js["state"] = nlohmann::json{{"term", state->get_term()}, {"voted_for", state->get_voted_for()}};
+        js["state"] = nlohmann::json{
+            {"term", state->get_term()}, {"voted_for", state->get_voted_for()},
+            {"election_timer_allowed", state->is_election_timer_allowed()},
+            {"catching_up", state->is_catching_up()}
+        };
     } else {
         try {
             state->set_term(uint64_cast(js["state"]["term"]));
             state->set_voted_for(static_cast< int >(js["state"]["voted_for"]));
+            state->allow_election_timer(static_cast<bool>(js["state"]["election_timer_allowed"]));
+            state->set_catching_up(static_cast<bool>(js["state"]["catching_up"]));
         } catch (std::out_of_range const&) {
             LOGWARN("State data was not in the expected format [group_id={}]!", m_group_id)
         }
