@@ -78,6 +78,7 @@ struct peer_info {
     uint64_t replication_idx_;
     // The elapsed time since the last successful response from this peer, set to 0 on leader
     uint64_t last_succ_resp_us_;
+    bool is_new_joiner{false};
 };
 
 struct replica_member_info {
