@@ -115,22 +115,22 @@ struct ReplDevCPContext {
 
 class nuraft_snapshot_context : public snapshot_context {
 public:
-    nuraft_snapshot_context(nuraft::snapshot &snp) : snapshot_context(snp.get_last_log_idx()) {
+    nuraft_snapshot_context(nuraft::snapshot& snp) : snapshot_context(snp.get_last_log_idx()) {
         auto snp_buf = snp.serialize();
         snapshot_ = nuraft::snapshot::deserialize(*snp_buf);
     }
 
-    nuraft_snapshot_context(sisl::io_blob_safe const &snp_ctx) : snapshot_context(0) { deserialize(snp_ctx); }
+    nuraft_snapshot_context(sisl::io_blob_safe const& snp_ctx) : snapshot_context(0) { deserialize(snp_ctx); }
 
     sisl::io_blob_safe serialize() override {
         // Dump the context from nuraft buffer to the io blob.
         auto snp_buf = snapshot_->serialize();
-        sisl::io_blob_safe blob{s_cast<size_t>(snp_buf->size())};
+        sisl::io_blob_safe blob{s_cast< size_t >(snp_buf->size())};
         std::memcpy(blob.bytes(), snp_buf->data_begin(), snp_buf->size());
         return blob;
     }
 
-    void deserialize(const sisl::io_blob_safe &snp_ctx) {
+    void deserialize(const sisl::io_blob_safe& snp_ctx) {
         // Load the context from the io blob to nuraft buffer.
         auto snp_buf = nuraft::buffer::alloc(snp_ctx.size());
         snp_buf->put_raw(snp_ctx.cbytes(), snp_ctx.size());
@@ -139,10 +139,10 @@ public:
         lsn_ = snapshot_->get_last_log_idx();
     }
 
-    nuraft::ptr<nuraft::snapshot> nuraft_snapshot() { return snapshot_; }
+    nuraft::ptr< nuraft::snapshot > nuraft_snapshot() { return snapshot_; }
 
 private:
-    nuraft::ptr<nuraft::snapshot> snapshot_;
+    nuraft::ptr< nuraft::snapshot > snapshot_;
 };
 
 class RaftReplDev : public ReplDev,
@@ -190,6 +190,9 @@ private:
     static std::atomic< uint64_t > s_next_group_ordinal;
     bool m_log_store_replay_done{false};
 
+    fetch_data_handler_t m_fetch_data_handler{nullptr};
+    no_space_left_handler_t m_no_space_left_handler{nullptr};
+
 public:
     friend class RaftStateMachine;
 
@@ -236,12 +239,14 @@ public:
         m_data_journal->purge_all_logs();
     }
 
-    std::shared_ptr<snapshot_context> deserialize_snapshot_context(sisl::io_blob_safe &snp_ctx) override {
-        return std::make_shared<nuraft_snapshot_context>(snp_ctx);
+    std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
+        return std::make_shared< nuraft_snapshot_context >(snp_ctx);
     }
 
+    void attach_listener(shared< ReplDevListener > listener) override;
+
     //////////////// Accessor/shortcut methods ///////////////////////
-    nuraft_mesg::repl_service_ctx *group_msg_service();
+    nuraft_mesg::repl_service_ctx* group_msg_service();
 
     nuraft::raft_server* raft_server();
     RaftReplDevMetrics& metrics() { return m_metrics; }
