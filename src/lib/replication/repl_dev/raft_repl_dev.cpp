@@ -784,6 +784,12 @@ void RaftReplDev::attach_listener(shared< ReplDevListener > listener) {
         reinterpret_cast< no_space_left_handler_t >(m_listener->get_event_handler(event_type_t::RD_NO_SPACE_LEFT));
 }
 
+void RaftReplDev::detach_listener() {
+    ReplDev::detach_listener();
+    m_fetch_data_handler = nullptr;
+    m_no_space_left_handler = nullptr;
+}
+
 void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
     if (!incoming_buf.cbytes()) {

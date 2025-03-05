@@ -244,6 +244,7 @@ public:
     }
 
     void attach_listener(shared< ReplDevListener > listener) override;
+    void detach_listener() override;
 
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();
