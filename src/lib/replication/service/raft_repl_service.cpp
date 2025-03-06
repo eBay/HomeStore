@@ -165,7 +165,7 @@ void RaftReplService::start() {
         if (auto listener = rdev->get_listener(); listener) {
             if (auto log_replay_done_handler = listener->get_event_handler(event_type_t::RD_LOG_REPLAY_DONE);
                 log_replay_done_handler) {
-                reinterpret_cast< log_replay_done_handler_t >(log_replay_done_handler)();
+                reinterpret_cast< log_replay_done_handler_t >(log_replay_done_handler)(rdev->group_id());
             }
         }
 

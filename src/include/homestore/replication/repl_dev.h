@@ -59,7 +59,7 @@ using fetch_data_handler_t = folly::Future< std::error_code > (*)(int64_t lsn, c
                                                                   std::vector< sisl::sg_list >& sgs_vec);
 using no_space_left_handler_t = folly::Future< folly::Unit > (*)(uint32_t pdev_id, chunk_num_t chunk_id);
 
-using log_replay_done_handler_t = void (*)();
+using log_replay_done_handler_t = void (*)(const group_id_t& group_id);
 
 // magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
 static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
