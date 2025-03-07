@@ -367,6 +367,27 @@ public:
     /// @brief Free up user-defined context inside the snapshot_obj that is allocated during read_snapshot_obj.
     virtual void free_user_snp_ctx(void*& user_snp_ctx) = 0;
 
+    /// @brief ask upper layer to decide which data should be returned.
+    // @param header - header of the log entry.
+    // @param sgs_vec - vector of sgs to be filled with data
+    // @param lsn - lsn of the log entry
+    virtual folly::Future< std::error_code > on_fetch_data(const int64_t lsn, const sisl::blob& header,
+                                                           std::vector< sisl::sg_list >& sgs_vec) {
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    }
+
+    /// @brief ask upper layer to handle no_space_left event
+    virtual folly::Future< std::error_code > on_no_space_left(uint32_t pdev_id, chunk_num_t chunk_id) {
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    }
+
+    /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
+    virtual void on_log_replay_done(const group_id_t& group_id){};
+
+    /// @brief decide whether a particular type of event need to be handled by upper layer
+    // TODD: if we have many events to handle, we can all the judgement in one function
+    virtual bool need_to_handle_fetch_data() { return false; }
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };
@@ -449,7 +470,7 @@ public:
     /// @brief Clean up resources on this repl dev.
     virtual void purge() = 0;
 
-    virtual std::shared_ptr<snapshot_context> deserialize_snapshot_context(sisl::io_blob_safe &snp_ctx) = 0;
+    virtual std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 
@@ -459,6 +480,8 @@ public:
             m_listener.reset();
         }
     }
+
+    virtual shared< ReplDevListener > get_listener() { return m_listener; }
 
     // we have no shutdown for repl_dev, since shutdown repl_dev is done by repl_service
     void stop() {

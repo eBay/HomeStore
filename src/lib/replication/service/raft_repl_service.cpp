@@ -160,6 +160,10 @@ void RaftReplService::start() {
     for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         rdev->wait_for_logstore_ready();
+
+        // upper layer can register a callback to be notified when log replay is done.
+        if (auto listener = rdev->get_listener(); listener) listener->on_log_replay_done(rdev->group_id());
+
         if (!rdev->join_group()) {
             HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
             it = m_rd_map.erase(it);
