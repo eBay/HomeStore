@@ -190,9 +190,6 @@ private:
     static std::atomic< uint64_t > s_next_group_ordinal;
     bool m_log_store_replay_done{false};
 
-    fetch_data_handler_t m_fetch_data_handler{nullptr};
-    no_space_left_handler_t m_no_space_left_handler{nullptr};
-
 public:
     friend class RaftStateMachine;
 
@@ -242,9 +239,6 @@ public:
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
     }
-
-    void attach_listener(shared< ReplDevListener > listener) override;
-    void detach_listener() override;
 
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();

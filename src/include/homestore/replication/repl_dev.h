@@ -47,20 +47,6 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_REPLACE = 3, // Control message to replace a member
 )
 
-// some events need to be handled by upper layer
-VENUM(event_type_t, uint8_t,
-      RD_FETCH_DATA = 0,      // fetch data
-      RD_NO_SPACE_LEFT = 1,   // no space left error
-      RD_LOG_REPLAY_DONE = 2, // log replay done
-                              // add more if needed for other applications.
-)
-
-using fetch_data_handler_t = folly::Future< std::error_code > (*)(int64_t lsn, const sisl::blob& header,
-                                                                  std::vector< sisl::sg_list >& sgs_vec);
-using no_space_left_handler_t = folly::Future< folly::Unit > (*)(uint32_t pdev_id, chunk_num_t chunk_id);
-
-using log_replay_done_handler_t = void (*)(const group_id_t& group_id);
-
 // magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
 static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
 static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
@@ -381,9 +367,26 @@ public:
     /// @brief Free up user-defined context inside the snapshot_obj that is allocated during read_snapshot_obj.
     virtual void free_user_snp_ctx(void*& user_snp_ctx) = 0;
 
-    /// @brief some repl_dev event might be handle by upper layer. This is where homestore gets the callbacks for these
-    /// events.
-    virtual void* get_event_handler(event_type_t event_type) { return nullptr; }
+    /// @brief ask upper layer to decide which data should be returned.
+    // @param header - header of the log entry.
+    // @param sgs_vec - vector of sgs to be filled with data
+    // @param lsn - lsn of the log entry
+    virtual folly::Future< std::error_code > on_fetch_data(const int64_t lsn, const sisl::blob& header,
+                                                           std::vector< sisl::sg_list >& sgs_vec) {
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    }
+
+    /// @brief ask upper layer to handle no_space_left event
+    virtual folly::Future< std::error_code > on_no_space_left(uint32_t pdev_id, chunk_num_t chunk_id) {
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    }
+
+    /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
+    virtual void on_log_replay_done(const group_id_t& group_id){};
+
+    /// @brief decide whether a particular type of event need to be handled by upper layer
+    // TODD: if we have many events to handle, we can all the judgement in one function
+    virtual bool need_to_handle_fetch_data() { return false; }
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

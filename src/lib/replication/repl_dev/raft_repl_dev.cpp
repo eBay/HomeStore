@@ -782,22 +782,6 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
         });
 }
 
-void RaftReplDev::attach_listener(shared< ReplDevListener > listener) {
-    ReplDev::attach_listener(std::move(listener));
-
-    m_fetch_data_handler =
-        reinterpret_cast< fetch_data_handler_t >(m_listener->get_event_handler(event_type_t::RD_FETCH_DATA));
-
-    m_no_space_left_handler =
-        reinterpret_cast< no_space_left_handler_t >(m_listener->get_event_handler(event_type_t::RD_NO_SPACE_LEFT));
-}
-
-void RaftReplDev::detach_listener() {
-    ReplDev::detach_listener();
-    m_fetch_data_handler = nullptr;
-    m_no_space_left_handler = nullptr;
-}
-
 void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
     if (!incoming_buf.cbytes()) {
@@ -818,16 +802,21 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& lsn = req->lsn();
         auto const& originator = req->blkid_originator();
 
-        if (originator != server_id())
+        if (originator != server_id()) {
             RD_LOGD("non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}", req->dsn(), lsn,
                     originator, server_id());
+        } else {
+            RD_LOGD("Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
+        }
 
-        if (m_fetch_data_handler) {
+        if (m_listener->need_to_handle_fetch_data()) {
             auto const& header = req->user_header();
             sisl::blob user_header = sisl::blob{header->Data(), header->size()};
-            RD_LOGD("Data Channel: FetchData handled by application: dsn={} lsn={}", req->dsn(), lsn);
-            futs.emplace_back(m_fetch_data_handler(lsn, user_header, sgs_vec));
+            RD_LOGD("Data Channel: FetchData received handled by upper layer");
+
+            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, sgs_vec)));
         } else {
+            // add the default implementation to on_fetch_data will bring a lot of compling issues
             auto const& remote_blkid = req->remote_blkid();
             // fetch data based on the remote_blkid
             // We are the originator of the blkid, read data locally;
@@ -836,8 +825,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             // convert remote_blkid serialized data to local blkid
             local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
 
-            RD_LOGD("Data Channel: FetchData received: dsn={} lsn={} my_blkid={}", req->dsn(), lsn,
-                    local_blkid.to_string());
+            RD_LOGD("Data Channel: FetchData received: my_blkid={}", req->dsn(), lsn, local_blkid.to_string());
 
             // prepare the sgs data buffer to read into;
             auto const total_size = local_blkid.blk_count() * get_blk_size();
