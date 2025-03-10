@@ -33,8 +33,8 @@ TEST_F(RaftReplDevTest, Write_Duplicated_Data) {
         stored_key = dbs_[0]->inmem_db_.cbegin()->first;
         ASSERT_EQ(id, stored_key.id_);
     } else {
-        LOGINFO("I am not leader, leader_uuid={} my_uuid={}, do nothing",
-                boost::uuids::to_string(leader_uuid), boost::uuids::to_string(g_helper->my_replica_id()));
+        LOGINFO("I am not leader, leader_uuid={} my_uuid={}, do nothing", boost::uuids::to_string(leader_uuid),
+                boost::uuids::to_string(g_helper->my_replica_id()));
     }
     wait_for_commits(total_writes);
 
@@ -45,12 +45,12 @@ TEST_F(RaftReplDevTest, Write_Duplicated_Data) {
     if duplication found in leader proposal, reject it;
     if duplication found in the followers, skip it.
     */
-    //1. write the same data again on leader, should fail
+    // 1. write the same data again on leader, should fail
     if (leader_uuid == g_helper->my_replica_id()) {
         auto err = this->write_with_id(id, true /* wait_for_commit */);
         ASSERT_EQ(ReplServiceError::DATA_DUPLICATED, err);
 
-        //2. delete it from the db to simulate duplication in followers(skip the duplication check in leader side)
+        // 2. delete it from the db to simulate duplication in followers(skip the duplication check in leader side)
         dbs_[0]->inmem_db_.erase(stored_key);
         LOGINFO("data with id={} has been deleted from db", id);
         err = this->write_with_id(id, true /* wait_for_commit */);
@@ -109,6 +109,24 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
 
     g_helper->sync_for_cleanup_start();
 }
+
+TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
+    g_helper->set_basic_flip("disable_leader_push_data");
+    LOGINFO("Homestore replica={} setup completed, all the push_data from leader are disabled",
+            g_helper->replica_num());
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    this->write_on_leader(100, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+
+    g_helper->sync_for_cleanup_start();
+}
+
 #endif
 
 // do some io before restart;
