@@ -553,21 +553,34 @@ void RaftReplService::gc_repl_reqs() {
 }
 
 void RaftReplService::gc_repl_devs() {
-    std::unique_lock lg(m_rd_map_mtx);
-    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
-        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
-        if (rdev->is_destroy_pending() &&
-            (get_elapsed_time_sec(rdev->destroyed_time()) >=
-             HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec))) {
-            LOGINFOMOD(replication,
-                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now",
-                       rdev->group_id());
-            m_msg_mgr->leave_group(rdev->group_id());
-            it = m_rd_map.erase(it);
-        } else {
-            ++it;
+    incr_pending_request_num();
+    std::vector< group_id_t > groups_to_leave;
+    {
+        std::shared_lock lg(m_rd_map_mtx);
+        for (auto it = m_rd_map.begin(); it != m_rd_map.end(); ++it) {
+            auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+            if (rdev->is_destroy_pending() &&
+                (get_elapsed_time_sec(rdev->destroyed_time()) >=
+                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec))) {
+                LOGINFOMOD(replication,
+                           "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now",
+                           rdev->group_id());
+                groups_to_leave.push_back(rdev->group_id());
+            }
         }
     }
+
+    // Call leave_group to shut down the raft server and destroy all resources on the repl dev.
+    // This operation may require acquiring the m_rd_map_mtx lock for some steps (e.g., trigger cp flush).
+    // Therefore, we perform it outside the lock scope and then remove group from m_rd_map.
+    for (const auto& group_id : groups_to_leave) {
+        m_msg_mgr->leave_group(group_id);
+        {
+            std::unique_lock lg(m_rd_map_mtx);
+            m_rd_map.erase(group_id);
+        }
+    }
+    decr_pending_request_num();
 }
 
 void RaftReplService::flush_durable_commit_lsn() {
