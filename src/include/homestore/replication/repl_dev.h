@@ -385,7 +385,7 @@ public:
     virtual void on_log_replay_done(const group_id_t& group_id){};
 
     /// @brief decide whether a particular type of event need to be handled by upper layer
-    // TODD: if we have many events to handle, we can all the judgement in one function
+    // TODD: if we have many events to handle, we can put all the judgement in one function
     virtual bool need_to_handle_fetch_data() { return false; }
 
 private:
