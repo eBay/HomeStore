@@ -369,9 +369,11 @@ public:
 
     /// @brief ask upper layer to decide which data should be returned.
     // @param header - header of the log entry.
+    // @param blkid - original blkid of the log entry
     // @param sgs_vec - vector of sgs to be filled with data
     // @param lsn - lsn of the log entry
     virtual folly::Future< std::error_code > on_fetch_data(const int64_t lsn, const sisl::blob& header,
+                                                           const MultiBlkId& blkid,
                                                            std::vector< sisl::sg_list >& sgs_vec) {
         return folly::makeFuture< std::error_code >(std::error_code{});
     }

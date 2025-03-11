@@ -801,6 +801,9 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     for (auto const& req : *(fetch_req->request()->entries())) {
         auto const& lsn = req->lsn();
         auto const& originator = req->blkid_originator();
+        auto const& remote_blkid = req->remote_blkid();
+        MultiBlkId local_blkid;
+        local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
 
         if (originator != server_id()) {
             RD_LOGD("non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}", req->dsn(), lsn,
@@ -812,20 +815,12 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         if (m_listener->need_to_handle_fetch_data()) {
             auto const& header = req->user_header();
             sisl::blob user_header = sisl::blob{header->Data(), header->size()};
-            RD_LOGD("Data Channel: FetchData received handled by upper layer");
+            RD_LOGD("Data Channel: FetchData handled by upper layer, my_blkid={}", local_blkid.to_string());
 
-            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, sgs_vec)));
+            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs_vec)));
         } else {
-            // add the default implementation to on_fetch_data will bring a lot of compling issues
-            auto const& remote_blkid = req->remote_blkid();
-            // fetch data based on the remote_blkid
-            // We are the originator of the blkid, read data locally;
-            MultiBlkId local_blkid;
-
-            // convert remote_blkid serialized data to local blkid
-            local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
-
-            RD_LOGD("Data Channel: FetchData received: my_blkid={}", req->dsn(), lsn, local_blkid.to_string());
+            // add the default implementation to on_fetch_data will bring a lot of compiling issues
+            RD_LOGD("Data Channel: FetchData received: my_blkid={}", local_blkid.to_string());
 
             // prepare the sgs data buffer to read into;
             auto const total_size = local_blkid.blk_count() * get_blk_size();

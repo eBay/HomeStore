@@ -158,8 +158,8 @@ void RaftReplService::start() {
 
     // Step 6: Iterate all the repl devs and ask each one of them to join the raft group concurrently.
     std::vector< std::future< bool > > join_group_futures;
-    for (const auto& [_, repl_dev] : m_rd_map)
-        join_group_futures.emplace_back(std::async(std::launch::async, [this, repl_dev]() {
+    for (const auto& [_, repl_dev] : m_rd_map) {
+        join_group_futures.emplace_back(std::async(std::launch::async, [&repl_dev]() {
             auto rdev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev);
             rdev->wait_for_logstore_ready();
 
@@ -167,9 +167,11 @@ void RaftReplService::start() {
             if (auto listener = rdev->get_listener(); listener) listener->on_log_replay_done(rdev->group_id());
             return rdev->join_group();
         }));
+    }
 
-    for (auto& future : join_group_futures)
+    for (auto& future : join_group_futures) {
         if (!future.get()) HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
+    }
 
     // Step 7: Register to CPManager to ensure we can flush the superblk.
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< RaftReplServiceCPHandler >());
