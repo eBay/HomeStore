@@ -804,6 +804,15 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& remote_blkid = req->remote_blkid();
         MultiBlkId local_blkid;
         local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
+        // prepare the sgs data buffer to read into;
+        auto const total_size = local_blkid.blk_count() * get_blk_size();
+        sisl::sg_list sgs;
+        sgs.size = total_size;
+        sgs.iovs.emplace_back(
+            iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
+
+        // accumulate the sgs for later use (send back to the requester));
+        sgs_vec.push_back(sgs);
 
         if (originator != server_id()) {
             RD_LOGD("non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}", req->dsn(), lsn,
@@ -816,21 +825,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             auto const& header = req->user_header();
             sisl::blob user_header = sisl::blob{header->Data(), header->size()};
             RD_LOGD("Data Channel: FetchData handled by upper layer, my_blkid={}", local_blkid.to_string());
-
-            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs_vec)));
+            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
         } else {
             // add the default implementation to on_fetch_data will bring a lot of compiling issues
             RD_LOGD("Data Channel: FetchData received: my_blkid={}", local_blkid.to_string());
-
-            // prepare the sgs data buffer to read into;
-            auto const total_size = local_blkid.blk_count() * get_blk_size();
-            sisl::sg_list sgs;
-            sgs.size = total_size;
-            sgs.iovs.emplace_back(
-                iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
-
-            // accumulate the sgs for later use (send back to the requester));
-            sgs_vec.push_back(sgs);
             futs.emplace_back(async_read(local_blkid, sgs, total_size));
         }
     }
