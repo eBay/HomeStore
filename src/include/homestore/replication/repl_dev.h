@@ -11,6 +11,7 @@
 #include <sisl/grpc/generic_service.hpp>
 #include <sisl/grpc/rpc_client.hpp>
 #include <homestore/replication/repl_decls.h>
+#include <homestore/blkdata_service.hpp>
 #include <libnuraft/snapshot.hxx>
 
 namespace nuraft {
@@ -374,7 +375,8 @@ public:
     // @param lsn - lsn of the log entry
     virtual folly::Future< std::error_code > on_fetch_data(const int64_t lsn, const sisl::blob& header,
                                                            const MultiBlkId& blkid, sisl::sg_list& sgs) {
-        return folly::makeFuture< std::error_code >(std::error_code{});
+        // default implementation is reading by blkid directly
+        return data_service().async_read(blkid, sgs, sgs.size);
     }
 
     /// @brief ask upper layer to handle no_space_left event
@@ -384,10 +386,6 @@ public:
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id){};
-
-    /// @brief decide whether a particular type of event need to be handled by upper layer
-    // TODD: if we have many events to handle, we can put all the judgement in one function
-    virtual bool need_to_handle_fetch_data() { return false; }
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

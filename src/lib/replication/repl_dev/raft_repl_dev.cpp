@@ -821,16 +821,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             RD_LOGD("Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
         }
 
-        if (m_listener->need_to_handle_fetch_data()) {
-            auto const& header = req->user_header();
-            sisl::blob user_header = sisl::blob{header->Data(), header->size()};
-            RD_LOGD("Data Channel: FetchData handled by upper layer, my_blkid={}", local_blkid.to_string());
-            futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
-        } else {
-            // add the default implementation to on_fetch_data will bring a lot of compiling issues
-            RD_LOGD("Data Channel: FetchData received: my_blkid={}", local_blkid.to_string());
-            futs.emplace_back(async_read(local_blkid, sgs, total_size));
-        }
+        auto const& header = req->user_header();
+        sisl::blob user_header = sisl::blob{header->Data(), header->size()};
+        RD_LOGD("Data Channel: FetchData handled, my_blkid={}", local_blkid.to_string());
+        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
     }
 
     folly::collectAllUnsafe(futs).thenValue(
