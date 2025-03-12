@@ -335,7 +335,15 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             handle_error(rreq, ReplServiceError::DATA_DUPLICATED);
             return;
         }
+
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("disable_leader_push_data")) {
+            RD_LOGD("Simulating push data failure, so that all the follower will have to fetch data");
+        } else
+            push_data_to_all_followers(rreq, data);
+#else
         push_data_to_all_followers(rreq, data);
+#endif
 
         COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
         COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
@@ -794,30 +802,8 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& lsn = req->lsn();
         auto const& originator = req->blkid_originator();
         auto const& remote_blkid = req->remote_blkid();
-
-        // Edit this check if in the future we want to fetch from non-originator;
-        if (originator != server_id()) {
-            auto const error_msg =
-                fmt::format("Did not expect to receive fetch data from "
-                            "remote when I am not the originator of this request, originator={}, my_server_id={}",
-                            originator, server_id());
-            RD_LOGW("{}", error_msg);
-            auto status = ::grpc::Status(::grpc::INVALID_ARGUMENT, error_msg);
-            rpc_data->set_status(status);
-            rpc_data->send_response();
-            return;
-        }
-
-        // fetch data based on the remote_blkid
-        // We are the originator of the blkid, read data locally;
         MultiBlkId local_blkid;
-
-        // convert remote_blkid serialized data to local blkid
         local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
-
-        RD_LOGD("Data Channel: FetchData received: dsn={} lsn={} my_blkid={}", req->dsn(), lsn,
-                local_blkid.to_string());
-
         // prepare the sgs data buffer to read into;
         auto const total_size = local_blkid.blk_count() * get_blk_size();
         sisl::sg_list sgs;
@@ -827,7 +813,18 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
         // accumulate the sgs for later use (send back to the requester));
         sgs_vec.push_back(sgs);
-        futs.emplace_back(async_read(local_blkid, sgs, total_size));
+
+        if (originator != server_id()) {
+            RD_LOGD("non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}", req->dsn(), lsn,
+                    originator, server_id());
+        } else {
+            RD_LOGD("Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
+        }
+
+        auto const& header = req->user_header();
+        sisl::blob user_header = sisl::blob{header->Data(), header->size()};
+        RD_LOGD("Data Channel: FetchData handled, my_blkid={}", local_blkid.to_string());
+        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
     }
 
     folly::collectAllUnsafe(futs).thenValue(
@@ -1238,10 +1235,10 @@ void RaftReplDev::save_config(const nuraft::cluster_config& config) {
 
 void RaftReplDev::save_state(const nuraft::srv_state& state) {
     std::unique_lock lg{m_config_mtx};
-    (*m_raft_config_sb)["state"] = nlohmann::json{
-        {"term", state.get_term()}, {"voted_for", state.get_voted_for()},
-        {"election_timer_allowed", state.is_election_timer_allowed()}, {"catching_up", state.is_catching_up()}
-    };
+    (*m_raft_config_sb)["state"] = nlohmann::json{{"term", state.get_term()},
+                                                  {"voted_for", state.get_voted_for()},
+                                                  {"election_timer_allowed", state.is_election_timer_allowed()},
+                                                  {"catching_up", state.is_catching_up()}};
     m_raft_config_sb.write();
     RD_LOGI("Saved state {}", (*m_raft_config_sb)["state"].dump());
 }
@@ -1251,17 +1248,16 @@ nuraft::ptr< nuraft::srv_state > RaftReplDev::read_state() {
     auto& js = *m_raft_config_sb;
     auto state = nuraft::cs_new< nuraft::srv_state >();
     if (js["state"].empty()) {
-        js["state"] = nlohmann::json{
-            {"term", state->get_term()}, {"voted_for", state->get_voted_for()},
-            {"election_timer_allowed", state->is_election_timer_allowed()},
-            {"catching_up", state->is_catching_up()}
-        };
+        js["state"] = nlohmann::json{{"term", state->get_term()},
+                                     {"voted_for", state->get_voted_for()},
+                                     {"election_timer_allowed", state->is_election_timer_allowed()},
+                                     {"catching_up", state->is_catching_up()}};
     } else {
         try {
             state->set_term(uint64_cast(js["state"]["term"]));
             state->set_voted_for(static_cast< int >(js["state"]["voted_for"]));
-            state->allow_election_timer(static_cast<bool>(js["state"]["election_timer_allowed"]));
-            state->set_catching_up(static_cast<bool>(js["state"]["catching_up"]));
+            state->allow_election_timer(static_cast< bool >(js["state"]["election_timer_allowed"]));
+            state->set_catching_up(static_cast< bool >(js["state"]["catching_up"]));
         } catch (std::out_of_range const&) {
             LOGWARN("State data was not in the expected format [group_id={}]!", m_group_id)
         }
