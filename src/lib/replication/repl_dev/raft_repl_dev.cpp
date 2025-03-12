@@ -1283,6 +1283,8 @@ std::shared_ptr< nuraft::state_machine > RaftReplDev::get_state_machine() { retu
 
 void RaftReplDev::permanent_destroy() {
     RD_LOGI("Permanent destroy for raft repl dev group_id={}", group_id_str());
+    // let the listener know at first, so that they can cleanup persistent structures before raft repl dev is destroyed
+    m_listener->on_destroy(group_id());
     m_raft_config_sb.destroy();
     m_data_journal->remove_store();
     logstore_service().destroy_log_dev(m_data_journal->logdev_id());
@@ -1309,10 +1311,6 @@ void RaftReplDev::leave() {
     // We update that this repl_dev in destroyed state, actual clean up of resources happen in reaper thread later
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::DESTROYED; });
     m_destroyed_time = Clock::now();
-
-    // We let the listener know right away, so that they can cleanup persistent structures soonest. This will
-    // reduce the time window of leaked resources if any
-    m_listener->on_destroy(group_id());
 
     // Persist that destroy pending in superblk, so that in case of crash before cleanup of resources, it can be done
     // post restart.
