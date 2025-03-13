@@ -559,6 +559,13 @@ void RaftReplService::gc_repl_reqs() {
 
 void RaftReplService::gc_repl_devs() {
     incr_pending_request_num();
+    // Skip gc when raft repl service is stopping to avoid concurrency issues between repl_dev's stop and destroy ops.
+    if (is_stopping()) {
+        LOGINFOMOD(replication, "ReplSvc is stopping, skipping GC");
+        decr_pending_request_num();
+        return;
+    }
+
     std::vector< group_id_t > groups_to_leave;
     {
         std::shared_lock lg(m_rd_map_mtx);
