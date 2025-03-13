@@ -1409,6 +1409,11 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
 }
 
 void RaftReplDev::flush_durable_commit_lsn() {
+    if (is_destroyed()) {
+        RD_LOGI("Raft repl dev is destroyed, ignore flush durable commmit lsn");
+        return;
+    }
+
     auto const lsn = m_commit_upto_lsn.load();
     std::unique_lock lg{m_sb_mtx};
     m_rd_sb->durable_commit_lsn = lsn;
@@ -1417,6 +1422,11 @@ void RaftReplDev::flush_durable_commit_lsn() {
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
 void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
+    if (is_destroyed()) {
+        RD_LOGI("Raft repl dev is destroyed, ignore cp flush");
+        return;
+    }
+
     auto const lsn = ctx->cp_lsn;
     auto const clsn = ctx->compacted_to_lsn;
     auto const dsn = ctx->last_applied_dsn;
