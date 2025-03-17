@@ -452,6 +452,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         LOGINFO("Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data, "
                 "server_id={}, term={}, dsn={}",
                 push_req->issuer_replica_id(), push_req->raft_term(), push_req->dsn());
+        rpc_data->send_response();
         return;
     }
 #endif
@@ -463,11 +464,13 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                "Data Channel: Creating rreq on applier has failed, will ignore the push and let Raft channel send "
                "trigger a fetch explicitly if needed. rkey={}",
                rkey.to_string());
+        rpc_data->send_response();
         return;
     }
 
     if (!rreq->save_pushed_data(rpc_data, incoming_buf.cbytes() + fb_size, push_req->data_size())) {
         RD_LOGD("Data Channel: Data already received for rreq=[{}], ignoring this data", rreq->to_string());
+        rpc_data->send_response();
         return;
     }
 
