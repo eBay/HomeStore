@@ -157,6 +157,16 @@ public:
     BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
 
     /**
+     * @brief Allocates blocks of disk space of the given size.
+     *
+     * @param size The size of the block to allocate, in bytes.
+     * @param hints Hints for how to allocate the block.
+     * @param out_blkids Output parameter that will be filled with the IDs of the allocated blocks.
+     * @return The status of the block allocation attempt.
+     */
+    BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, std::vector< BlkId >& out_blkids);
+
+    /**
      * @brief Asynchronously frees the specified block IDs.
      * It is asynchronous because it might need to wait for pending read to complete if same block is being read and not
      * completed yet;

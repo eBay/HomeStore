@@ -88,6 +88,7 @@ public:
     void cp_cleanup(CP* cp);
 
 private:
+    void write_data_local(sisl::sg_list const& value, repl_req_ptr_t rreq);
     void write_journal(repl_req_ptr_t rreq);
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
 };

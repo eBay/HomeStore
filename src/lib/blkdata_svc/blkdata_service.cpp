@@ -219,6 +219,18 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
     return ret;
 }
 
+BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints,
+                                          std::vector< BlkId >& out_blkids) {
+    if (is_stopping()) return BlkAllocStatus::FAILED;
+    incr_pending_request_num();
+    HS_DBG_ASSERT_EQ(size % m_blk_size, 0, "Non aligned size requested");
+    blk_count_t nblks = static_cast< blk_count_t >(size / m_blk_size);
+
+    auto ret = m_vdev->alloc_blks(nblks, hints, out_blkids);
+    decr_pending_request_num();
+    return ret;
+}
+
 BlkAllocStatus BlkDataService::commit_blk(MultiBlkId const& blkid) {
     if (is_stopping()) return BlkAllocStatus::FAILED;
     incr_pending_request_num();
