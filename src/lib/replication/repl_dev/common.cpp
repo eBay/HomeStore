@@ -12,7 +12,7 @@ namespace homestore {
 
 ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer,
                                     sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
-                                    cshared< ReplDevListener >& listener) {
+                                    cshared< ReplDevListener >& listener, blkid_alloc_type_t blkid_alloc_type) {
     m_rkey = std::move(rkey);
 #ifndef NDEBUG
     if (data_size > 0) {
@@ -26,6 +26,7 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     m_header = user_header;
     m_key = key;
     m_is_jentry_localize_pending = (!is_proposer && (data_size > 0)); // Pending on the applier and with linked data
+    m_blkid_alloc_type = blkid_alloc_type;
 
     // We need to allocate the block if the req has data linked, since entry doesn't exist or if it exist, two
     // threads(data channel and raft channel) are trying to do the same thing. So take state mutex and allocate the blk
@@ -63,7 +64,7 @@ repl_req_ctx::~repl_req_ctx() {
 }
 
 void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
-    uint32_t val_size = has_linked_data() ? m_local_blkid.serialized_size() : 0;
+    uint32_t val_size = value_size();
     uint32_t entry_size = sizeof(repl_journal_entry) + m_header.size() + m_key.size() + val_size;
 
     if (is_raft_buf) {
@@ -81,6 +82,7 @@ void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
     m_journal_entry->user_header_size = m_header.size();
     m_journal_entry->key_size = m_key.size();
     m_journal_entry->value_size = val_size;
+    m_journal_entry->blkid_alloc_type = blkid_alloc_type();
 
     uint8_t* raw_ptr = uintptr_cast(m_journal_entry) + sizeof(repl_journal_entry);
     if (m_header.size()) {
@@ -94,14 +96,35 @@ void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
     }
 
     if (has_linked_data()) {
-        auto const b = m_local_blkid.serialize();
-        std::memcpy(raw_ptr, b.cbytes(), b.size());
+        if (blkid_alloc_type() == blkid_alloc_type_t::SINGLE) {
+            auto const b = m_local_blkid.serialize();
+            std::memcpy(raw_ptr, b.cbytes(), b.size());
+        } else {
+            for (const auto& blkid : m_local_blkid_vec) {
+                auto const b = blkid.serialize();
+                std::memcpy(raw_ptr, b.cbytes(), b.size());
+                raw_ptr += b.size();
+            }
+        }
     }
 }
 
 uint32_t repl_req_ctx::journal_entry_size() const {
-    return sizeof(repl_journal_entry) + m_header.size() + m_key.size() +
-        (has_linked_data() ? m_local_blkid.serialized_size() : 0);
+    return sizeof(repl_journal_entry) + m_header.size() + m_key.size() + value_size();
+}
+
+uint32_t repl_req_ctx::value_size() const {
+    uint32_t val_size = 0;
+    if (has_linked_data()) {
+        if (blkid_alloc_type() == blkid_alloc_type_t::SINGLE) {
+            val_size = m_local_blkid.serialized_size();
+        } else {
+            for (const auto& blkid : m_local_blkid_vec) {
+                val_size += blkid.serialized_size();
+            }
+        }
+    }
+    return val_size;
 }
 
 void repl_req_ctx::change_raft_journal_buf(raft_buf_ptr_t new_buf, bool adjust_hdr_key) {
@@ -138,13 +161,28 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
         return ReplServiceError::OK;
     }
 
-    auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
-                                            hints_result.value(), m_local_blkid);
-    if (status != BlkAllocStatus::SUCCESS) {
-        LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID,
-                   rkey(), status);
-        DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
-        return ReplServiceError::NO_SPACE_LEFT;
+    if (blkid_alloc_type() == blkid_alloc_type_t::SINGLE) {
+        // Create one multiblkid.
+        auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
+                                                hints_result.value(), m_local_blkid);
+        if (status != BlkAllocStatus::SUCCESS) {
+            LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID,
+                       rkey(), status);
+            DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
+            return ReplServiceError::NO_SPACE_LEFT;
+        }
+    } else {
+        // Create independent blkids
+        auto aligned_data_size = sisl::round_up(uint32_cast(data_size), data_service().get_blk_size());
+        std::vector< BlkId > blkid_vec;
+        auto status = data_service().alloc_blks(aligned_data_size, hints_result.value(), blkid_vec);
+        if (status != BlkAllocStatus::SUCCESS) {
+            DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
+            return ReplServiceError::NO_SPACE_LEFT;
+        }
+        for (auto& blkid : blkid_vec) {
+            m_local_blkid_vec.emplace_back(blkid);
+        }
     }
     add_state(repl_req_state_t::BLK_ALLOCATED);
     return ReplServiceError::OK;

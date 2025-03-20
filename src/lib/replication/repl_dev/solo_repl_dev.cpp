@@ -30,21 +30,57 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                     repl_req_ptr_t rreq, bool part_of_batch, trace_id_t tid) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
-
     incr_pending_request_num();
+
+    // TODO let the user choose the blkid alloc type.
     auto status = rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1, .traceID = tid},
                              value.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true,
-                             header, key, value.size, m_listener);
+                             header, key, value.size, m_listener, blkid_alloc_type_t::MULTIPLE);
     HS_REL_ASSERT_EQ(status, ReplServiceError::OK, "Error in allocating local blks");
     // If it is header only entry, directly write to the journal
     if (rreq->has_linked_data() && !rreq->has_state(repl_req_state_t::DATA_WRITTEN)) {
         // Write the data
+        write_data_local(value, rreq);
+    } else {
+        write_journal(std::move(rreq));
+    }
+}
+
+void SoloReplDev::write_data_local(sisl::sg_list const& value, repl_req_ptr_t rreq) {
+    if (rreq->is_single_blkalloc_req()) {
         data_service().async_write(value, rreq->local_blkid()).thenValue([this, rreq = std::move(rreq)](auto&& err) {
             HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
             write_journal(std::move(rreq));
         });
     } else {
-        write_journal(std::move(rreq));
+        HS_REL_ASSERT_GT(rreq->local_blkid_vec().size(), 0, "Empty blkid vec");
+        std::vector< folly::Future< std::error_code > > futs;
+        futs.reserve(rreq->local_blkid_vec().size());
+        sisl::sg_iterator sg_it{value.iovs};
+
+        for (const auto& blkid : rreq->local_blkid_vec()) {
+            HS_REL_ASSERT(blkid.num_pieces() == 1, "Multiple pieces in blkid");
+            auto sgs_size = blkid.blk_count() * data_service().get_blk_size();
+            const auto iovs = sg_it.next_iovs(sgs_size);
+            uint32_t total_size = 0;
+            for (auto& iov : iovs) {
+                total_size += iov.iov_len;
+            }
+            HS_REL_ASSERT(total_size == sgs_size, "Block size mismatch");
+            sisl::sg_list sgs{sgs_size, iovs};
+            futs.emplace_back(data_service().async_write(sgs, blkid));
+        }
+
+        folly::collectAllUnsafe(futs).thenTry([this, rreq = std::move(rreq)](auto&& v_res) {
+            for (const auto& err_c : v_res.value()) {
+                if (sisl_unlikely(err_c.value())) {
+                    // TODO: Find a way to return error to the Listener
+                    HS_REL_ASSERT(0, "Error in writing data");
+                }
+            }
+
+            write_journal(std::move(rreq));
+        });
     }
 }
 
@@ -60,8 +96,15 @@ void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
             auto cur_lsn = m_commit_upto.load();
             if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
-            data_service().commit_blk(rreq->local_blkid());
-            m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
+            if (rreq->is_single_blkalloc_req()) {
+                data_service().commit_blk(rreq->local_blkid());
+                m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
+            } else {
+                for (const auto& blkid : rreq->local_blkid_vec()) {
+                    data_service().commit_blk(blkid);
+                }
+                m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid_vec(), rreq);
+            }
             decr_pending_request_num();
         });
 }
@@ -83,16 +126,39 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     raw_ptr += entry->key_size;
     remain_size -= entry->key_size;
 
-    sisl::blob value_blob{raw_ptr, remain_size};
-    MultiBlkId blkid;
-    if (remain_size) { blkid.deserialize(value_blob, true /* copy */); }
+    if (entry->blkid_alloc_type == blkid_alloc_type_t::SINGLE) {
+        sisl::blob value_blob{raw_ptr, remain_size};
+        MultiBlkId blkid;
+        if (remain_size) { blkid.deserialize(value_blob, true /* copy */); }
 
-    m_listener->on_pre_commit(lsn, header, key, nullptr);
+        m_listener->on_pre_commit(lsn, header, key, nullptr);
 
-    auto cur_lsn = m_commit_upto.load();
-    if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
+        auto cur_lsn = m_commit_upto.load();
+        if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
-    m_listener->on_commit(lsn, header, key, blkid, nullptr);
+        m_listener->on_commit(lsn, header, key, blkid, nullptr);
+    } else {
+        std::vector< MultiBlkId > blkid_vec;
+        if (remain_size == 0) {
+            blkid_vec.push_back(MultiBlkId{});
+        } else {
+            while (remain_size > 0) {
+                MultiBlkId blkid;
+                sisl::blob value_blob{raw_ptr, sizeof(BlkId)};
+                blkid.deserialize(value_blob, true /* copy */);
+                raw_ptr += sizeof(BlkId);
+                remain_size -= sizeof(BlkId);
+                blkid_vec.push_back(blkid);
+            }
+        }
+
+        m_listener->on_pre_commit(lsn, header, key, nullptr);
+
+        auto cur_lsn = m_commit_upto.load();
+        if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
+
+        m_listener->on_commit(lsn, header, key, blkid_vec, nullptr);
+    }
 }
 
 folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,

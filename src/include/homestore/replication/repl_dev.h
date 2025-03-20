@@ -49,6 +49,12 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_REPLACE = 3, // Control message to replace a member
 )
 
+// Whether block allocation type is a single multiblkid or vector of blkids.
+VENUM(blkid_alloc_type_t, uint8_t,
+      SINGLE = 0,   // Single multi blkid
+      MULTIPLE = 1, // Vector of independent blkids
+)
+
 // magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
 static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
 static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
@@ -116,7 +122,8 @@ public:
     repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
     ReplServiceError init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-                          sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
+                          sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener,
+                          blkid_alloc_type_t blkid_alloc_type = blkid_alloc_type_t::SINGLE);
 
     /////////////////////// All getters ///////////////////////
     repl_key const& rkey() const { return m_rkey; }
@@ -131,6 +138,9 @@ public:
     sisl::blob const& header() const { return m_header; }
     sisl::blob const& key() const { return m_key; }
     MultiBlkId const& local_blkid() const { return m_local_blkid; }
+    std::vector< MultiBlkId > const& local_blkid_vec() const { return m_local_blkid_vec; }
+    blkid_alloc_type_t blkid_alloc_type() const { return m_blkid_alloc_type; }
+    bool is_single_blkalloc_req() { return blkid_alloc_type() == blkid_alloc_type_t::SINGLE; }
     RemoteBlkId const& remote_blkid() const { return m_remote_blkid; }
     const char* data() const {
         DEBUG_ASSERT(m_data != nullptr,
@@ -141,6 +151,7 @@ public:
     bool has_state(repl_req_state_t s) const { return m_state.load() & uint32_cast(s); }
     repl_journal_entry const* journal_entry() const { return m_journal_entry; }
     uint32_t journal_entry_size() const;
+    uint32_t value_size() const;
     bool is_localize_pending() const { return m_is_jentry_localize_pending; }
     bool has_linked_data() const { return (m_op_code == journal_type_t::HS_DATA_LINKED); }
 
@@ -226,7 +237,9 @@ private:
     std::atomic< bool > m_is_volatile{true};                   // Is the log still in memory and not flushed to disk yet
 
     /////////////// Data related section /////////////////
-    MultiBlkId m_local_blkid;   // Local BlkId for the data
+    MultiBlkId m_local_blkid;                    // Local BlkId for the data
+    std::vector< MultiBlkId > m_local_blkid_vec; // For multiple blkid
+    blkid_alloc_type_t m_blkid_alloc_type;
     RemoteBlkId m_remote_blkid; // Corresponding remote blkid for the data
     uint8_t const* m_data;      // Raw data pointer containing the actual data
 
@@ -402,7 +415,7 @@ public:
     virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) { return; }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id){};
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

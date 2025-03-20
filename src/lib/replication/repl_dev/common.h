@@ -41,6 +41,7 @@ struct repl_journal_entry {
     uint32_t user_header_size;
     uint32_t key_size;
     uint32_t value_size;
+    blkid_alloc_type_t blkid_alloc_type;
     // Followed by user_header, then key, then MultiBlkId/value
 
     std::string to_string() const {
