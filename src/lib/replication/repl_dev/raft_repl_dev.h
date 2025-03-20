@@ -232,8 +232,15 @@ public:
         return ready;
     }
     void purge() override {
-        // clean up existing logs in log store
+        // Ensure there are no background commits before cleaning up existing logs in the log store
+        // to avoid the commit thread accessing logs that are being purged.
+        raft_server()->pause_state_machine_exeuction();
+        size_t wait_count = 0;
+        while (!raft_server()->wait_for_state_machine_pause(500)) {
+            RD_LOGI("Waiting for raft state machine pause before purging existing logs: count {}", ++wait_count);
+        }
         m_data_journal->purge_all_logs();
+        raft_server()->resume_state_machine_execution();
     }
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
