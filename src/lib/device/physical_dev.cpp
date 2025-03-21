@@ -35,6 +35,8 @@ namespace homestore {
 static std::mutex s_cached_dev_mtx;
 static std::unordered_map< std::string, iomgr::io_device_ptr > s_cached_opened_devs;
 
+__attribute__((no_sanitize_address)) static auto get_current_time() { return Clock::now(); }
+
 iomgr::io_device_ptr open_and_cache_dev(const std::string& devname, int oflags) {
     std::unique_lock lg(s_cached_dev_mtx);
 
@@ -136,26 +138,50 @@ void PhysicalDev::close_device() { close_and_uncache_dev(m_devname, m_iodev); }
 
 folly::Future< std::error_code > PhysicalDev::async_write(const char* data, uint32_t size, uint64_t offset,
                                                           bool part_of_batch) {
-    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
-    return m_drive_iface->async_write(m_iodev.get(), data, size, offset, part_of_batch);
+    auto const start_time = get_current_time();
+    return m_drive_iface->async_write(m_iodev.get(), data, size, offset, part_of_batch)
+        .thenValue([this, start_time, size](std::error_code ec) {
+            HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
+            HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
+            COUNTER_INCREMENT(m_metrics, drive_async_write_count, 1);
+            return ec;
+        });
 }
 
 folly::Future< std::error_code > PhysicalDev::async_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
                                                            bool part_of_batch) {
-    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
-    return m_drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, part_of_batch);
+    auto const start_time = get_current_time();
+    return m_drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, part_of_batch)
+        .thenValue([this, start_time, size](std::error_code ec) {
+            HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
+            HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
+            COUNTER_INCREMENT(m_metrics, drive_async_write_count, 1);
+            return ec;
+        });
 }
 
 folly::Future< std::error_code > PhysicalDev::async_read(char* data, uint32_t size, uint64_t offset,
                                                          bool part_of_batch) {
-    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
-    return m_drive_iface->async_read(m_iodev.get(), data, size, offset, part_of_batch);
+    auto const start_time = get_current_time();
+    return m_drive_iface->async_read(m_iodev.get(), data, size, offset, part_of_batch)
+        .thenValue([this, start_time, size](std::error_code ec) {
+            HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
+            HISTOGRAM_OBSERVE(m_metrics, drive_read_latency, get_elapsed_time_us(start_time));
+            COUNTER_INCREMENT(m_metrics, drive_async_read_count, 1);
+            return ec;
+        });
 }
 
 folly::Future< std::error_code > PhysicalDev::async_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
                                                           bool part_of_batch) {
-    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
-    return m_drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, offset, part_of_batch);
+    auto const start_time = get_current_time();
+    return m_drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, offset, part_of_batch)
+        .thenValue([this, start_time, size](std::error_code ec) {
+            HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
+            HISTOGRAM_OBSERVE(m_metrics, drive_read_latency, get_elapsed_time_us(start_time));
+            COUNTER_INCREMENT(m_metrics, drive_async_read_count, 1);
+            return ec;
+        });
 }
 
 folly::Future< std::error_code > PhysicalDev::async_write_zero(uint64_t size, uint64_t offset) {
@@ -174,46 +200,50 @@ folly::Future< std::error_code > PhysicalDev::async_write_zero(uint64_t size, ui
 
 folly::Future< std::error_code > PhysicalDev::queue_fsync() { return m_drive_iface->queue_fsync(m_iodev.get()); }
 
-__attribute__((no_sanitize_address)) static auto get_current_time() { return Clock::now(); }
-
 std::error_code PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
-    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
-    COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
     auto const start_time = get_current_time();
     auto const ret = m_drive_iface->sync_write(m_iodev.get(), data, size, offset);
     HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
+    COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
     return ret;
 }
 
 std::error_code PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
-    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
-    COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
     auto const start_time = Clock::now();
     auto const ret = m_drive_iface->sync_writev(m_iodev.get(), iov, iovcnt, size, offset);
     HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
+    COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
+
     return ret;
 }
 
 std::error_code PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
-    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
-    COUNTER_INCREMENT(m_metrics, drive_sync_read_count, 1);
     auto const start_time = Clock::now();
     auto const ret = m_drive_iface->sync_read(m_iodev.get(), data, size, offset);
     HISTOGRAM_OBSERVE(m_metrics, drive_read_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
+    COUNTER_INCREMENT(m_metrics, drive_sync_read_count, 1);
     return ret;
 }
 
 std::error_code PhysicalDev::sync_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset) {
-    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
-    COUNTER_INCREMENT(m_metrics, drive_sync_read_count, 1);
     auto const start_time = Clock::now();
     auto const ret = m_drive_iface->sync_readv(m_iodev.get(), iov, iovcnt, size, offset);
     HISTOGRAM_OBSERVE(m_metrics, drive_read_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
+    COUNTER_INCREMENT(m_metrics, drive_sync_read_count, 1);
     return ret;
 }
 
 std::error_code PhysicalDev::sync_write_zero(uint64_t size, uint64_t offset) {
-    return m_drive_iface->sync_write_zero(m_iodev.get(), size, offset);
+    auto const start_time = Clock::now();
+    auto const ret = m_drive_iface->sync_write_zero(m_iodev.get(), size, offset);
+    HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, wirte_io_size, (((size - 1) / 1024) + 1));
+    COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
+    return ret;
 }
 
 void PhysicalDev::submit_batch() { m_drive_iface->submit_batch(); }
