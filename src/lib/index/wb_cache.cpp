@@ -218,39 +218,55 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
                             IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
     // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
     // bunch of times.
+    // TODO: Need an API to check if a flip is triggered easilly to avoid the use of several atomics.
     if (parent_buf && parent_buf->is_meta_buf()) {
         // Split or merge happening on root
         if (iomgr_flip::instance()->test_flip("crash_flush_on_meta")) {
             parent_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_root")) {
             child_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         }
     } else if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
         // Its a split node situation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_parent")) {
             parent_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_left_child")) {
             child_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_right_child")) {
             new_node_bufs[0]->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() != freed_node_bufs.size())) {
         // Its a merge nodes sitation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_parent")) {
             parent_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_left_child")) {
             child_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_right_child")) {
-            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+            if (!new_node_bufs.empty()) {
+                new_node_bufs[0]->set_crash_flag();
+                hs()->crash_simulator().set_will_crash(true);
+            }
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() == freed_node_bufs.size())) {
         // Its a rebalance node situation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_parent")) {
             parent_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_left_child")) {
             child_buf->set_crash_flag();
+            hs()->crash_simulator().set_will_crash(true);
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_right_child")) {
-            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+            if (!new_node_bufs.empty()) {
+                new_node_bufs[0]->set_crash_flag();
+                hs()->crash_simulator().set_will_crash(true);
+            }
         }
     }
 }

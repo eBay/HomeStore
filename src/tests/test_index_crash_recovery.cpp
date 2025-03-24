@@ -708,6 +708,8 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
                 this->get_all();
             }
         } else {
+            // remove the flips so that they do not get triggered erroneously
+            this->remove_flip(flip);
             this->crash_and_recover(operations, fmt::format("long_tree_{}", round));
         }
         if (elapsed_time - last_progress_time > 30) {
