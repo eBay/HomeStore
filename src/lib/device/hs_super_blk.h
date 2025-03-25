@@ -75,7 +75,7 @@ struct disk_attr {
 };
 
 struct first_block_header {
-    static constexpr const char* PRODUCT_NAME{"OmStore"};
+    static constexpr const char* PRODUCT_NAME{"HomeStore4x"};
     static constexpr size_t s_product_name_size{64};
     static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{4};
 
@@ -128,7 +128,7 @@ struct first_block {
     static constexpr uint32_t s_atomic_fb_size{512};       // increase 512 to actual size if in the future first_block
                                                            // can be larger;
     static constexpr uint32_t s_io_fb_size{4096};          // This is the size we do IO on, with padding
-    static constexpr uint32_t HOMESTORE_MAGIC{0xCEEDDEEB}; // Magic written as first bytes on each device
+    static constexpr uint32_t HOMESTORE_MAGIC{0xABBECDCD}; // Magic written as first bytes on each device
 
 public:
     uint64_t magic{0};                // Header magic expected to be at the top of block
