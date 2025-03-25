@@ -216,14 +216,14 @@ public:
     test_params& params(uint32_t svc) { return m_token.svc_params_[svc]; }
 
 #ifdef _PRERELEASE
-    void wait_for_crash_recovery() {
-        if(homestore::HomeStore::instance()->crash_simulator().will_crash()) {
-            LOGDEBUG("Waiting for m_crash_recovered future");
-            m_crash_recovered.getFuture().get();
-            m_crash_recovered = folly::Promise< folly::Unit >();
-            homestore::HomeStore::instance()->crash_simulator().set_will_crash(false);
+    void wait_for_crash_recovery(bool check_will_crash = false) {
+        if(check_will_crash && !homestore::HomeStore::instance()->crash_simulator().will_crash()) {
+            return;
         }
-        
+        LOGDEBUG("Waiting for m_crash_recovered future");
+        m_crash_recovered.getFuture().get();
+        m_crash_recovered = folly::Promise< folly::Unit >();
+        homestore::HomeStore::instance()->crash_simulator().set_will_crash(false);
     }
 #endif
 
