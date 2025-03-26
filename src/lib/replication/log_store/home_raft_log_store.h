@@ -217,7 +217,7 @@ public:
 
     /**
      * Purge all logs in the log store
-     * It is a dangerous operation and is only used in baseline resync now (purge all logs and restore by snapshot).
+     * It is a dangerous operation and not be used currently.
      */
     void purge_all_logs();
 

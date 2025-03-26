@@ -69,6 +69,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
         m_rd_sb->destroy_pending = 0x0;
+        m_rd_sb->last_snapshot_lsn = 0;
         m_rd_sb->group_ordinal = s_next_group_ordinal.fetch_add(1);
         m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
 
@@ -1541,6 +1542,11 @@ void RaftReplDev::set_log_store_last_durable_lsn(store_lsn_t lsn) { m_data_journ
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto repl_lsn = to_repl_lsn(lsn);
+    if (need_skip_processing(repl_lsn)) {
+        RD_LOGI("Raft Channel: Log {} is outdated and will be handled by baseline resync. Ignoring replay.", lsn);
+        return;
+    }
+
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
     if (repl_lsn <= m_rd_sb->checkpoint_lsn) { return; }
 
@@ -1635,7 +1641,7 @@ void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
     std::memcpy(data_out->data_begin(), &msg, msg_size);
 }
 
-bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data) {
+bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s) {
     auto msg = r_cast< snp_repl_dev_data* >(data.data_begin());
     if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC ||
         msg->protocol_version != HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
@@ -1651,6 +1657,14 @@ bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data) {
     if (received_crc != computed_crc) {
         RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);
         return false;
+    }
+    {
+        // Save last_snapshot_lsn, so that we can skip the replay/commit operation for logs included in baseline resync.
+        // The reason is baseline resync will clear existing resources on the upper layer, skipping replay/commit
+        // operations can avoid accessing unavailable resources
+        std::unique_lock lg{m_sb_mtx};
+        m_rd_sb->last_snapshot_lsn = s_cast< repl_lsn_t >(s.get_last_log_idx());
+        m_rd_sb.write();
     }
     if (msg->dsn > m_next_dsn) {
         m_next_dsn = msg->dsn;

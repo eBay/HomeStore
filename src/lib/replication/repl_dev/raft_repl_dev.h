@@ -25,6 +25,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint8_t is_timeline_consistent; // Flag to indicate whether the recovery of followers need to be timeline consistent
     uint64_t last_applied_dsn;      // Last applied data sequence number
     uint8_t destroy_pending;        // Flag to indicate whether the group is in destroy pending state
+    repl_lsn_t last_snapshot_lsn;   // Last snapshot LSN follower received from leader
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
@@ -231,9 +232,9 @@ public:
         if (!ready) { RD_LOGD("Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate); }
         return ready;
     }
+    // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
     void purge() override {
-        // clean up existing logs in log store
-        m_data_journal->purge_all_logs();
+        RD_REL_ASSERT(false, "NOT SUPPORTED YET");
     }
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
@@ -325,6 +326,18 @@ public:
      */
     void force_leave() { leave(); }
 
+    /**
+     * \brief This method is called to check if the given LSN is within the last snapshot LSN received from the leader.
+     * All logs with LSN less than or equal to the last snapshot LSN are considered as part of the baseline resync, which
+     * doesn't need any more operations (e.g., replay, commit).
+     *
+     * \param lsn The LSN to be checked.
+     * \return true if the LSN is within the last snapshot LSN, false otherwise.
+     */
+    bool need_skip_processing(const repl_lsn_t lsn) {
+        return lsn <= m_rd_sb->last_snapshot_lsn;
+    }
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;
@@ -366,7 +379,7 @@ private:
     void replace_member(repl_req_ptr_t rreq);
     void reset_quorum_size(uint32_t commit_quorum);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
-    bool save_snp_resync_data(nuraft::buffer& data);
+    bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
 };
 
 } // namespace homestore
