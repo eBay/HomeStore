@@ -86,6 +86,9 @@ void SoloReplService::start() {
     }
     m_sb_bufs.clear();
 
+    LOGINFO("Repl devs load completed, calling upper layer on_repl_devs_init_completed");
+    m_repl_app->on_repl_devs_init_completed();
+
     hs()->data_service().start();
     hs()->logstore_service().start(hs()->is_first_time_boot());
 
