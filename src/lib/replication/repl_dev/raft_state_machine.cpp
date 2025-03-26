@@ -188,6 +188,10 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
 
 raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params const& params) {
     int64_t lsn = s_cast< int64_t >(params.log_idx);
+    if (m_rd.need_skip_processing(lsn)) {
+        RD_LOGI("Raft Channel: Log {} is expected to be handled by snapshot. Skipping commit.", lsn);
+        return m_success_ptr;
+    }
     RD_LOGD("Raft channel: Received Commit message lsn {} store {} logdev {} size {}", lsn,
             m_rd.m_data_journal->logstore_id(), m_rd.m_data_journal->logdev_id(), params.data->size());
     repl_req_ptr_t rreq = lsn_to_req(lsn);
@@ -206,6 +210,10 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
 void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_ptr_t& new_conf) {
     // when reaching here, the config change log has already been committed, and the new config has been applied to the
     // cluster
+    if (m_rd.need_skip_processing(s_cast< repl_lsn_t >(log_idx))) {
+        RD_LOGI("Raft Channel: Config {} is expected to be handled by snapshot. Skipping commit.", log_idx);
+        return;
+    }
 
     RD_LOGD("Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
 
@@ -322,6 +330,19 @@ void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result
 
 int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
                                            bool& is_last_obj) {
+
+    // Ensure all logs snapshot included are committed to prevent the following scenario:
+    // If a crash occurs during snapshot creation, the snapshot might be persisted while the rd's sb is not.
+    // This means the durable_commit_lsn is less than the snapshot's log_idx. Upon restart, the changes in
+    // uncommitted logs may or may not included in the snapshot data sent by leader,
+    // depending on the racing of commit vs snapshot read, leading to data inconsistency.
+    if (s_cast< repl_lsn_t >(s.get_last_log_idx()) > m_rd.get_last_commit_lsn()) {
+        RD_LOG(WARN, "not ready to read because there are some uncommitted logs in snapshot, "
+                     "let nuraft retry later. snapshot log_idx={}, last_commit_lsn={}",
+                     s.get_last_log_idx(), m_rd.get_last_commit_lsn());
+        return -1;
+    }
+
     // For Nuraft baseline resync, we separate the process into two layers: HomeStore layer and Application layer.
     // We use the highest bit of the obj_id to indicate the message type: 0 is for HS, 1 is for Application.
     if (is_hs_snp_obj(obj_id)) {
@@ -354,7 +375,7 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
                                             bool is_last_obj) {
     if (is_hs_snp_obj(obj_id)) {
         // Homestore preserved msg
-        if (m_rd.save_snp_resync_data(data)) {
+        if (m_rd.save_snp_resync_data(data, s)) {
             obj_id = snp_obj_id_type_app;
             LOGDEBUG("save_snp_resync_data success, next obj_id={}", obj_id);
         }
