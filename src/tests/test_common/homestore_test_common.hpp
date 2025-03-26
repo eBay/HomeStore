@@ -32,6 +32,10 @@
 #include <iomgr/iomgr_config_generated.h>
 #include <common/homestore_assert.hpp>
 
+#ifdef _PRERELEASE
+#include "common/crash_simulator.hpp"
+#endif
+
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
 const std::string HTTP_SVC_ENV_VAR_STRING{"USER_WANT_HTTP_OFF"};
 const std::string CP_WATCHDOG_TIMER_SEC{"USER_SET_CP_WD_TMR_SEC"};          // used in nightly test;
@@ -212,9 +216,14 @@ public:
     test_params& params(uint32_t svc) { return m_token.svc_params_[svc]; }
 
 #ifdef _PRERELEASE
-    void wait_for_crash_recovery() {
+    void wait_for_crash_recovery(bool check_will_crash = false) {
+        if(check_will_crash && !homestore::HomeStore::instance()->crash_simulator().will_crash()) {
+            return;
+        }
+        LOGDEBUG("Waiting for m_crash_recovered future");
         m_crash_recovered.getFuture().get();
         m_crash_recovered = folly::Promise< folly::Unit >();
+        homestore::HomeStore::instance()->crash_simulator().set_will_crash(false);
     }
 #endif
 

@@ -38,8 +38,12 @@ public:
         }
     }
 
+    bool will_crash() const { return m_will_crash.load(); }
+    void set_will_crash(bool crash) { m_will_crash.store(crash); }
+
 private:
     std::function< void(void) > m_restart_cb{nullptr};
+    std::atomic<bool> m_will_crash{false};
     sisl::urcu_scoped_ptr< bool > m_crashed;
 };
 } // namespace homestore
