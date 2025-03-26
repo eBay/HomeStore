@@ -283,6 +283,13 @@ void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = 
 
 void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
     RD_LOG(DEBUG, "create_snapshot last_idx={}/term={}", s.get_last_log_idx(), s.get_last_log_term());
+    // Ensure all metadata is flushed to disk before creating the snapshot to prevent the following scenario:
+    // If a crash occurs during snapshot creation, the snapshot might be persisted while the rd's sb is not.
+    // This means the durable_commit_lsn is less than the snapshot's log_idx. Upon restart, the changes in
+    // uncommitted logs may or may not included in the snapshot data sent by leader,
+    // depending on the racing of commit vs snapshot read, leading to data inconsistency.
+    hs()->cp_mgr().trigger_cp_flush(true).wait();
+    RD_LOG(DEBUG, "create_snapshot cp_flush done");
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto result = m_listener->create_snapshot(snp_ctx).get();
     auto null_except = std::shared_ptr< std::exception >();
