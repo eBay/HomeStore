@@ -111,9 +111,10 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
 
     if (!m_in_recovery) {
         // Add the node to the cache. Skip if we are in recovery mode.
-        bool found = m_cache.get(blkid, node);
+        BtreeNodePtr node2;
+        bool found = m_cache.get(blkid, node2);
         if(found){
-            LOGTRACEMOD(wbcache, "Found node {} blkid {} in cache, not inserting again", node->to_string(), blkid.to_integer());
+            LOGTRACEMOD(wbcache, "Found node {} blkid {} in cache, not inserting again", node2->to_string(), blkid.to_integer());
         }
         bool done = m_cache.insert(node);
         HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node {} blkid {} to cache, low memory or duplicate inserts? {}", blkid.to_integer(),node->to_string(),  m_cache.get(blkid, node));

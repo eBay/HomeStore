@@ -100,7 +100,7 @@ retry:
             }
 
             K split_key;
-            BT_NODE_LOG(TRACE, my_node, "Split node needed");
+            BT_NODE_LOG(TRACE, my_node, "Split node needed, child = {}, idx = {}", child_node->node_id(), curr_idx);
             ret = split_node(my_node, child_node, curr_idx, &split_key, req.m_op_context);
             unlock_lambda(child_node, child_cur_lock);
             if (ret != btree_status_t::success) { goto out; }
