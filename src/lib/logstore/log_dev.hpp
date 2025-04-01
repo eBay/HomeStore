@@ -404,6 +404,8 @@ struct logdev_superblk {
     uint32_t num_stores{0};
     uint64_t start_dev_offset{0};
     logid_t key_idx{0};
+    flush_mode_t flush_mode;
+
     // The meta data starts immediately after the super block
     // Equivalent of:
     // logstore_superblk meta[0];
@@ -481,7 +483,7 @@ public:
     LogDevMetadata& operator=(LogDevMetadata&&) noexcept = delete;
     ~LogDevMetadata() = default;
 
-    logdev_superblk* create(logdev_id_t id);
+    logdev_superblk* create(logdev_id_t id, flush_mode_t);
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
@@ -571,12 +573,6 @@ struct logstore_info {
 
 static std::string const logdev_sb_meta_name{"Logdev_sb"};
 static std::string const logdev_rollback_sb_meta_name{"Logdev_rollback_sb"};
-
-VENUM(flush_mode_t, uint32_t, // Various flush modes (can be or'ed together)
-      INLINE = 1 << 0,        // Allow flush inline with the append
-      TIMER = 1 << 1,         // Allow timer based automatic flush
-      EXPLICIT = 1 << 2,      // Allow explcitly user calling flush
-);
 
 class LogDev : public std::enable_shared_from_this< LogDev > {
     friend class HomeLogStore;

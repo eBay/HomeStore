@@ -455,7 +455,7 @@ public:
 
                 for (uint32_t i{0}; i < n_log_stores; ++i) {
                     SampleLogStoreClient* client = m_log_store_clients[i].get();
-                    logstore_service().open_logdev(client->m_logdev_id);
+                    logstore_service().open_logdev(client->m_logdev_id, flush_mode_t::EXPLICIT);
                     logstore_service()
                         .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
                         .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
@@ -479,7 +479,7 @@ public:
 
             std::vector< logdev_id_t > logdev_id_vec;
             for (uint32_t i{0}; i < n_log_devs; ++i) {
-                logdev_id_vec.push_back(logstore_service().create_new_logdev());
+                logdev_id_vec.push_back(logstore_service().create_new_logdev(flush_mode_t::EXPLICIT));
             }
 
             for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -1225,7 +1225,7 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
-        auto logdev_id = logstore_service().create_new_logdev();
+        auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         auto tmp_log_store = logstore_service().create_new_log_store(logdev_id, false);
         const auto store_id = tmp_log_store->get_store_id();
         LOGINFO("Created new log store -> id {}", store_id);

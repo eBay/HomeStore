@@ -58,7 +58,7 @@ public:
     bool is_ready_for_traffic() const override { return true; }
     void purge() override {}
 
-    std::shared_ptr<snapshot_context> deserialize_snapshot_context(sisl::io_blob_safe &snp_ctx) override {
+    std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return nullptr;
     }
 
