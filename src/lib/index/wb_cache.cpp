@@ -50,7 +50,9 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair<
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
                 [](const sisl::CacheRecord& rec) -> bool {
+
                     const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
+                    LOGTRACEMOD(wbcache, "evict node triggered for {}", hnode.m_value->to_string());
                     return (hnode.m_value->m_refcount.test_le(1));
                 }},
         m_node_size{node_size},
@@ -109,8 +111,12 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
 
     if (!m_in_recovery) {
         // Add the node to the cache. Skip if we are in recovery mode.
+        bool found = m_cache.get(blkid, node);
+        if(found){
+            LOGTRACEMOD(wbcache, "Found node {} blkid {} in cache, not inserting again", node->to_string(), blkid.to_integer());
+        }
         bool done = m_cache.insert(node);
-        HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node to cache, low memory or duplicate inserts?");
+        HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node {} blkid {} to cache, low memory or duplicate inserts? {}", blkid.to_integer(),node->to_string(),  m_cache.get(blkid, node));
     }
 
     // The entire index is updated in the commit path, so we alloc the blk and commit them right away
