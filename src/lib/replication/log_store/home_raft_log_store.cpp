@@ -92,7 +92,7 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
     m_dummy_log_entry = nuraft::cs_new< nuraft::log_entry >(0, nuraft::buffer::alloc(0), nuraft::log_val_type::app_log);
 
     if (logstore_id == UINT32_MAX) {
-        m_logdev_id = logstore_service().create_new_logdev();
+        m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         m_log_store = logstore_service().create_new_log_store(m_logdev_id, true);
         if (!m_log_store) { throw std::runtime_error("Failed to create log store"); }
         m_logstore_id = m_log_store->get_store_id();
@@ -101,7 +101,7 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
         m_logdev_id = logdev_id;
         m_logstore_id = logstore_id;
         LOGDEBUGMOD(replication, "Opening existing home log_dev={} log_store={}", m_logdev_id, logstore_id);
-        logstore_service().open_logdev(m_logdev_id);
+        logstore_service().open_logdev(m_logdev_id, flush_mode_t::EXPLICIT);
         m_log_store_future = logstore_service()
                                  .open_log_store(m_logdev_id, logstore_id, true, log_found_cb, log_replay_done_cb)
                                  .thenValue([this](auto log_store) {
@@ -382,8 +382,8 @@ ulong HomeRaftLogStore::last_durable_index() {
 
 void HomeRaftLogStore::purge_all_logs() {
     auto last_lsn = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
-    REPL_STORE_LOG(INFO, "Store={} LogDev={}: Purging all logs in the log store, last_lsn={}",
-                   m_logstore_id, m_logdev_id, last_lsn);
+    REPL_STORE_LOG(INFO, "Store={} LogDev={}: Purging all logs in the log store, last_lsn={}", m_logstore_id,
+                   m_logdev_id, last_lsn);
     m_log_store->truncate(last_lsn, false /* in_memory_truncate_only */);
 }
 

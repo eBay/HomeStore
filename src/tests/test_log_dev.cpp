@@ -158,9 +158,10 @@ public:
         }
     }
 
-    void insert_batch_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& lsn, int64_t batch, uint32_t fixed_size = 0) {
+    void insert_batch_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& lsn, int64_t batch,
+                           uint32_t fixed_size = 0) {
         bool io_memory{false};
-        std::vector<test_log_data*> data_vector;
+        std::vector< test_log_data* > data_vector;
 
         for (int64_t i = 0; i < batch; ++i) {
             auto* d = prepare_data(lsn + i, io_memory, fixed_size);
@@ -246,20 +247,16 @@ public:
 
     logid_t get_last_truncate_idx(logdev_id_t logdev_id) {
         auto status = logstore_service().get_logdev(logdev_id)->get_status(0);
-        if (status.contains("last_truncate_log_idx")) {
-            return s_cast<logid_t>(status["last_truncate_log_idx"]);
-        }
+        if (status.contains("last_truncate_log_idx")) { return s_cast< logid_t >(status["last_truncate_log_idx"]); }
         LOGERROR("Failed to get last_truncate_log_idx from logdev status for logdev_id {}", logdev_id);
-        return static_cast<logid_t>(-1);
+        return static_cast< logid_t >(-1);
     }
 
     logid_t get_current_log_idx(logdev_id_t logdev_id) {
         auto status = logstore_service().get_logdev(logdev_id)->get_status(0);
-        if (status.contains("current_log_idx")) {
-            return s_cast<logid_t>(status["current_log_idx"]);
-        }
+        if (status.contains("current_log_idx")) { return s_cast< logid_t >(status["current_log_idx"]); }
         LOGERROR("Failed to get current_log_idx from logdev status for logdev_id {}", logdev_id);
-        return static_cast<logid_t>(-1);
+        return static_cast< logid_t >(-1);
     }
 };
 
@@ -268,7 +265,7 @@ TEST_F(LogDevTest, WriteSyncThenRead) {
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
-        auto logdev_id = logstore_service().create_new_logdev();
+        auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
         auto log_store = logstore_service().create_new_log_store(logdev_id, false);
         const auto store_id = log_store->get_store_id();
@@ -288,7 +285,7 @@ TEST_F(LogDevTest, WriteSyncThenRead) {
 
 TEST_F(LogDevTest, Rollback) {
     LOGINFO("Step 1: Create a single logstore to start rollback test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
     auto store_id = log_store->get_store_id();
@@ -296,7 +293,7 @@ TEST_F(LogDevTest, Rollback) {
     auto restart = [&]() {
         std::promise< bool > p;
         auto starting_cb = [&]() {
-            logstore_service().open_logdev(logdev_id);
+            logstore_service().open_logdev(logdev_id, flush_mode_t::EXPLICIT);
             logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
                 log_store = store;
                 p.set_value(true);
@@ -355,7 +352,7 @@ TEST_F(LogDevTest, Rollback) {
 
 TEST_F(LogDevTest, ReTruncate) {
     LOGINFO("Step 1: Create a single logstore to start re-truncate test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
 
@@ -382,7 +379,7 @@ TEST_F(LogDevTest, ReTruncate) {
 
 TEST_F(LogDevTest, TruncateWithExceedingLSN) {
     LOGINFO("Step 1: Create a single logstore to start truncate with exceeding LSN test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
 
@@ -426,7 +423,7 @@ TEST_F(LogDevTest, TruncateWithExceedingLSN) {
 
 TEST_F(LogDevTest, TruncateAfterRestart) {
     LOGINFO("Step 1: Create a single logstore to start truncate with overlapping LSN test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
     auto store_id = log_store->get_store_id();
@@ -434,7 +431,7 @@ TEST_F(LogDevTest, TruncateAfterRestart) {
     auto restart = [&]() {
         std::promise< bool > p;
         auto starting_cb = [&]() {
-            logstore_service().open_logdev(logdev_id);
+            logstore_service().open_logdev(logdev_id, flush_mode_t::EXPLICIT);
             logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
                 log_store = store;
                 p.set_value(true);
@@ -477,12 +474,11 @@ TEST_F(LogDevTest, TruncateAfterRestart) {
 
 TEST_F(LogDevTest, TruncateAcrossMultipleStores) {
     LOGINFO("Step 1: Create 3 log stores to start truncate across multiple stores test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto store1 = logstore_service().create_new_log_store(logdev_id, false);
     auto store2 = logstore_service().create_new_log_store(logdev_id, false);
     auto store3 = logstore_service().create_new_log_store(logdev_id, false);
-
 
     LOGINFO("Step 2: Insert 100 entries to store {}", store1->get_store_id());
     logstore_seq_num_t cur_lsn = 0;
@@ -644,15 +640,15 @@ TEST_F(LogDevTest, TruncateAcrossMultipleStores) {
 
 TEST_F(LogDevTest, TruncateLogsAfterFlushAndRestart) {
     LOGINFO("Step 1: Create a single logstore to start truncate-logs-after-flush-and-restart test");
-    auto logdev_id = logstore_service().create_new_logdev();
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
     s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
     auto log_store = logstore_service().create_new_log_store(logdev_id, false);
     auto store_id = log_store->get_store_id();
 
     auto restart = [&]() {
-        std::promise < bool > p;
+        std::promise< bool > p;
         auto starting_cb = [&]() {
-            logstore_service().open_logdev(logdev_id);
+            logstore_service().open_logdev(logdev_id, flush_mode_t::EXPLICIT);
             logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
                 log_store = store;
                 p.set_value(true);
@@ -712,7 +708,7 @@ TEST_F(LogDevTest, CreateRemoveLogDev) {
     ASSERT_EQ(vdev->num_descriptors(), 0);
 
     for (uint32_t i{0}; i < num_logdev; ++i) {
-        auto id = logstore_service().create_new_logdev();
+        auto id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
         auto store = logstore_service().create_new_log_store(id, false);
         log_stores.push_back(store);
@@ -760,7 +756,7 @@ TEST_F(LogDevTest, DeleteUnopenedLogDev) {
     // Test deletion of unopened logdev.
     std::set< logdev_id_t > id_set, unopened_id_set;
     for (uint32_t i{0}; i < num_logdev; ++i) {
-        auto id = logstore_service().create_new_logdev();
+        auto id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         id_set.insert(id);
         if (i >= num_logdev / 2) { unopened_id_set.insert(id); }
         s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
@@ -784,7 +780,7 @@ TEST_F(LogDevTest, DeleteUnopenedLogDev) {
         auto starting_cb = [&]() {
             auto it = id_set.begin();
             for (uint32_t i{0}; i < id_set.size() / 2; i++, it++) {
-                logstore_service().open_logdev(*it);
+                logstore_service().open_logdev(*it, flush_mode_t::EXPLICIT);
             }
         };
         start_homestore(true /* restart */, starting_cb);
