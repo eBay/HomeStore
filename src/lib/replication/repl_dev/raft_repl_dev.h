@@ -156,6 +156,7 @@ private:
     nuraft_mesg::Manager& m_msg_mgr;
     group_id_t m_group_id;     // Replication Group id
     std::string m_rdev_name;   // Short name for the group for easy debugging
+    std::string m_identify_str; // combination of rdev_name:group_id
     replica_id_t m_my_repl_id; // This replica's uuid
     int32_t m_raft_server_id;  // Server ID used by raft (unique within raft group)
     shared< ReplLogStore > m_data_journal;
@@ -205,10 +206,10 @@ public:
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                           repl_req_ptr_t ctx) override;
+                           repl_req_ptr_t ctx, trace_id_t tid = 0) override;
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
-                                                bool part_of_batch = false) override;
-    folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
+                                                bool part_of_batch = false, trace_id_t tid = 0) override;
+    folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid, trace_id_t tid = 0) override;
     AsyncReplResult<> become_leader() override;
     bool is_leader() const override;
     replica_id_t get_leader_id() const override;
@@ -216,7 +217,8 @@ public:
     std::set< replica_id_t > get_active_peers() const;
     group_id_t group_id() const override { return m_group_id; }
     std::string group_id_str() const { return boost::uuids::to_string(m_group_id); }
-    std::string rdev_name() const { return m_rdev_name; }
+    std::string rdev_name() const { return m_rdev_name; };
+    std::string identify_str() const { return m_identify_str; };
     std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }

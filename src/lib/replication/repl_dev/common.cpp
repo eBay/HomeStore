@@ -31,9 +31,7 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     std::unique_lock< std::mutex > lg(m_state_mtx);
     if (has_linked_data() && !has_state(repl_req_state_t::BLK_ALLOCATED)) {
         auto alloc_status = alloc_local_blks(listener, data_size);
-        if (alloc_status != ReplServiceError::OK) {
-            LOGERROR("Allocate blk for rreq failed error={}", alloc_status);
-        }
+        if (alloc_status != ReplServiceError::OK) { LOGERROR("Allocate blk for rreq failed error={}", alloc_status); }
         return alloc_status;
     }
     return ReplServiceError::OK;

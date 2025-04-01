@@ -30,6 +30,7 @@ public:
 
 private:
     std::string rdev_name() const;
+    std::string identify_str() const;
 };
 
 } // namespace homestore

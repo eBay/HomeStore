@@ -107,6 +107,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
 }
 
 std::string ReplLogStore::rdev_name() const { return m_rd.rdev_name(); }
+std::string ReplLogStore::identify_str() const { return m_rd.identify_str(); }
 
 bool ReplLogStore::compact(ulong compact_upto_lsn) {
     RD_LOG(DEBUG, "Raft Channel: compact_to_lsn={}", compact_upto_lsn);

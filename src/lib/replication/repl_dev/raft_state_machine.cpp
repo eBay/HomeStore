@@ -429,6 +429,6 @@ nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() {
 
 void RaftStateMachine::free_user_snp_ctx(void*& user_snp_ctx) { m_rd.m_listener->free_user_snp_ctx(user_snp_ctx); }
 
-std::string RaftStateMachine::rdev_name() const { return m_rd.rdev_name(); }
+std::string RaftStateMachine::identify_str() const { return m_rd.identify_str(); }
 
 } // namespace homestore

@@ -80,6 +80,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb.write();
         bind_data_service();
     }
+    m_identify_str = m_rdev_name + ":" + group_id_str();
 
     RD_LOG(INFO,
            "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, "
@@ -300,7 +301,7 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
 
 // we do not have shutdown for async_alloc_write according to the two points above.
 void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& data,
-                                    repl_req_ptr_t rreq) {
+                                    repl_req_ptr_t rreq, trace_id_t tid) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
 
     {
@@ -319,12 +320,16 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
         key, data.size, m_listener);
 
+    RD_LOGD("traceID [{}], repl_key [{}], header size [{}] bytes, user_key size [{}] bytes, data size "
+            "[{}] bytes",
+        tid, rreq->rkey(), header.size(), key.size(), data.size);
+
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
     auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
     RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
     if (status != ReplServiceError::OK) {
-        RD_LOGD("Initializing rreq failed error={}, failing this req", status);
+        RD_LOGD("traceID [{}], Initializing rreq failed error={}, failing this req", tid, status);
         handle_error(rreq, status);
         return;
     }
@@ -1071,7 +1076,7 @@ repl_req_ptr_t RaftReplDev::repl_key_to_req(repl_key const& rkey) const {
 // async_read and async_free_blks graceful shutdown will be handled by data_service.
 
 folly::Future< std::error_code > RaftReplDev::async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
-                                                         bool part_of_batch) {
+                                                         bool part_of_batch, trace_id_t tid) {
     if (is_stopping()) {
         LOGINFO("repl dev is being shutdown!");
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
@@ -1079,7 +1084,7 @@ folly::Future< std::error_code > RaftReplDev::async_read(MultiBlkId const& bid, 
     return data_service().async_read(bid, sgs, size, part_of_batch);
 }
 
-folly::Future< std::error_code > RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
+folly::Future< std::error_code > RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid, trace_id_t tid) {
     // TODO: For timeline consistency required, we should retain the blkid that is changed and write that to another
     // journal.
     if (is_stopping()) {

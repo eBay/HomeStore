@@ -29,6 +29,7 @@ struct repl_req_ctx;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
+using trace_id_t = u_int64_t;
 
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
@@ -385,7 +386,7 @@ public:
     }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id){};
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
@@ -416,7 +417,7 @@ public:
     /// @param ctx - User supplied context which will be passed to listener
     /// callbacks
     virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                   repl_req_ptr_t ctx) = 0;
+                                   repl_req_ptr_t ctx, trace_id_t tid = 0) = 0;
 
     /// @brief Reads the data and returns a future to continue on
     /// @param bid Block id to read
@@ -427,13 +428,14 @@ public:
     /// @return A Future with std::error_code to notify if it has successfully read the data or any error code in case
     /// of failure
     virtual folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
-                                                        bool part_of_batch = false) = 0;
+                                                        bool part_of_batch = false, trace_id_t tid = 0) = 0;
 
     /// @brief After data is replicated and on_commit to the listener is called. the blkids can be freed.
     ///
     /// @param lsn - LSN of the old blkids that is being freed
     /// @param blkids - blkids to be freed.
-    virtual folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
+    virtual folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid,
+                                                             trace_id_t tid = 0) = 0;
 
     /// @brief Try to switch the current replica where this method called to become a leader.
     /// @return True if it is successful, false otherwise.
