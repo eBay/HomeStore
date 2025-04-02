@@ -67,9 +67,13 @@ BlkAllocStatus AppendBlkAllocator::alloc_contiguous(BlkId& bid) { return alloc(1
 // If we want to change above design, we can open this api for vector allocation;
 //
 BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint, BlkId& out_bid) {
-    if (available_blks() < nblks) {
+    auto avail_blks = available_blks();
+    if (hint.reserved_blks) {
+        avail_blks = avail_blks > hint.reserved_blks.value() ? avail_blks - hint.reserved_blks.value() : 0;
+    }
+    if (avail_blks < nblks) {
         // COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
-        LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
+        LOGERROR("No space left to serve request nblks: {}, available_blks: {}, actual available_blks(exclude reserved blks): {}", nblks, available_blks(), avail_blks);
         return BlkAllocStatus::SPACE_FULL;
     } else if (nblks > max_blks_per_blkid()) {
         // consumer(vdev) already handles this case.
