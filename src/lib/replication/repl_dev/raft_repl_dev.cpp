@@ -1295,6 +1295,7 @@ void RaftReplDev::permanent_destroy() {
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::PERMANENT_DESTROYED; });
     // we should destroy repl_dev superblk only after all the resources are cleaned up, so that is crash recovery
     // occurs, we have a chance to find the stale repl_dev and reclaim all the stale resources.
+    std::unique_lock lg{m_sb_mtx};
     m_rd_sb.destroy();
 }
 
@@ -1413,24 +1414,18 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
 }
 
 void RaftReplDev::flush_durable_commit_lsn() {
-    if (is_destroyed()) {
-        RD_LOGI("Raft repl dev is destroyed, ignore flush durable commmit lsn");
-        return;
-    }
-
     auto const lsn = m_commit_upto_lsn.load();
     std::unique_lock lg{m_sb_mtx};
+    if (is_destroyed()) {
+        RD_LOGD("Raft repl dev is destroyed, ignore flush durable commmit lsn");
+        return;
+    }
     m_rd_sb->durable_commit_lsn = lsn;
     m_rd_sb.write();
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
 void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
-    if (is_destroyed()) {
-        RD_LOGI("Raft repl dev is destroyed, ignore cp flush");
-        return;
-    }
-
     auto const lsn = ctx->cp_lsn;
     auto const clsn = ctx->compacted_to_lsn;
     auto const dsn = ctx->last_applied_dsn;
@@ -1441,6 +1436,10 @@ void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     }
 
     std::unique_lock lg{m_sb_mtx};
+    if (is_destroyed()) {
+        RD_LOGD("Raft repl dev is destroyed, ignore cp flush");
+        return;
+    }
     m_rd_sb->compact_lsn = clsn;
     // dc_lsn is also flushed in flush_durable_commit_lsn()
     // we need to take a max to avoid rolling back.
