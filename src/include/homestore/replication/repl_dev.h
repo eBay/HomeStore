@@ -54,10 +54,10 @@ static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
 static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
 
 struct repl_key {
-    int32_t server_id{0}; // Server Id which this req is originated from
-    uint64_t term;        // RAFT term number
-    uint64_t dsn{0};      // Data sequence number to tie the data with the raft journal entry
-    uint64_t traceID{0};  // tracing ID provided by application that connects logs.
+    int32_t server_id{0};  // Server Id which this req is originated from
+    uint64_t term;         // RAFT term number
+    uint64_t dsn{0};       // Data sequence number to tie the data with the raft journal entry
+    trace_id_t traceID{0}; // tracing ID provided by application that connects logs.
 
     struct Hasher {
         size_t operator()(repl_key const& rk) const {
@@ -68,8 +68,7 @@ struct repl_key {
 
     bool operator==(repl_key const& other) const = default;
     std::string to_string() const {
-        return fmt::format("server={}, term={}, dsn={}, hash={}, traceID={}", server_id, term, dsn, Hasher()(*this),
-                           traceID);
+        return fmt::format("server={}, term={}, dsn={}, hash={}", server_id, term, dsn, Hasher()(*this));
     }
 };
 
@@ -123,7 +122,7 @@ public:
     repl_key const& rkey() const { return m_rkey; }
     uint64_t dsn() const { return m_rkey.dsn; }
     uint64_t term() const { return m_rkey.term; }
-    uint64_t traceID() const { return m_rkey.traceID; }
+    trace_id_t traceID() const { return m_rkey.traceID; }
     int64_t lsn() const { return m_lsn; }
     bool is_proposer() const { return m_is_proposer; }
     journal_type_t op_code() const { return m_op_code; }

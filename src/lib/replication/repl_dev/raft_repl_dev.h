@@ -231,7 +231,9 @@ public:
         auto committed_lsn = m_commit_upto_lsn.load();
         auto gate = m_traffic_ready_lsn.load();
         bool ready = committed_lsn >= gate;
-        if (!ready) { RD_LOGD("Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate); }
+        if (!ready) {
+            RD_LOGD(NO_TRACE_ID, "Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate);
+        }
         return ready;
     }
     // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
@@ -270,12 +272,12 @@ public:
             // was a follower, m_traffic_ready_lsn should be zero on follower.
             RD_REL_ASSERT(existing_gate == 0, "existing gate should be zero");
         }
-        RD_LOGD("become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
+        RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
     };
     void become_follower_cb() {
         // m_traffic_ready_lsn should be zero on follower.
         m_traffic_ready_lsn.store(0);
-        RD_LOGD("become_follower_cb setting  traffic_ready_lsn to 0");
+        RD_LOGD(NO_TRACE_ID, "become_follower_cb setting  traffic_ready_lsn to 0");
     }
 
     /// @brief This method is called when the data journal is compacted
@@ -379,7 +381,7 @@ private:
     void set_log_store_last_durable_lsn(store_lsn_t lsn);
     void commit_blk(repl_req_ptr_t rreq);
     void replace_member(repl_req_ptr_t rreq);
-    void reset_quorum_size(uint32_t commit_quorum);
+    void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
 };

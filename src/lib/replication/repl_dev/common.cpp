@@ -31,7 +31,10 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     std::unique_lock< std::mutex > lg(m_state_mtx);
     if (has_linked_data() && !has_state(repl_req_state_t::BLK_ALLOCATED)) {
         auto alloc_status = alloc_local_blks(listener, data_size);
-        if (alloc_status != ReplServiceError::OK) { LOGERROR("Allocate blk for rreq failed error={}", alloc_status); }
+        if (alloc_status != ReplServiceError::OK) {
+            LOGERRORMOD(replication, "[traceID={}] Allocate blk for rreq failed error={}", m_rkey.traceID,
+                        alloc_status);
+        }
         return alloc_status;
     }
     return ReplServiceError::OK;
@@ -105,7 +108,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
 
     if (hints_result.value().committed_blk_id.has_value()) {
         //if the committed_blk_id is already present, use it and skip allocation and commitment
-        LOGINFO("For Repl_key=[{}] data already exists, skip", rkey().to_string());
+        LOGINFOMOD(replication, "[traceID={}] For Repl_key=[{}] data already exists, skip", rkey().traceID, rkey().to_string());
         m_local_blkid = hints_result.value().committed_blk_id.value();
         add_state(repl_req_state_t::BLK_ALLOCATED);
         add_state(repl_req_state_t::DATA_RECEIVED);
@@ -119,6 +122,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
                                             hints_result.value(), m_local_blkid);
     if (status != BlkAllocStatus::SUCCESS) {
+        LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID, rkey(), status);
         DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
         return ReplServiceError::NO_SPACE_LEFT;
     }
@@ -134,7 +138,7 @@ void repl_req_ctx::set_lsn(int64_t lsn) {
                  "Changing lsn for request={} on the fly can cause race condition, not expected. lsn {}, m_lsn {}",
                  to_string(), lsn, m_lsn);
     m_lsn = lsn;
-    LOGTRACEMOD(replication, "Setting lsn={} for request={}", lsn, to_string());
+    LOGTRACEMOD(replication, "[traceID={}] Setting lsn={} for request={}", rkey().traceID, lsn, to_string());
 }
 
 bool repl_req_ctx::save_pushed_data(intrusive< sisl::GenericRpcData > const& pushed_data, uint8_t const* data,
@@ -198,7 +202,7 @@ void repl_req_ctx::release_data() {
     // explicitly clear m_buf_for_unaligned_data as unaligned pushdata/fetchdata will be saved here
     m_buf_for_unaligned_data = sisl::io_blob_safe{};
     if (m_pushed_data) {
-        LOGTRACEMOD(replication, "m_pushed_data addr={}, m_rkey={}, m_lsn={}",
+        LOGTRACEMOD(replication, "[traceID={}] m_pushed_data addr={}, m_rkey={}, m_lsn={}", rkey().traceID,
                     static_cast< void* >(m_pushed_data.get()), m_rkey.to_string(), m_lsn);
         m_pushed_data->send_response();
         m_pushed_data = nullptr;

@@ -24,7 +24,9 @@ namespace homestore {
 class ReplicaSetImpl;
 class StateMachineStore;
 
-#define RD_LOG(level, msg, ...) LOG##level##MOD(replication, "[{}] " msg, identify_str(), ##__VA_ARGS__)
+#define NO_TRACE_ID "n/a"
+#define RD_LOG(level, traceID, msg, ...)                                                                               \
+    LOG##level##MOD(replication, "[traceID={}] [{}] " msg, traceID, identify_str(), ##__VA_ARGS__)
 
 #define RD_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                               \
     {                                                                                                                  \
@@ -69,12 +71,12 @@ class StateMachineStore;
 #define RD_REL_ASSERT_GT(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
 #define RD_REL_ASSERT_GE(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
 
-#define RD_LOGT(...) RD_LOG(TRACE, ##__VA_ARGS__)
-#define RD_LOGD(...) RD_LOG(DEBUG, ##__VA_ARGS__)
-#define RD_LOGI(...) RD_LOG(INFO, ##__VA_ARGS__)
-#define RD_LOGW(...) RD_LOG(WARN, ##__VA_ARGS__)
-#define RD_LOGE(...) RD_LOG(ERROR, ##__VA_ARGS__)
-#define RD_LOGC(...) RD_LOG(CRITICAL, ##__VA_ARGS__)
+#define RD_LOGT(traceID, ...) RD_LOG(TRACE, traceID, ##__VA_ARGS__)
+#define RD_LOGD(traceID, ...) RD_LOG(DEBUG, traceID, ##__VA_ARGS__)
+#define RD_LOGI(traceID, ...) RD_LOG(INFO, traceID, ##__VA_ARGS__)
+#define RD_LOGW(traceID, ...) RD_LOG(WARN, traceID, ##__VA_ARGS__)
+#define RD_LOGE(traceID, ...) RD_LOG(ERROR, traceID, ##__VA_ARGS__)
+#define RD_LOGC(traceID, ...) RD_LOG(CRITICAL, traceID, ##__VA_ARGS__)
 
 // For the logic snapshot obj_id, we use the highest bit to indicate the type of the snapshot message.
 // 0 is for HS, 1 is for Application.

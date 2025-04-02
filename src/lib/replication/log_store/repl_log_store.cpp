@@ -10,7 +10,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     // We don't want to transform anything that is not an app log
     if (entry->get_val_type() != nuraft::log_val_type::app_log || entry->get_buf_ptr()->size() == 0) {
         ulong lsn = HomeRaftLogStore::append(entry);
-        RD_LOGD("append entry term={}, log_val_type={} lsn={} size={}", entry->get_term(),
+        RD_LOGD(NO_TRACE_ID, "None-APP log: append entry term={}, log_val_type={} lsn={} size={}", entry->get_term(),
                 static_cast< uint32_t >(entry->get_val_type()), lsn, entry->get_buf().size());
         return lsn;
     }
@@ -19,7 +19,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
 
-    RD_LOGD("Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
+    RD_LOGT(rreq->traceID(), "Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
     return lsn;
 }
 
@@ -33,7 +33,7 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     HomeRaftLogStore::write_at(index, entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(index));
-    RD_LOGD("Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
+    RD_LOGT(rreq->traceID(), "Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
 }
 
 void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
@@ -54,8 +54,8 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         }
     }
 
-    RD_LOGT("Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={} {}", start_lsn, count,
-            reqs->size(), proposer_reqs->size());
+    RD_LOGT(NO_TRACE_ID, "Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={} {}",
+            start_lsn, count, reqs->size(), proposer_reqs->size());
 
     if (!reqs->empty()) {
         // Check the map if data corresponding to all of these requsts have been received and written. If not, schedule
@@ -85,7 +85,9 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
     // so skip waiting data written and mark reqs as flushed here.
     for (auto const& rreq : *proposer_reqs) {
         if (rreq) {
-            RD_LOGT("Raft Channel: end_of_append_batch, I am proposer for lsn {}, only flushed log for it", rreq->lsn());
+            RD_LOGT(rreq->traceID(),
+                    "Raft Channel: end_of_append_batch, I am proposer for lsn {}, only flushed log for it",
+                    rreq->lsn());
             rreq->add_state(repl_req_state_t::LOG_FLUSHED);
         }
     }
@@ -95,7 +97,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         auto rreq = m_sm.lsn_to_req(lsn);
         if (rreq != nullptr) {
             if (rreq->has_state(repl_req_state_t::ERRORED)) {
-                RD_LOGE("Raft Channel: rreq=[{}] met some errors before", rreq->to_compact_string());
+                RD_LOGE(rreq->traceID(), "Raft Channel: rreq=[{}] met some errors before", rreq->to_compact_string());
                 continue;
             }
             rreq->set_is_volatile(false);
@@ -110,7 +112,7 @@ std::string ReplLogStore::rdev_name() const { return m_rd.rdev_name(); }
 std::string ReplLogStore::identify_str() const { return m_rd.identify_str(); }
 
 bool ReplLogStore::compact(ulong compact_upto_lsn) {
-    RD_LOG(DEBUG, "Raft Channel: compact_to_lsn={}", compact_upto_lsn);
+    RD_LOGD(NO_TRACE_ID, "Raft Channel: compact_to_lsn={}", compact_upto_lsn);
     m_rd.on_compact(compact_upto_lsn);
     return HomeRaftLogStore::compact(compact_upto_lsn);
 }

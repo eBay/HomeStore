@@ -34,7 +34,7 @@ static std::pair< sisl::blob, sisl::blob > header_only_extract(nuraft::buffer& b
 
 ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     rreq->create_journal_entry(true /* raft_buf */, m_rd.server_id());
-    RD_LOGT("Raft Channel: propose journal_entry=[{}] ", rreq->journal_entry()->to_string());
+    RD_LOGT(rreq->traceID(), "Raft Channel: propose journal_entry=[{}] ", rreq->journal_entry()->to_string());
 
     auto* vec = sisl::VectorPool< raft_buf_ptr_t >::alloc();
     vec->push_back(rreq->raft_journal_buf());
@@ -43,7 +43,7 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     sisl::VectorPool< raft_buf_ptr_t >::free(vec);
 
     if (append_status && !append_status->get_accepted()) {
-        RD_LOGE("Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
+        RD_LOGE(rreq->traceID(), "Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
                 append_status->get_result_code());
         return RaftReplService::to_repl_error(append_status->get_result_code());
     }
@@ -56,8 +56,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOGT("Raft Channel: Localizing Raft log_entry: server_id={}, term={}, journal_entry=[{}] ", jentry->server_id,
-            lentry.get_term(), jentry->to_string());
+    RD_LOGT(jentry->traceID, "Raft Channel: Localizing Raft log_entry: server_id={}, term={}, journal_entry=[{}] ",
+            jentry->server_id, lentry.get_term(), jentry->to_string());
 
     auto entry_to_hdr = [](repl_journal_entry* jentry) {
         return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
@@ -121,9 +121,9 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
 
 out:
     if (rreq == nullptr) {
-        RD_LOG(ERROR,
-               "Failed to localize journal entry rkey={} jentry=[{}], we return error and let Raft resend this req",
-               rkey.to_string(), jentry->to_string());
+        RD_LOGE(rreq->traceID(),
+                "Failed to localize journal entry rkey={} jentry=[{}], we return error and let Raft resend this req",
+                rkey.to_string(), jentry->to_string());
     }
     return rreq;
 }
@@ -182,7 +182,7 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
     int64_t lsn = s_cast< int64_t >(params.log_idx);
 
     repl_req_ptr_t rreq = lsn_to_req(lsn);
-    RD_LOGD("Raft channel: Precommit rreq=[{}]", rreq->to_compact_string());
+    RD_LOGT(rreq->traceID(), "Precommit rreq=[{}]", rreq->to_compact_string());
     m_rd.m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
     return m_success_ptr;
@@ -190,22 +190,18 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
 
 raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params const& params) {
     int64_t lsn = s_cast< int64_t >(params.log_idx);
+    repl_req_ptr_t rreq = lsn_to_req(lsn);
     if (m_rd.need_skip_processing(lsn)) {
-        RD_LOGI("Raft Channel: Log {} is expected to be handled by snapshot. Skipping commit.", lsn);
+        RD_LOGI(rreq->traceID(), "Raft Channel: Log {} is expected to be handled by snapshot. Skipping commit.", lsn);
         return m_success_ptr;
     }
-    RD_LOGD("Raft channel: Received Commit message lsn {} store {} logdev {} size {}", lsn,
-            m_rd.m_data_journal->logstore_id(), m_rd.m_data_journal->logdev_id(), params.data->size());
-    repl_req_ptr_t rreq = lsn_to_req(lsn);
     RD_DBG_ASSERT(rreq != nullptr, "Raft channel got null rreq for lsn={}", lsn);
-    RD_LOGD("Raft channel: Received Commit message rreq=[{}]", rreq->to_string());
+    RD_LOGT(rreq->traceID(), "Raft channel: Received Commit message rreq=[{}]", rreq->to_string());
     if (rreq->is_proposer()) {
         // This is the time to ensure flushing of journal happens in the proposer
         rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     }
-
     m_rd.handle_commit(rreq);
-
     return m_success_ptr;
 }
 
@@ -213,11 +209,11 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
     // when reaching here, the config change log has already been committed, and the new config has been applied to the
     // cluster
     if (m_rd.need_skip_processing(s_cast< repl_lsn_t >(log_idx))) {
-        RD_LOGI("Raft Channel: Config {} is expected to be handled by snapshot. Skipping commit.", log_idx);
+        RD_LOGI(NO_TRACE_ID, "Raft Channel: Config {} is expected to be handled by snapshot. Skipping commit.", log_idx);
         return;
     }
 
-    RD_LOGD("Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
+    RD_LOGD(NO_TRACE_ID, "Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
 
 #ifdef _PRERELEASE
     auto& servers_in_new_conf = new_conf->get_servers();
@@ -237,15 +233,15 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
         oss << "," << *it;
     }
 
-    RD_LOG(INFO, "Raft channel: server ids in new cluster conf : {}, my_id {}, group_id {}", oss.str(), my_id,
-           m_rd.group_id_str());
+    RD_LOGI(NO_TRACE_ID, "Raft channel: server ids in new cluster conf : {}, my_id {}, group_id {}", oss.str(), my_id,
+            m_rd.group_id_str());
 #endif
 
     m_rd.handle_config_commit(s_cast< repl_lsn_t >(log_idx), new_conf);
 }
 
 void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
-    RD_LOGD("Raft channel: Rollback cluster conf , log_idx = {}", log_idx);
+    RD_LOGD(NO_TRACE_ID, "Raft channel: Rollback cluster conf , log_idx = {}", log_idx);
     // TODO:add more logic here if necessary
 }
 
@@ -253,11 +249,11 @@ void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& 
     int64_t lsn = s_cast< int64_t >(params.log_idx);
     repl_req_ptr_t rreq = lsn_to_req(lsn);
     if (rreq == nullptr) {
-        RD_LOG(ERROR, "Raft channel: Rollback lsn {} rreq not found", lsn);
+        RD_LOGE(NO_TRACE_ID, "Raft channel: Rollback lsn {} rreq not found", lsn);
         return;
     }
 
-    RD_LOGD("Raft channel: Rollback lsn {}, rreq=[{}]", lsn, rreq->to_string());
+    RD_LOGD(rreq->traceID(), "Raft channel: Rollback lsn {}, rreq=[{}]", lsn, rreq->to_string());
     m_rd.handle_rollback(rreq);
 }
 
@@ -287,7 +283,7 @@ void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_p
 }
 
 uint64_t RaftStateMachine::last_commit_index() {
-    RD_LOG(DEBUG, "Raft channel: last_commit_index {}", uint64_cast(m_rd.get_last_commit_lsn()));
+    RD_LOGD(NO_TRACE_ID, "Raft channel: last_commit_index {}", uint64_cast(m_rd.get_last_commit_lsn()));
     return uint64_cast(m_rd.get_last_commit_lsn());
 }
 
@@ -297,7 +293,7 @@ void RaftStateMachine::unlink_lsn_to_req(int64_t lsn, repl_req_ptr_t rreq) {
     // it is possible a LSN mapped to different rreq in history
     // due to log overwritten. Verify the rreq before removing
     auto deleted = m_lsn_req_map.erase_if_equal(lsn, rreq);
-    if (deleted) { RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, rreq->to_string()); }
+    if (deleted) { RD_LOGT(rreq->traceID(), "Raft channel: erase lsn {},  rreq {}", lsn, rreq->to_string()); }
 }
 
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
@@ -307,8 +303,8 @@ void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->set_created_time();
     auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
     if (!r.second) {
-        RD_LOG(ERROR, "lsn={} already in precommit list, exist_term={}, is_volatile={}",
-               lsn, r.first->second->term(), r.first->second->is_volatile());
+        RD_LOGE(rreq->traceID(), "lsn={} already in precommit list, exist_term={}, is_volatile={}", lsn,
+                r.first->second->term(), r.first->second->is_volatile());
         // TODO: we need to think about the case where volatile is in the map already, is it safe to overwrite it?
     }
 }
@@ -339,7 +335,7 @@ int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx,
     // uncommitted logs may or may not included in the snapshot data sent by leader,
     // depending on the racing of commit vs snapshot read, leading to data inconsistency.
     if (s_cast< repl_lsn_t >(s.get_last_log_idx()) > m_rd.get_last_commit_lsn()) {
-        RD_LOG(WARN, "not ready to read because there are some uncommitted logs in snapshot, "
+        RD_LOGW(NO_TRACE_ID, "not ready to read because there are some uncommitted logs in snapshot, "
                      "let nuraft retry later. snapshot log_idx={}, last_commit_lsn={}",
                      s.get_last_log_idx(), m_rd.get_last_commit_lsn());
         return -1;
@@ -390,7 +386,7 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
     snp_data->is_last_obj = is_last_obj;
 
     // We are doing a copy here.
-    sisl::io_blob_safe blob{static_cast<uint32_t>(data.size())};
+    sisl::io_blob_safe blob{static_cast< uint32_t >(data.size())};
     std::memcpy(blob.bytes(), data.data_begin(), data.size());
     snp_data->blob = std::move(blob);
 
