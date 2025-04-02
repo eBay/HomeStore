@@ -249,6 +249,7 @@ VENUM(BlkAllocStatus, uint32_t,
 
 struct blk_alloc_hints {
     blk_temp_t desired_temp{0};                  // Temperature hint for the device
+    std::optional< uint32_t > reserved_blks;     // Reserved blks in a chunk
     std::optional< uint32_t > pdev_id_hint;      // which physical device to pick (hint if any) -1 for don't care
     std::optional< chunk_num_t > chunk_id_hint;  // any specific chunk id to pick for this allocation
     std::optional<MultiBlkId> committed_blk_id; //  blk id indicates the blk was already allocated and committed, don't allocate and commit again
