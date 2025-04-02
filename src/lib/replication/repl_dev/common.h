@@ -35,6 +35,7 @@ struct repl_journal_entry {
     uint16_t minor_version{JOURNAL_ENTRY_MINOR};
 
     journal_type_t code;
+    uint64_t traceID;  // traceID provided by application, mostly for consolidate logs.
     int32_t server_id; // Server id from where journal entry is originated
     uint64_t dsn;      // Data seq number
     uint32_t user_header_size;

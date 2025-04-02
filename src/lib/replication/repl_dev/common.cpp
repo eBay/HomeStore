@@ -54,6 +54,7 @@ void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
     }
 
     m_journal_entry->code = m_op_code;
+    m_journal_entry->traceID = m_rkey.traceID;
     m_journal_entry->server_id = server_id;
     m_journal_entry->dsn = m_rkey.dsn;
     m_journal_entry->user_header_size = m_header.size();

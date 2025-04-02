@@ -74,7 +74,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
                           jentry->value_size};
     };
 
-    repl_key const rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
+    repl_key const rkey{
+        .server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
 
     // Create a new rreq (or) Pull rreq from the map given the repl_key, header and key. Any new rreq will
     // allocate the blks (in case of large data). We will use the new blkid and transform the current journal entry's
@@ -150,7 +151,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    repl_key rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
+    repl_key rkey{
+        .server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
 
     auto rreq = m_rd.repl_key_to_req(rkey);
     if ((rreq == nullptr) || (rreq->is_localize_pending())) {

@@ -196,9 +196,11 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             members.replica_in = member_in;
 
             sisl::blob header(r_cast< uint8_t* >(&members), sizeof(replace_members_ctx));
-            rreq->init(
-                repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
-                journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0, m_listener);
+            rreq->init(repl_key{.server_id = server_id(),
+                                .term = raft_server()->get_term(),
+                                .dsn = m_next_dsn.fetch_add(1),
+                                .traceID = 0},
+                       journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0, m_listener);
 
             auto err = m_state_machine->propose_to_raft(std::move(rreq));
             if (err != ReplServiceError::OK) {
@@ -267,7 +269,10 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
 
     // here, we set the dsn to a new one , which is definitely unique in the follower, so that the new rreq will not
     // have a conflict with the old rreq.
-    rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+    rreq->init(repl_key{.server_id = server_id(),
+                        .term = raft_server()->get_term(),
+                        .dsn = m_next_dsn.fetch_add(1),
+                        .traceID = std::numeric_limits< uint64_t >::max()},
                journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0, m_listener);
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
@@ -315,14 +320,16 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         }
     }
 
-    auto status = rreq->init(
-        repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
-        data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
-        key, data.size, m_listener);
+    auto status = rreq->init(repl_key{.server_id = server_id(),
+                                      .term = raft_server()->get_term(),
+                                      .dsn = m_next_dsn.fetch_add(1),
+                                      .traceID = tid},
+                             data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED,
+                             true /* is_proposer */, header, key, data.size, m_listener);
 
     RD_LOGD("traceID [{}], repl_key [{}], header size [{}] bytes, user_key size [{}] bytes, data size "
             "[{}] bytes",
-        tid, rreq->rkey(), header.size(), key.size(), data.size);
+            tid, rreq->rkey(), header.size(), key.size(), data.size);
 
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
     auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
@@ -391,7 +398,7 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
 
     // Prepare the rpc request packet with all repl_reqs details
     builder.FinishSizePrefixed(CreatePushDataRequest(
-        builder, server_id(), rreq->term(), rreq->dsn(),
+        builder, rreq->traceID(), server_id(), rreq->term(), rreq->dsn(),
         builder.CreateVector(rreq->header().cbytes(), rreq->header().size()),
         builder.CreateVector(rreq->key().cbytes(), rreq->key().size()), data.size, get_time_since_epoch_ms()));
 
@@ -448,7 +455,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     }
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
-    repl_key rkey{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()};
+    repl_key rkey{.server_id = push_req->issuer_replica_id(),
+                  .term = push_req->raft_term(),
+                  .dsn = push_req->dsn(),
+                  .traceID = push_req->traceID()};
     auto const req_orig_time_ms = push_req->time_ms();
 
     RD_LOGD("Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
@@ -1583,7 +1593,8 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
                           jentry->value_size};
     };
 
-    repl_key const rkey{.server_id = jentry->server_id, .term = lentry->get_term(), .dsn = jentry->dsn};
+    repl_key const rkey{
+        .server_id = jentry->server_id, .term = lentry->get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
 
     auto const [it, happened] = m_repl_key_req_map.try_emplace(rkey, repl_req_ptr_t(new repl_req_ctx()));
     RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
