@@ -121,7 +121,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
 
 out:
     if (rreq == nullptr) {
-        RD_LOGE(rreq->traceID(),
+        RD_LOGE(rkey.traceID,
                 "Failed to localize journal entry rkey={} jentry=[{}], we return error and let Raft resend this req",
                 rkey.to_string(), jentry->to_string());
     }
