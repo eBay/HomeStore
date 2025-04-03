@@ -593,7 +593,9 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
 
             // the chunk_id is the chunk on which no_space_left happens
             const auto& chunk_id = rreq->local_blkid().chunk_num();
-            const auto last_append_lsn = m_data_journal->next_slot() - 1;
+
+            // last_append_lsn here means the raft_lsn of the last log in logstore.
+            const auto last_append_lsn = to_repl_lsn(raft_server()->get_last_log_idx());
             const auto last_commit_lsn = get_last_commit_lsn();
 
             RD_LOGD(rkey.traceID,
@@ -606,7 +608,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
                 // we have to hanlde it here, since the last_commit_lsn has been committed and as a result,
                 // handle_no_space_left will not be triggered in committing thread.
                 handle_no_space_left();
-            } else if (lsn < m_no_space_left_error_info.lsn) {
+            } else if (lsn - 1 < m_no_space_left_error_info.lsn) {
                 /*set a new error info or overwrite an existing error info*/
                 // if current committed lsn is 100, apppended lsn is 110, then we want to wait for lsn 110 is
                 // committed and then we can start handling the no_space_left error. however, lsn 105-110 might be
@@ -614,7 +616,9 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
                 // new no_space_left happens.in this case, we need to overwrite an existing error info with the new
                 // one.
                 RD_LOGD(rkey.traceID,
-                        "wait for the commit thread to handle no_space_left error after lsn {} is committed", lsn - 1);
+                        "wait for the commit thread to handle no_space_left error after lsn {} is committed, "
+                        "last_append_lsn {}, last_commit_lsn {}",
+                        lsn - 1, last_append_lsn, last_commit_lsn);
                 set_no_space_left_error_info(lsn - 1, chunk_id);
             } else {
                 RD_LOGW(rkey.traceID,
@@ -1441,7 +1445,7 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
         auto raft_req = r_cast< nuraft::req_msg* >(param->ctx);
         auto const& entries = raft_req->log_entries();
 
-        auto start_lsn = raft_req->get_last_log_idx() + 1;
+        auto start_lsn = to_repl_lsn(raft_req->get_last_log_idx() + 1);
         if (entries.size() == 0) {
             RD_LOGT(NO_TRACE_ID, "Raft channel: Received no entry, leader committed lsn {}",
                     raft_req->get_commit_idx());
@@ -1912,8 +1916,7 @@ void RaftReplDev::handle_no_space_left() {
             "call upper layer to handle no_space_left error, lsn={}, chunk_id={} for raft repl dev group_id={}", lsn,
             chunk_id, group_id_str());
 
-    // need to wait for the completion
-    auto ec = m_listener->on_no_space_left(chunk_id).get();
+    auto ec = m_listener->on_no_space_left(chunk_id);
 
     HS_LOG_ASSERT(
         !ec,

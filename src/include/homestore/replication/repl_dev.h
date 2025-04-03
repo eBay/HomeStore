@@ -382,12 +382,10 @@ public:
     }
 
     /// @brief ask upper layer to handle no_space_left event
-    virtual folly::Future< std::error_code > on_no_space_left(chunk_num_t chunk_id) {
-        return folly::makeFuture< std::error_code >(std::error_code{});
-    }
+    virtual std::error_code on_no_space_left(chunk_num_t chunk_id) { return std::error_code{}; }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) {};
+    virtual void on_log_replay_done(const group_id_t& group_id){};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
