@@ -142,7 +142,6 @@ public:
     repl_journal_entry const* journal_entry() const { return m_journal_entry; }
     uint32_t journal_entry_size() const;
     bool is_localize_pending() const { return m_is_jentry_localize_pending; }
-    bool is_data_inlined() const { return (m_op_code == journal_type_t::HS_DATA_INLINED); }
     bool has_linked_data() const { return (m_op_code == journal_type_t::HS_DATA_LINKED); }
 
     raft_buf_ptr_t& raft_journal_buf();
@@ -383,12 +382,10 @@ public:
     }
 
     /// @brief ask upper layer to handle no_space_left event
-    virtual folly::Future< std::error_code > on_no_space_left(uint32_t pdev_id, chunk_num_t chunk_id) {
-        return folly::makeFuture< std::error_code >(std::error_code{});
-    }
+    virtual std::error_code on_no_space_left(chunk_num_t chunk_id) { return std::error_code{}; }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) {};
+    virtual void on_log_replay_done(const group_id_t& group_id){};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

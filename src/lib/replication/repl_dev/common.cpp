@@ -10,8 +10,9 @@
 
 namespace homestore {
 
-ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-                        sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener) {
+ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer,
+                                    sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
+                                    cshared< ReplDevListener >& listener) {
     m_rkey = std::move(rkey);
 #ifndef NDEBUG
     if (data_size > 0) {
@@ -26,17 +27,34 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     m_key = key;
     m_is_jentry_localize_pending = (!is_proposer && (data_size > 0)); // Pending on the applier and with linked data
 
-    // We need to allocate the block if the req has data linked, since entry doesn't exist or if it exist, two threads(data channel and raft channel) are trying to do the same
-    // thing. So take state mutex and allocate the blk
+    // We need to allocate the block if the req has data linked, since entry doesn't exist or if it exist, two
+    // threads(data channel and raft channel) are trying to do the same thing. So take state mutex and allocate the blk
     std::unique_lock< std::mutex > lg(m_state_mtx);
     if (has_linked_data() && !has_state(repl_req_state_t::BLK_ALLOCATED)) {
-        auto alloc_status = alloc_local_blks(listener, data_size);
+        ReplServiceError alloc_status;
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("fake_no_space_left") && !is_proposer) {
+            LOGERROR("Simulate no space left on follower for testing purposes");
+            // TODO: support `fake_no_space_left` for the leader, do not throw exception in on-error in the test
+            // framework, it will cause the leader to fail and exit.
+            alloc_status = ReplServiceError::NO_SPACE_LEFT;
+        } else {
+            alloc_status = alloc_local_blks(listener, data_size);
+            if (alloc_status != ReplServiceError::OK) {
+                LOGERRORMOD(replication, "[traceID={}] Allocate blk for rreq failed error={}", m_rkey.traceID,
+                            alloc_status);
+            }
+        }
+#else
+        alloc_status = alloc_local_blks(listener, data_size);
         if (alloc_status != ReplServiceError::OK) {
             LOGERRORMOD(replication, "[traceID={}] Allocate blk for rreq failed error={}", m_rkey.traceID,
                         alloc_status);
         }
+#endif
         return alloc_status;
     }
+
     return ReplServiceError::OK;
 }
 
@@ -107,8 +125,9 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     if (hints_result.hasError()) { return hints_result.error(); }
 
     if (hints_result.value().committed_blk_id.has_value()) {
-        //if the committed_blk_id is already present, use it and skip allocation and commitment
-        LOGINFOMOD(replication, "[traceID={}] For Repl_key=[{}] data already exists, skip", rkey().traceID, rkey().to_string());
+        // if the committed_blk_id is already present, use it and skip allocation and commitment
+        LOGINFOMOD(replication, "[traceID={}] For Repl_key=[{}] data already exists, skip", rkey().traceID,
+                   rkey().to_string());
         m_local_blkid = hints_result.value().committed_blk_id.value();
         add_state(repl_req_state_t::BLK_ALLOCATED);
         add_state(repl_req_state_t::DATA_RECEIVED);
@@ -122,7 +141,8 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
                                             hints_result.value(), m_local_blkid);
     if (status != BlkAllocStatus::SUCCESS) {
-        LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID, rkey(), status);
+        LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID,
+                   rkey(), status);
         DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
         return ReplServiceError::NO_SPACE_LEFT;
     }
