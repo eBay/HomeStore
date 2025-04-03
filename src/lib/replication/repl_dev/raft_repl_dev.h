@@ -154,11 +154,11 @@ private:
     RaftReplService& m_repl_svc;
     folly::ConcurrentHashMap< repl_key, repl_req_ptr_t, repl_key::Hasher > m_repl_key_req_map;
     nuraft_mesg::Manager& m_msg_mgr;
-    group_id_t m_group_id;     // Replication Group id
-    std::string m_rdev_name;   // Short name for the group for easy debugging
+    group_id_t m_group_id;      // Replication Group id
+    std::string m_rdev_name;    // Short name for the group for easy debugging
     std::string m_identify_str; // combination of rdev_name:group_id
-    replica_id_t m_my_repl_id; // This replica's uuid
-    int32_t m_raft_server_id;  // Server ID used by raft (unique within raft group)
+    replica_id_t m_my_repl_id;  // This replica's uuid
+    int32_t m_raft_server_id;   // Server ID used by raft (unique within raft group)
     shared< ReplLogStore > m_data_journal;
     shared< HomeLogStore > m_free_blks_journal;
     sisl::urcu_scoped_ptr< repl_dev_stage_t > m_stage;
@@ -191,6 +191,17 @@ private:
 
     static std::atomic< uint64_t > s_next_group_ordinal;
     bool m_log_store_replay_done{false};
+
+    // this is used to track the latest no_space_left error. It means after we commit to lsn, we have to start handling
+    // no_space_left for the chunk(chunk_id)
+    struct no_space_left_error_info {
+        repl_lsn_t lsn;
+        chunk_num_t chunk_id;
+    } m_no_space_left_error_info{std::numeric_limits< repl_lsn_t >::max(), 0};
+
+    // pending create requests, including both raft and data channel
+    std::atomic_uint64_t m_pending_init_req_num;
+    std::atomic< bool > m_in_emergency;
 
 public:
     friend class RaftStateMachine;
@@ -225,6 +236,7 @@ public:
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
+
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
     bool is_ready_for_traffic() const override {
         if (is_stopping()) return false;
@@ -237,9 +249,7 @@ public:
         return ready;
     }
     // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
-    void purge() override {
-        RD_REL_ASSERT(false, "NOT SUPPORTED YET");
-    }
+    void purge() override { RD_REL_ASSERT(false, "NOT SUPPORTED YET"); }
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
@@ -258,22 +268,17 @@ public:
     void handle_rollback(repl_req_ptr_t rreq);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
     repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
-                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel);
+                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel,
+                                      int64_t lsn = -1 /*init lsn*/);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
     void cp_flush(CP* cp, cshared< ReplDevCPContext > ctx);
     cshared< ReplDevCPContext > get_cp_ctx(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
-    void become_leader_cb() {
-        auto new_gate = raft_server()->get_last_log_idx();
-        repl_lsn_t existing_gate = 0;
-        if (!m_traffic_ready_lsn.compare_exchange_strong(existing_gate, new_gate)) {
-            // was a follower, m_traffic_ready_lsn should be zero on follower.
-            RD_REL_ASSERT(existing_gate == 0, "existing gate should be zero");
-        }
-        RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
-    };
+
+    void become_leader_cb();
+
     void become_follower_cb() {
         // m_traffic_ready_lsn should be zero on follower.
         m_traffic_ready_lsn.store(0);
@@ -332,15 +337,13 @@ public:
 
     /**
      * \brief This method is called to check if the given LSN is within the last snapshot LSN received from the leader.
-     * All logs with LSN less than or equal to the last snapshot LSN are considered as part of the baseline resync, which
-     * doesn't need any more operations (e.g., replay, commit).
+     * All logs with LSN less than or equal to the last snapshot LSN are considered as part of the baseline resync,
+     * which doesn't need any more operations (e.g., replay, commit).
      *
      * \param lsn The LSN to be checked.
      * \return true if the LSN is within the last snapshot LSN, false otherwise.
      */
-    bool need_skip_processing(const repl_lsn_t lsn) {
-        return lsn <= m_rd_sb->last_snapshot_lsn;
-    }
+    bool need_skip_processing(const repl_lsn_t lsn) { return lsn <= m_rd_sb->last_snapshot_lsn; }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
@@ -384,6 +387,25 @@ private:
     void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
+
+    ReplServiceError init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,
+                                  sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
+                                  cshared< ReplDevListener >& listener);
+
+    // no_space_left error handling
+    void pause_statemachine();
+    void resume_statemachine();
+    void set_no_space_left_error_info(repl_lsn_t lsn, chunk_num_t chunk_id);
+    void reset_no_space_left_error_info();
+    void handle_no_space_left();
+
+    void enter_emergency() { m_in_emergency.store(true, std::memory_order_release); }
+    void leave_emergency() { m_in_emergency.store(false, std::memory_order_release); }
+    bool is_in_emergency() { return m_in_emergency.load(std::memory_order_acquire); }
+
+    void inc_pending_init_req_num() { m_pending_init_req_num.fetch_add(1, std::memory_order_acq_rel); }
+    void dec_pending_init_req_num() { m_pending_init_req_num.fetch_sub(1, std::memory_order_acq_rel); }
+    uint64_t get_pending_init_req_num() { return m_pending_init_req_num.load(std::memory_order_acquire); }
 };
 
 } // namespace homestore

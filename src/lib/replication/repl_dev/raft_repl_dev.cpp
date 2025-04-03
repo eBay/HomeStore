@@ -15,7 +15,6 @@
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
-// #include "common/homestore_flip.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
 #include "device/device.h"
@@ -198,18 +197,27 @@ AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_
             members.replica_in = member_in;
 
             sisl::blob header(r_cast< uint8_t* >(&members), sizeof(replace_members_ctx));
-            rreq->init(repl_key{.server_id = server_id(),
-                                .term = raft_server()->get_term(),
-                                .dsn = m_next_dsn.fetch_add(1),
-                                .traceID = trace_id},
-                       journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0, m_listener);
+            auto status = init_req_ctx(rreq,
+                                       repl_key{.server_id = server_id(),
+                                                .term = raft_server()->get_term(),
+                                                .dsn = m_next_dsn.fetch_add(1),
+                                                .traceID = trace_id},
+                                       journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0, m_listener);
 
-            auto err = m_state_machine->propose_to_raft(std::move(rreq));
-            if (err != ReplServiceError::OK) {
-                RD_LOGE(trace_id, "Replace member propose to raft failed {}", err);
+            if (status != ReplServiceError::OK) {
+                // Failed to initialize the repl_req_ctx for replace member.
+                RD_LOGE(trace_id, "Failed to initialize repl_req_ctx for replace member, error={}", status);
                 reset_quorum_size(0, trace_id);
                 decr_pending_request_num();
-                return make_async_error<>(std::move(err));
+                return make_async_error<>(std::move(status));
+            }
+
+            status = m_state_machine->propose_to_raft(std::move(rreq));
+            if (status != ReplServiceError::OK) {
+                RD_LOGE(trace_id, "Replace member propose to raft failed {}", status);
+                reset_quorum_size(0, trace_id);
+                decr_pending_request_num();
+                return make_async_error<>(std::move(status));
             }
 
             RD_LOGI(trace_id, "Replace member proposed to raft group_id={}", group_id_str());
@@ -271,13 +279,20 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
 
     // here, we set the dsn to a new one , which is definitely unique in the follower, so that the new rreq will not
     // have a conflict with the old rreq.
-    rreq->init(repl_key{.server_id = server_id(),
-                        .term = raft_server()->get_term(),
-                        .dsn = m_next_dsn.fetch_add(1),
-                        .traceID = std::numeric_limits< uint64_t >::max()},
-               journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0, m_listener);
+    auto err = init_req_ctx(rreq,
+                            repl_key{.server_id = server_id(),
+                                     .term = raft_server()->get_term(),
+                                     .dsn = m_next_dsn.fetch_add(1),
+                                     .traceID = std::numeric_limits< uint64_t >::max()},
+                            journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0, m_listener);
 
-    auto err = m_state_machine->propose_to_raft(std::move(rreq));
+    if (err != ReplServiceError::OK) {
+        // Failed to initialize the repl_req_ctx for replace member.
+        LOGERROR("Failed to initialize repl_req_ctx for destorying group, error={}", err);
+        return folly::makeSemiFuture< ReplServiceError >(std::move(err));
+    }
+
+    err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
         m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::ACTIVE; });
         return folly::makeSemiFuture< ReplServiceError >(std::move(err));
@@ -322,12 +337,16 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         }
     }
 
-    auto status = rreq->init(repl_key{.server_id = server_id(),
-                                      .term = raft_server()->get_term(),
-                                      .dsn = m_next_dsn.fetch_add(1),
-                                      .traceID = tid},
-                             data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED,
-                             true /* is_proposer */, header, key, data.size, m_listener);
+    auto status = init_req_ctx(
+        rreq, repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+        data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
+        key, data.size, m_listener);
+
+    if (status != ReplServiceError::OK) {
+        RD_LOGI(tid, "Initializing rreq failed error={}, failing this req", status);
+        handle_error(rreq, status);
+        return;
+    }
 
     RD_LOGD(tid, "repl_key [{}], header size [{}] bytes, user_key size [{}] bytes, data size [{}] bytes", rreq->rkey(),
             header.size(), key.size(), data.size);
@@ -335,12 +354,6 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
     auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
     RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
-
-    if (status != ReplServiceError::OK) {
-        RD_LOGI(tid, "Initializing rreq failed error={}, failing this req", status);
-        handle_error(rreq, status);
-        return;
-    }
 
     // If it is header only entry, directly propose to the raft
     if (rreq->has_linked_data()) {
@@ -460,7 +473,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     repl_key rkey{.server_id = push_req->issuer_replica_id(),
                   .term = push_req->raft_term(),
                   .dsn = push_req->dsn(),
-                  .traceID = push_req->traceID()};
+                  .traceID = push_req->trace_id()};
     auto const req_orig_time_ms = push_req->time_ms();
 
     RD_LOGD(rkey.traceID, "Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
@@ -538,8 +551,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
 }
 
 repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
-                                               sisl::blob const& key, uint32_t data_size,
-                                               [[maybe_unused]] bool is_data_channel) {
+                                               sisl::blob const& key, uint32_t data_size, bool is_data_channel,
+                                               int64_t lsn) {
+    if (is_data_channel) RD_DBG_ASSERT(-1 == lsn, "lsn from data channel should always be -1 , got lsn {}", lsn);
+
     auto const [it, happened] = m_repl_key_req_map.try_emplace(rkey, repl_req_ptr_t(new repl_req_ctx()));
     RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
     auto rreq = it->second;
@@ -560,30 +575,67 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
     }
 
     // rreq->init will allocate the block if it has linked data.
-    auto status = rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size, m_listener);
-    if (!rreq->has_linked_data()) { return rreq; }
-#ifdef _PRERELEASE
-    if (is_data_channel) {
-        if (iomgr_flip::instance()->test_flip("fake_reject_append_data_channel")) {
-            LOGINFO("Data Channel: Reject append_entries flip is triggered for rkey={}", rkey.to_string());
-            status = ReplServiceError::NO_SPACE_LEFT;
-        }
-    } else {
-        if (iomgr_flip::instance()->test_flip("fake_reject_append_raft_channel")) {
-            LOGINFO("Raft Channel: Reject append_entries flip is triggered for rkey={}", rkey.to_string());
-            status = ReplServiceError::NO_SPACE_LEFT;
-        }
-    }
-#endif
+    auto status = init_req_ctx(rreq, rkey, code, false /* is_proposer */, user_header, key, data_size, m_listener);
+
     if (status != ReplServiceError::OK) {
         RD_LOGD(rkey.traceID, "For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(),
                 status);
+        if (status == ReplServiceError::NO_SPACE_LEFT && !is_data_channel && !rreq->is_proposer()) {
+
+            RD_LOGD(rkey.traceID, "For Repl_key=[{}] alloc hints returned error={}, try to handle no_space_left error",
+                    rkey.to_string(), status);
+            // only when the follower got no_space_left error in raft channel, we try to handle it. if it is a leader,
+            // we will not handle it and return fail to client.
+
+            pause_statemachine();
+            // since we pause statemachine here, handle_no_space_left will either be called in the commit thread, or be
+            // called here, where the raft channel is blocked
+
+            // the chunk_id is the chunk on which no_space_left happens
+            const auto& chunk_id = rreq->local_blkid().chunk_num();
+            const auto last_append_lsn = m_data_journal->next_slot() - 1;
+            const auto last_commit_lsn = get_last_commit_lsn();
+
+            RD_LOGD(rkey.traceID,
+                    "no_space_left occurs in raft channel for chunk_id={}, last_append_lsn={}, last_commit_lsn={}",
+                    chunk_id, last_append_lsn, last_commit_lsn);
+
+            if (s_cast< repl_lsn_t >(last_append_lsn) == last_commit_lsn) {
+                // handle error immediately if all the appended logs are committed
+                RD_LOGD(rkey.traceID, "All logs are committed, handle no space left immediately in raft channel");
+                // we have to hanlde it here, since the last_commit_lsn has been committed and as a result,
+                // handle_no_space_left will not be triggered in committing thread.
+                handle_no_space_left();
+            } else if (lsn < m_no_space_left_error_info.lsn) {
+                /*set a new error info or overwrite an existing error info*/
+                // if current committed lsn is 100, apppended lsn is 110, then we want to wait for lsn 110 is
+                // committed and then we can start handling the no_space_left error. however, lsn 105-110 might be
+                // rollbacked by later appned_log requests from a new leader, and we trying to append new lsn 105,
+                // new no_space_left happens.in this case, we need to overwrite an existing error info with the new
+                // one.
+                RD_LOGD(rkey.traceID,
+                        "wait for the commit thread to handle no_space_left error after lsn {} is committed", lsn - 1);
+                set_no_space_left_error_info(lsn - 1, chunk_id);
+            } else {
+                RD_LOGW(rkey.traceID,
+                        "got no_space_left error but my expected lsn {} is larger than existing error info lsn {}, "
+                        "ignore it!",
+                        lsn - 1, m_no_space_left_error_info.lsn);
+            }
+
+            resume_statemachine();
+        } else {
+            RD_LOGD(
+                rkey.traceID,
+                "For Repl_key=[{}] alloc hints returned error={}, failing this req, data_channl: {}, is_proposer: {} ",
+                rkey.to_string(), status, is_data_channel, rreq->is_proposer());
+        }
         // Do not call handle_error here, because handle_error is for rreq which needs to be terminated. This one can be
         // retried.
         return nullptr;
     }
 
-    RD_LOGD(rreq->traceID(), "in follower_create_req: rreq={}, addr=0x{:x}", rreq->to_string(),
+    RD_LOGD(rkey.traceID, , "in follower_create_req: rreq={}, addr=0x{:x}", rreq->to_string(),
             reinterpret_cast< uintptr_t >(rreq.get()));
     return rreq;
 }
@@ -1013,7 +1065,32 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
                          "Out of order commit of lsns, it is not expected in RaftReplDev. cur_lsns={}, prev_lsns={}",
                          rreq->lsn(), prev_lsn);
     }
-    if (!rreq->is_proposer()) { rreq->clear(); }
+
+    if (!rreq->is_proposer()) rreq->clear();
+
+    auto target_lsn = m_no_space_left_error_info.lsn;
+
+    if (std::numeric_limits< repl_lsn_t >::max() == target_lsn) {
+        // no pending no_space_left error to handle
+        return;
+    }
+
+    HS_LOG_ASSERT(target_lsn >= rreq->lsn(),
+                  "the lsn of no_space_left_error_info should be greater than or equal to the lsn of the "
+                  "committed rreq. "
+                  "current no_space_left_error_info lsn={}, committed rreq lsn={}",
+                  target_lsn, rreq->lsn());
+
+    if (is_leader()) {
+        // no need to handle stale no_space_left as a leader, since that log(casuing no_space_left) is not in the
+        // log store, and will not be committed.
+        reset_no_space_left_error_info();
+    } else if (target_lsn == rreq->lsn()) {
+        // if I am follower,  check if there is pending no_space_left error to be handled. only follower will handle
+        // this
+        RD_LOGD(rreq->traceID(), "handle no_space_left error after lsn {} is commited", target_lsn);
+        handle_no_space_left();
+    }
 }
 
 void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config_ptr_t& new_conf) {
@@ -1393,7 +1470,7 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
             }
             // Those LSNs already in logstore but not yet committed, will be dedup here,
             // applier_create_req will return same req as previous one
-            auto req = m_state_machine->localize_journal_entry_prepare(*entry);
+            auto req = m_state_machine->localize_journal_entry_prepare(*entry, lsn);
             if (req == nullptr) {
                 sisl::VectorPool< repl_req_ptr_t >::free(reqs);
                 // The hint set here will be used by the next after next appendEntry, the next one
@@ -1578,7 +1655,8 @@ void RaftReplDev::set_log_store_last_durable_lsn(store_lsn_t lsn) { m_data_journ
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto repl_lsn = to_repl_lsn(lsn);
     if (need_skip_processing(repl_lsn)) {
-        RD_LOGI(NO_TRACE_ID, "Raft Channel: Log {} is outdated and will be handled by baseline resync. Ignoring replay.", lsn);
+        RD_LOGI(NO_TRACE_ID,
+                "Raft Channel: Log {} is outdated and will be handled by baseline resync. Ignoring replay.", lsn);
         return;
     }
 
@@ -1637,8 +1715,8 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->set_lsn(repl_lsn);
     // keep lentry in scope for the lyfe cycle of the rreq
     rreq->set_lentry(lentry);
-    auto status = rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
-                             data_size, m_listener);
+    auto status = init_req_ctx(rreq, rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry),
+                               entry_to_key(jentry), data_size, m_listener);
     if (status != ReplServiceError::OK) {
         RD_LOGE(jentry->traceID, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
     }
@@ -1728,4 +1806,171 @@ bool RaftReplDev::is_resync_mode() {
     return resync_mode;
 }
 
+void RaftReplDev::pause_statemachine() {
+    if (!raft_server()->is_state_machine_execution_paused()) {
+        raft_server()->pause_state_machine_exeuction();
+        while (!raft_server()->wait_for_state_machine_pause(100)) {
+            RD_LOGD(NO_TRACE_ID, "wait for statemachine pause!");
+        }
+    }
+}
+
+void RaftReplDev::resume_statemachine() {
+    if (raft_server()->is_state_machine_execution_paused()) {
+        raft_server()->resume_state_machine_execution();
+        RD_LOGD(NO_TRACE_ID, "statemachine is resumed!");
+    }
+}
+
+void RaftReplDev::set_no_space_left_error_info(repl_lsn_t lsn, chunk_num_t chunk_id) {
+    // this will be called only in raft channel for follower, since `RaftReplDev::raft_event` is always called in a
+    // single thread, so it is safe to call this method without lock
+    // TODO:: add lock if it might be modified by multiple threads in the future
+    RD_LOGD(NO_TRACE_ID, "set no_space_left error info: chunk {}, lsn {}", chunk_id, lsn);
+    m_no_space_left_error_info.lsn = lsn;
+    m_no_space_left_error_info.chunk_id = chunk_id;
+}
+
+void RaftReplDev::handle_no_space_left() {
+
+    const auto chunk_id = m_no_space_left_error_info.chunk_id;
+    const auto lsn = m_no_space_left_error_info.lsn;
+
+    HS_LOG_ASSERT(-1 != chunk_id, "chunk_id should be valid when handling no_space_left error, chunk_id={}, lsn={}",
+                  chunk_id, lsn);
+
+    RD_LOGD(NO_TRACE_ID, "start handling no_space_left error for chunk {} , lsn {}", chunk_id, lsn);
+
+    enter_emergency();
+
+    // all the block allocation happens in rreq->init. so after we wait for all the pending req has been initialized we
+    // can make sure
+    // 1 all the pending reqs has allocated their blocks
+    // 2 no new pending reqs will be initialized again.
+    RD_LOGD(NO_TRACE_ID, "enter emergency state, waiting for all the pending req to be initialized");
+    while (true) {
+        uint64_t pending_req_num = get_pending_init_req_num();
+        if (pending_req_num) {
+            RD_LOGD(NO_TRACE_ID, "wait for {} pending create_req requests to be completed", pending_req_num);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        } else
+            break;
+    }
+
+    // ensure the latest durable commit lsn is flushed to superblk before handling no_space_left
+    hs()->cp_mgr().trigger_cp_flush(true).wait();
+
+    // when reaching here, no pending req is being initailized, and no new req can be initailized (reqs from both data
+    // channel and raft channel will all be refused) from now on. before handling no_space_left error, we definitely
+    // need this precondition. for nuobject case, if new blks is allocated from data channel in the move_from
+    // chunk(emergent chunk) after the chunk is reset(be gced, so can allocate new blk), it will be dangerous , since
+    // now the emergent chunk will be returned to the chunkselector as a candidated chunk for new shard.
+
+    // 2. clean all the necessary rreqs in memory
+    // those reqs generated by data_channel might have successfully alloc blk in the emergent chunk, and thus the
+    // rreq has a state of BLK_ALLOCATED. if we do not clear them, after handling `no_space_left` error, when the
+    // log comes in raft channel, it will find the rreq already exists and block is already allocated, then it will
+    // skip allocating a new block for the log entry, which will lead to a data loss in the end. so we need to clear
+    // necessary the rreqs(which has allocated blk in the emergent chunk) in memory before handling `no_space_left`
+    // error.
+    RD_LOGD(NO_TRACE_ID,
+            "start cleaning all the in-memory rreqs, which has allocated blk on the emergent chunk={} before handling "
+            "no_space_left error",
+            chunk_id);
+    std::vector< folly::Future< folly::Unit > > futs;
+    for (auto& [key, rreq] : m_repl_key_req_map) {
+        if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
+            auto blkid = rreq->local_blkid();
+            if (chunk_id == blkid.chunk_num()) {
+                // only clean the rreqs which has allocated blks on the emergent chunk
+                futs.emplace_back(
+                    std::move(data_service().async_free_blk(blkid).thenValue([this, &blkid, &key](auto&& err) {
+                        HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
+                                      blkid.to_string());
+                        RD_LOGD(NO_TRACE_ID, "blkid={} freed successfully for handling no_space_left error",
+                                blkid.to_string());
+                        m_repl_key_req_map.erase(key); // remove from the req map after freeing the blk
+                    })));
+            }
+        }
+    }
+
+    folly::collectAllUnsafe(futs)
+        .thenValue([this](auto&& vf) {
+            // TODO:: handle the error in freeing blk if necessary in the future.
+            // for nuobject case, error for freeing blk in the emergent chunk can be ingored
+            RD_LOGD(
+                NO_TRACE_ID,
+                "all the necessary in-memory rreqs which has allocated blks on the emergent chunk have been cleaned up "
+                "successfully, continue to handle no_space_left error.");
+        })
+        // need to wait for the completion
+        .wait();
+
+    // 3. call upper layer to hanlde no_space_left error and wait for the completion.
+    RD_LOGD(NO_TRACE_ID,
+            "call upper layer to handle no_space_left error, lsn={}, chunk_id={} for raft repl dev group_id={}", lsn,
+            chunk_id, group_id_str());
+
+    // need to wait for the completion
+    auto ec = m_listener->on_no_space_left(chunk_id).get();
+
+    HS_LOG_ASSERT(
+        !ec,
+        "fail to handle no_space_left error so the raft can not go on, we need to crash here. error: {}, chunk_id: {}",
+        ec.message(), chunk_id);
+
+    RD_LOGD(NO_TRACE_ID, "successfully handle no_space_left error, lsn={}, chunk_id={} for raft repl dev group_id={}",
+            lsn, chunk_id, group_id_str());
+
+    reset_no_space_left_error_info();
+
+    RD_LOGD(NO_TRACE_ID, "leave emergency state!");
+    leave_emergency();
+    // now , new requests can be accepted again , for both data and raft channel.
+}
+
+void RaftReplDev::reset_no_space_left_error_info() {
+    // this will only be called in handle_no_space_left, and will not have a concurrency issue with
+    // set_no_space_left_error_info.
+    // 1. if handle_no_space_left is called in raft channel, the statemachine must have been paused before the call.
+    // 2. if handle_no_space_left is called in commit thread, raft channel must have been blocked at pause statemachine.
+    // so no need to add a lock
+
+    // TODO: add a lock if this method can be called from multiple places in the future
+    RD_LOGD(NO_TRACE_ID, "reset no_space_left error info");
+    m_no_space_left_error_info.lsn = std::numeric_limits< repl_lsn_t >::max();
+    m_no_space_left_error_info.chunk_id = 0;
+}
+
+ReplServiceError RaftReplDev::init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,
+                                           sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
+                                           cshared< ReplDevListener >& listener) {
+    if (!rreq) {
+        RD_LOGD(rkey.traceID, "got nullptr for initing req, rkey=[{}]", rkey.to_string());
+        return ReplServiceError::CANCELLED;
+    }
+
+    inc_pending_init_req_num();
+    if (is_in_emergency()) {
+        // In emergency state, reject any new requests.
+        RD_LOGD(rkey.traceID, "Rejecting new request in emergency state, rkey=[{}]", rkey.to_string());
+        dec_pending_init_req_num();
+        return ReplServiceError::EMERGENCY_STATE;
+    }
+
+    auto status = rreq->init(rkey, op_code, is_proposer, user_header, key, data_size, m_listener);
+    dec_pending_init_req_num();
+    return status;
+}
+
+void RaftReplDev::become_leader_cb() {
+    auto new_gate = raft_server()->get_last_log_idx();
+    repl_lsn_t existing_gate = 0;
+    if (!m_traffic_ready_lsn.compare_exchange_strong(existing_gate, new_gate)) {
+        // was a follower, m_traffic_ready_lsn should be zero on follower.
+        RD_REL_ASSERT(!existing_gate, "existing gate should be zero");
+    }
+    RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
+}
 } // namespace homestore
