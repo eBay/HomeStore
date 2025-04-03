@@ -42,12 +42,12 @@ public:
     // TODO: implement graceful shutdown for solo repl dev
 
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                           repl_req_ptr_t ctx) override;
+                           repl_req_ptr_t ctx, trace_id_t tid = 0) override;
 
     folly::Future< std::error_code > async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
-                                                bool part_of_batch = false) override;
+                                                bool part_of_batch = false, trace_id_t tid = 0) override;
 
-    folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
+    folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid, trace_id_t tid = 0) override;
 
     AsyncReplResult<> become_leader() override { return make_async_error(ReplServiceError::OK); }
     bool is_leader() const override { return true; }

@@ -24,43 +24,35 @@ namespace homestore {
 class ReplicaSetImpl;
 class StateMachineStore;
 
-#define RD_LOG(level, msg, ...)                                                                                        \
-    LOG##level##MOD_FMT(replication, ([&](fmt::memory_buffer& buf, const char* msgcb, auto&&... args) -> bool {        \
-                            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                          \
-                                            fmt::make_format_args(file_name(__FILE__), __LINE__));                     \
-                            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                          \
-                                            fmt::make_format_args("rd", rdev_name()));                                 \
-                            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                               \
-                                            fmt::make_format_args(std::forward< decltype(args) >(args)...));           \
-                            return true;                                                                               \
-                        }),                                                                                            \
-                        msg, ##__VA_ARGS__);
+#define NO_TRACE_ID "n/a"
+#define RD_LOG(level, traceID, msg, ...)                                                                               \
+    LOG##level##MOD(replication, "[traceID={}] [{}] " msg, traceID, identify_str(), ##__VA_ARGS__)
 
 #define RD_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                               \
     {                                                                                                                  \
         assert_type##_ASSERT_CMP(                                                                                      \
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
-                                fmt::make_format_args(file_name(__FILE__), __LINE__));                                 \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}:{}] "},                                   \
+                                fmt::make_format_args(file_name(__FILE__), __LINE__, __FUNCTION__));                   \
                 sisl::logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);      \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                                      \
-                                fmt::make_format_args("rd", rdev_name()));                                             \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "}, fmt::make_format_args(identify_str())); \
                 return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \
     }
 #define RD_ASSERT(assert_type, cond, ...)                                                                              \
     {                                                                                                                  \
-        assert_type##_ASSERT_FMT(cond,                                                                                 \
-                                 ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {      \
-                                     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                 \
-                                                     fmt::make_format_args("rd", rdev_name()));                        \
-                                     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                      \
-                                                     fmt::make_format_args(std::forward< decltype(args) >(args)...));  \
-                                     return true;                                                                      \
-                                 }),                                                                                   \
-                                 ##__VA_ARGS__);                                                                       \
+        assert_type##_ASSERT_FMT(                                                                                      \
+            cond, ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                     \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}:{}] "},                                   \
+                                fmt::make_format_args(file_name(__FILE__), __LINE__, __FUNCTION__));                   \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "}, fmt::make_format_args(identify_str())); \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                                           \
+                                fmt::make_format_args(std::forward< decltype(args) >(args)...));                       \
+                return true;                                                                                           \
+            }),                                                                                                        \
+            ##__VA_ARGS__);                                                                                            \
     }
 
 #define RD_DBG_ASSERT(cond, ...) RD_ASSERT(DEBUG, cond, ##__VA_ARGS__)
@@ -79,12 +71,12 @@ class StateMachineStore;
 #define RD_REL_ASSERT_GT(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
 #define RD_REL_ASSERT_GE(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
 
-#define RD_LOGT(...) RD_LOG(TRACE, ##__VA_ARGS__)
-#define RD_LOGD(...) RD_LOG(DEBUG, ##__VA_ARGS__)
-#define RD_LOGI(...) RD_LOG(INFO, ##__VA_ARGS__)
-#define RD_LOGW(...) RD_LOG(WARN, ##__VA_ARGS__)
-#define RD_LOGE(...) RD_LOG(ERROR, ##__VA_ARGS__)
-#define RD_LOGC(...) RD_LOG(CRITICAL, ##__VA_ARGS__)
+#define RD_LOGT(traceID, ...) RD_LOG(TRACE, traceID, ##__VA_ARGS__)
+#define RD_LOGD(traceID, ...) RD_LOG(DEBUG, traceID, ##__VA_ARGS__)
+#define RD_LOGI(traceID, ...) RD_LOG(INFO, traceID, ##__VA_ARGS__)
+#define RD_LOGW(traceID, ...) RD_LOG(WARN, traceID, ##__VA_ARGS__)
+#define RD_LOGE(traceID, ...) RD_LOG(ERROR, traceID, ##__VA_ARGS__)
+#define RD_LOGC(traceID, ...) RD_LOG(CRITICAL, traceID, ##__VA_ARGS__)
 
 // For the logic snapshot obj_id, we use the highest bit to indicate the type of the snapshot message.
 // 0 is for HS, 1 is for Application.
@@ -139,7 +131,7 @@ public:
 
     void iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb);
 
-    std::string rdev_name() const;
+    std::string identify_str() const;
     int64_t reset_next_batch_size_hint(int64_t new_hint);
     int64_t inc_next_batch_size_hint();
 

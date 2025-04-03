@@ -29,6 +29,7 @@ struct repl_req_ctx;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
+using trace_id_t = u_int64_t;
 
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
@@ -53,9 +54,10 @@ static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
 static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
 
 struct repl_key {
-    int32_t server_id{0}; // Server Id which this req is originated from
-    uint64_t term;        // RAFT term number
-    uint64_t dsn{0};      // Data sequence number to tie the data with the raft journal entry
+    int32_t server_id{0};  // Server Id which this req is originated from
+    uint64_t term;         // RAFT term number
+    uint64_t dsn{0};       // Data sequence number to tie the data with the raft journal entry
+    trace_id_t traceID{0}; // tracing ID provided by application that connects logs.
 
     struct Hasher {
         size_t operator()(repl_key const& rk) const {
@@ -120,6 +122,7 @@ public:
     repl_key const& rkey() const { return m_rkey; }
     uint64_t dsn() const { return m_rkey.dsn; }
     uint64_t term() const { return m_rkey.term; }
+    trace_id_t traceID() const { return m_rkey.traceID; }
     int64_t lsn() const { return m_lsn; }
     bool is_proposer() const { return m_is_proposer; }
     journal_type_t op_code() const { return m_op_code; }
@@ -385,7 +388,7 @@ public:
     }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id){};
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
@@ -416,7 +419,7 @@ public:
     /// @param ctx - User supplied context which will be passed to listener
     /// callbacks
     virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                   repl_req_ptr_t ctx) = 0;
+                                   repl_req_ptr_t ctx, trace_id_t tid = 0) = 0;
 
     /// @brief Reads the data and returns a future to continue on
     /// @param bid Block id to read
@@ -427,13 +430,14 @@ public:
     /// @return A Future with std::error_code to notify if it has successfully read the data or any error code in case
     /// of failure
     virtual folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
-                                                        bool part_of_batch = false) = 0;
+                                                        bool part_of_batch = false, trace_id_t tid = 0) = 0;
 
     /// @brief After data is replicated and on_commit to the listener is called. the blkids can be freed.
     ///
     /// @param lsn - LSN of the old blkids that is being freed
     /// @param blkids - blkids to be freed.
-    virtual folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
+    virtual folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid,
+                                                             trace_id_t tid = 0) = 0;
 
     /// @brief Try to switch the current replica where this method called to become a leader.
     /// @return True if it is successful, false otherwise.

@@ -357,7 +357,7 @@ public:
                 test_common::HSTestHelper::create_sgs(data_size, max_size_per_iov, req->jheader.data_pattern);
         }
 
-        repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req);
+        repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req, s_uniq_num);
     }
 
     void validate_db_data() {
