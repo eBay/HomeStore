@@ -64,6 +64,11 @@ public:
 
     uuid_t group_id() const override { return m_group_id; }
 
+    void set_custom_rdev_name(std::string const& name) override {
+        std::strncpy(m_rd_sb->rdev_name, name.c_str(), m_rd_sb->max_name_len - 1);
+        m_rd_sb->rdev_name[m_rd_sb->max_name_len - 1] = '\0';
+    }
+
     repl_lsn_t get_last_commit_lsn() const override { return 0; }
 
     uint32_t get_blk_size() const override;

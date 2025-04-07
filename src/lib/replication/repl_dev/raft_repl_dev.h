@@ -216,8 +216,14 @@ public:
     std::vector< peer_info > get_replication_status() const override;
     std::set< replica_id_t > get_active_peers() const;
     group_id_t group_id() const override { return m_group_id; }
+    void set_custom_rdev_name(std::string const& name) override {
+        RD_LOGI(NO_TRACE_ID, "Resetting repl dev name from {} to {}", m_rdev_name, name);
+        m_rdev_name = name;
+        m_identify_str = name + ":" + group_id_str();
+        m_rd_sb->set_rdev_name(m_rdev_name);
+    }
     std::string group_id_str() const { return boost::uuids::to_string(m_group_id); }
-    std::string rdev_name() const { return m_rdev_name; };
+    std::string rdev_name() const { return m_rd_sb->rdev_name; };
     std::string identify_str() const { return m_identify_str; };
     std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
