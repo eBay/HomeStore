@@ -318,7 +318,7 @@ public:
 
     void free_user_snp_ctx(void*& user_snp_ctx) override {}
 
-    ReplResult<blk_alloc_hints> get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
+    ReplResult<blk_alloc_hints> get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size, cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
         auto jheader = r_cast<test_req::journal_header const*>(header.cbytes());
         Key k{.id_ = jheader->key_id};
         auto iter = inmem_db_.find(k);

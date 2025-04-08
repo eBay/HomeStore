@@ -58,6 +58,7 @@ struct repl_journal_entry {
 struct repl_dev_superblk {
     static constexpr uint64_t REPL_DEV_SB_MAGIC = 0xABCDF00D;
     static constexpr uint32_t REPL_DEV_SB_VERSION = 1;
+    static constexpr size_t max_name_len = 64;
 
     uint64_t magic{REPL_DEV_SB_MAGIC};
     uint32_t version{REPL_DEV_SB_VERSION};
@@ -68,9 +69,14 @@ struct repl_dev_superblk {
     repl_lsn_t checkpoint_lsn;     // LSN upto which this replica have checkpointed the Data
     repl_lsn_t compact_lsn;        // maximum LSN that can be compacted to
     uint64_t group_ordinal;        // Ordinal number which will be used to indicate the rdevXYZ for debugging
+    char rdev_name[max_name_len];  // Short name for the group for easy debugging
 
     uint64_t get_magic() const { return magic; }
     uint32_t get_version() const { return version; }
+    void set_rdev_name(std::string const& name) {
+        std::strncpy(rdev_name, name.c_str(), max_name_len - 1);
+        rdev_name[max_name_len - 1] = '\0';
+    }
 };
 #pragma pack()
 

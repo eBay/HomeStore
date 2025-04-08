@@ -48,8 +48,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
         m_compact_lsn = m_rd_sb->compact_lsn;
 
-        m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
-
+        m_rdev_name = m_rd_sb->rdev_name;
         // Its ok not to do compare exchange, because loading is always single threaded as of now
         if (m_rd_sb->group_ordinal >= s_next_group_ordinal.load()) {
             s_next_group_ordinal.store(m_rd_sb->group_ordinal + 1);
@@ -72,6 +71,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb->last_snapshot_lsn = 0;
         m_rd_sb->group_ordinal = s_next_group_ordinal.fetch_add(1);
         m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
+        m_rd_sb->set_rdev_name(m_rdev_name);
 
         if (m_rd_sb->is_timeline_consistent) {
             m_free_blks_journal = logstore_service().create_new_log_store(m_rd_sb->logdev_id, false /* append_mode */);
@@ -80,6 +80,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb.write();
         bind_data_service();
     }
+
     m_identify_str = m_rdev_name + ":" + group_id_str();
 
     RD_LOGI(NO_TRACE_ID,

@@ -103,7 +103,7 @@ void repl_req_ctx::change_raft_journal_buf(raft_buf_ptr_t new_buf, bool adjust_h
 ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& listener, uint32_t data_size) {
     DEBUG_ASSERT(has_linked_data(), "Trying to allocate a block for non-inlined block");
 
-    auto const hints_result = listener->get_blk_alloc_hints(m_header, data_size);
+    auto const hints_result = listener->get_blk_alloc_hints(m_header, data_size, repl_req_ptr_t(this));
     if (hints_result.hasError()) { return hints_result.error(); }
 
     if (hints_result.value().committed_blk_id.has_value()) {
