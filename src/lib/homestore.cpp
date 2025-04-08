@@ -136,6 +136,15 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     HomeStoreDynamicConfig::init_settings_default();
 
+    // Check if the max_grpc_message_size is large enough to hold the data and snapshot batch size
+    if (HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < input.max_data_size ||
+        HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < input.max_snapshot_batch_size) {
+        LOGERROR("max_grpc_message_size {} is too small to hold max_data_size {} and max_snapshot_batch_size {}",
+                 HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size,
+                 input.max_snapshot_batch_size);
+        throw std::invalid_argument("max_grpc_message_size is insufficient for the configured data or snapshot sizes");
+    }
+
 #ifdef _PRERELEASE
     // Start a default crash simulator which raises SIGKILL, in case user has not provided with_crash_simulator()
     // callback

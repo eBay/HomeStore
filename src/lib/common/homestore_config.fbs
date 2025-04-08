@@ -235,6 +235,9 @@ table Consensus {
     // Max append batch size
     max_append_batch_size: int32 = 64;
 
+    // Max grpc message size
+    max_grpc_message_size: int32 = 67108864;
+
     // Threshold of log gap from leader to consider a replica as stale
     stale_log_gap_hi_threshold: int32 = 200;
 

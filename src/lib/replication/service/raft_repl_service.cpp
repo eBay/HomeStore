@@ -79,7 +79,9 @@ void RaftReplService::start() {
         .ssl_key_ = ioenvironment.get_ssl_key(),
         .ssl_cert_ = ioenvironment.get_ssl_cert(),
         .token_verifier_ = std::dynamic_pointer_cast< sisl::GrpcTokenVerifier >(ioenvironment.get_token_verifier()),
-        .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client())};
+        .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client()),
+        .max_receive_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size),
+        .max_send_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size)};
     m_msg_mgr = nuraft_mesg::init_messaging(params, weak_from_this(), true /* with_data_channel */);
 
     LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),

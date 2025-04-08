@@ -566,7 +566,8 @@ public:
         } while (true);
     }
 
-    void write_on_leader(uint32_t num_entries, bool wait_for_commit = true, shared< TestReplicatedDB > db = nullptr) {
+    void write_on_leader(uint32_t num_entries, bool wait_for_commit = true, shared< TestReplicatedDB > db = nullptr,
+                         uint64_t* data_size = nullptr) {
         if (dbs_[0]->repl_dev() == nullptr) return;
 
         do {
@@ -587,9 +588,10 @@ public:
                 g_helper->runner().set_num_tasks(num_entries);
 
                 LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
-                g_helper->runner().set_task([this, block_size, db]() {
+                g_helper->runner().set_task([this, block_size, db, data_size]() {
                     static std::normal_distribution<> num_blks_gen{3.0, 2.0};
-                    this->generate_writes(std::abs(std::lround(num_blks_gen(g_re))) * block_size, block_size, db);
+                    uint64_t size = data_size == nullptr ? std::abs(std::lround(num_blks_gen(g_re))) * block_size : *data_size;
+                    this->generate_writes(size, block_size, db);
                 });
                 if (wait_for_commit) { g_helper->runner().execute().get(); }
                 break;
