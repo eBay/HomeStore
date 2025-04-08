@@ -169,6 +169,8 @@ public:
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
     uint64_t hugepage_size{0};                            // memory available for the hugepage
+    int max_data_size{0};                                 // max data size in byte on the data plane
+    int max_snapshot_batch_size{0};                       // max snapshot batch size in byte for the raft state machine
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
 

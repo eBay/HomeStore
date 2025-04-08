@@ -451,6 +451,22 @@ TEST_F(RaftReplDevTest, BaselineTest) {
     LOGINFO("BaselineTest done");
 }
 
+TEST_F(RaftReplDevTest, LargeDataWrite) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    // TODO: Increase the data size (e.g., to 16MB) for testing.
+    // For now, use 4MB to ensure the test passes since there are issues with larger IO sizes on the uring drive.
+    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    uint64_t data_size = 4 * 1024 * 1024;
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */, nullptr, &data_size);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;
