@@ -50,7 +50,7 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     return ReplServiceError::OK;
 }
 
-repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entry& lentry) {
+repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entry& lentry, int64_t lsn /*repl_lsn*/) {
     // Validate the journal entry and see if it needs to be transformed
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry.get_buf().data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
@@ -85,8 +85,9 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         MultiBlkId entry_blkid;
         entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
 
-        rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
-                                       (entry_blkid.blk_count() * m_rd.get_blk_size()), false /* is_data_channel */);
+        rreq =
+            m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
+                                    (entry_blkid.blk_count() * m_rd.get_blk_size()), false /* is_data_channel */, lsn);
         if (rreq == nullptr) { goto out; }
 
         rreq->set_remote_blkid(RemoteBlkId{jentry->server_id, entry_blkid});
@@ -111,7 +112,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         std::memcpy(blkid_location, rreq->local_blkid().serialize().cbytes(), local_size);
     } else {
         rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
-                                       jentry->value_size, false /* is_data_channel */);
+                                       jentry->value_size, false /* is_data_channel */, lsn);
+        if (rreq == nullptr) goto out;
     }
 
     // We might have localized the journal entry with new blkid. We need to also update the header/key pointers pointing
@@ -156,7 +158,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
 
     auto rreq = m_rd.repl_key_to_req(rkey);
     if ((rreq == nullptr) || (rreq->is_localize_pending())) {
-        rreq = localize_journal_entry_prepare(lentry);
+        rreq = localize_journal_entry_prepare(lentry,
+                                              -1 /* lsn=-1, since this is a finish call and we don't have lsn yet */);
         if (rreq == nullptr) {
             RELEASE_ASSERT(rreq != nullptr,
                            "We get an linked data for rkey=[{}], jentry=[{}] not as part of Raft Append but "
@@ -209,7 +212,8 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
     // when reaching here, the config change log has already been committed, and the new config has been applied to the
     // cluster
     if (m_rd.need_skip_processing(s_cast< repl_lsn_t >(log_idx))) {
-        RD_LOGI(NO_TRACE_ID, "Raft Channel: Config {} is expected to be handled by snapshot. Skipping commit.", log_idx);
+        RD_LOGI(NO_TRACE_ID, "Raft Channel: Config {} is expected to be handled by snapshot. Skipping commit.",
+                log_idx);
         return;
     }
 
@@ -335,9 +339,10 @@ int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx,
     // uncommitted logs may or may not included in the snapshot data sent by leader,
     // depending on the racing of commit vs snapshot read, leading to data inconsistency.
     if (s_cast< repl_lsn_t >(s.get_last_log_idx()) > m_rd.get_last_commit_lsn()) {
-        RD_LOGW(NO_TRACE_ID, "not ready to read because there are some uncommitted logs in snapshot, "
-                     "let nuraft retry later. snapshot log_idx={}, last_commit_lsn={}",
-                     s.get_last_log_idx(), m_rd.get_last_commit_lsn());
+        RD_LOGW(NO_TRACE_ID,
+                "not ready to read because there are some uncommitted logs in snapshot, "
+                "let nuraft retry later. snapshot log_idx={}, last_commit_lsn={}",
+                s.get_last_log_idx(), m_rd.get_last_commit_lsn());
         return -1;
     }
 

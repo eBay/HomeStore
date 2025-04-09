@@ -142,7 +142,6 @@ public:
     repl_journal_entry const* journal_entry() const { return m_journal_entry; }
     uint32_t journal_entry_size() const;
     bool is_localize_pending() const { return m_is_jentry_localize_pending; }
-    bool is_data_inlined() const { return (m_op_code == journal_type_t::HS_DATA_INLINED); }
     bool has_linked_data() const { return (m_op_code == journal_type_t::HS_DATA_LINKED); }
 
     raft_buf_ptr_t& raft_journal_buf();
@@ -336,7 +335,8 @@ public:
     /// @return Expected to return blk_alloc_hints for this write. If the hints are not available, then return the
     /// error. It is to be noted this method should return error only in very abnornal cases as in some code flow, an
     /// error would result in a crash or stall of the entire commit thread.
-    virtual ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size, cintrusive< homestore::repl_req_ctx >& hs_ctx) = 0;
+    virtual ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size,
+                                                              cintrusive< homestore::repl_req_ctx >& hs_ctx) = 0;
 
     /// @brief Called when the repl_dev is being destroyed. The consumer is expected to clean up any related resources.
     /// However, it is expected that this call be idempotent. It is possible in rare scenarios that this can be called
@@ -383,12 +383,12 @@ public:
     }
 
     /// @brief ask upper layer to handle no_space_left event
-    virtual folly::Future< std::error_code > on_no_space_left(uint32_t pdev_id, chunk_num_t chunk_id) {
-        return folly::makeFuture< std::error_code >(std::error_code{});
-    }
+    // @param lsn - on which repl_lsn no_space_left happened
+    // @param chunk_id - on which chunk no_space_left happened
+    virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) { return; }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) {};
+    virtual void on_log_replay_done(const group_id_t& group_id){};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
@@ -469,6 +469,10 @@ public:
     /// @return last_commit_lsn
     virtual repl_lsn_t get_last_commit_lsn() const = 0;
 
+    /// @brief Gets the repl lsn of the last log in log store
+    /// @return last_append_repl_lsn
+    virtual repl_lsn_t get_last_append_lsn() = 0;
+
     /// @brief if this replica is ready for accepting client IO.
     /// @return true if ready, false otherwise
     virtual bool is_ready_for_traffic() const = 0;
@@ -499,6 +503,16 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }
+
+    // pause/resume statemachine(commiting thread)
+    virtual void pause_statemachine() = 0;
+    virtual void resume_statemachine() = 0;
+
+    virtual void enter_emergency() = 0;
+    virtual void leave_emergency() = 0;
+
+    // clear reqs that has allocated blks on the given chunk.
+    virtual void clear_chunk_req(chunk_num_t chunk_id) = 0;
 
 protected:
     shared< ReplDevListener > m_listener;

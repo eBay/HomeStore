@@ -2,7 +2,7 @@ native_include "boost/uuid/uuid.hpp";
 namespace homestore;
 
 table PushDataRequest {
-    traceID: uint64;             // traceID for the REQ
+    trace_id: uint64;            // traceID for the REQ
     issuer_replica_id : int32;   // Replica id of the issuer
     raft_term : uint64;          // Raft term number
     dsn : uint64;                // Data Sequence number

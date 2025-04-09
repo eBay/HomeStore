@@ -157,15 +157,28 @@ class RaftReplDev : public ReplDev,
                     public nuraft_mesg::mesg_state_mgr,
                     public std::enable_shared_from_this< RaftReplDev > {
 private:
+    class init_req_counter {
+    public:
+        init_req_counter(std::atomic_uint64_t& counter) : my_counter(counter) {
+            my_counter.fetch_add(1, std::memory_order_acq_rel);
+        }
+
+        ~init_req_counter() { my_counter.fetch_sub(1, std::memory_order_acq_rel); }
+
+    private:
+        std::atomic_uint64_t& my_counter;
+    };
+
+private:
     shared< RaftStateMachine > m_state_machine;
     RaftReplService& m_repl_svc;
     folly::ConcurrentHashMap< repl_key, repl_req_ptr_t, repl_key::Hasher > m_repl_key_req_map;
     nuraft_mesg::Manager& m_msg_mgr;
-    group_id_t m_group_id;     // Replication Group id
-    std::string m_rdev_name;   // Short name for the group for easy debugging
+    group_id_t m_group_id;      // Replication Group id
+    std::string m_rdev_name;    // Short name for the group for easy debugging
     std::string m_identify_str; // combination of rdev_name:group_id
-    replica_id_t m_my_repl_id; // This replica's uuid
-    int32_t m_raft_server_id;  // Server ID used by raft (unique within raft group)
+    replica_id_t m_my_repl_id;  // This replica's uuid
+    int32_t m_raft_server_id;   // Server ID used by raft (unique within raft group)
     shared< ReplLogStore > m_data_journal;
     shared< HomeLogStore > m_free_blks_journal;
     sisl::urcu_scoped_ptr< repl_dev_stage_t > m_stage;
@@ -176,7 +189,7 @@ private:
     mutable folly::SharedMutexWritePriority m_sb_lock; // Lock to protect staged sb and persisting sb
     raft_repl_dev_superblk m_sb_in_mem;                // Cached version which is used to read and for staging
 
-    std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
+    std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly committed, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
     // The `traffic_ready_lsn` variable holds the Log Sequence Number (LSN) up to which
     // the state machine should committed to before accepting traffic. This threshold ensures that
@@ -198,6 +211,10 @@ private:
 
     static std::atomic< uint64_t > s_next_group_ordinal;
     bool m_log_store_replay_done{false};
+
+    // pending create requests, including both raft and data channel
+    std::atomic_uint64_t m_pending_init_req_num;
+    std::atomic< bool > m_in_emergency;
 
 public:
     friend class RaftStateMachine;
@@ -236,23 +253,14 @@ public:
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
+    repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx() + 1; /*to_repl_lsn*/ }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
+
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
-    bool is_ready_for_traffic() const override {
-        if (is_stopping()) return false;
-        auto committed_lsn = m_commit_upto_lsn.load();
-        auto gate = m_traffic_ready_lsn.load();
-        bool ready = committed_lsn >= gate;
-        if (!ready) {
-            RD_LOGD(NO_TRACE_ID, "Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate);
-        }
-        return ready;
-    }
+    bool is_ready_for_traffic() const override;
     // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
-    void purge() override {
-        RD_REL_ASSERT(false, "NOT SUPPORTED YET");
-    }
+    void purge() override { RD_REL_ASSERT(false, "NOT SUPPORTED YET"); }
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
@@ -271,22 +279,17 @@ public:
     void handle_rollback(repl_req_ptr_t rreq);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
     repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
-                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel);
+                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel,
+                                      int64_t lsn = -1 /*init lsn*/);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
     void cp_flush(CP* cp, cshared< ReplDevCPContext > ctx);
     cshared< ReplDevCPContext > get_cp_ctx(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
-    void become_leader_cb() {
-        auto new_gate = raft_server()->get_last_log_idx();
-        repl_lsn_t existing_gate = 0;
-        if (!m_traffic_ready_lsn.compare_exchange_strong(existing_gate, new_gate)) {
-            // was a follower, m_traffic_ready_lsn should be zero on follower.
-            RD_REL_ASSERT(existing_gate == 0, "existing gate should be zero");
-        }
-        RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
-    };
+
+    void become_leader_cb();
+
     void become_follower_cb() {
         // m_traffic_ready_lsn should be zero on follower.
         m_traffic_ready_lsn.store(0);
@@ -345,15 +348,23 @@ public:
 
     /**
      * \brief This method is called to check if the given LSN is within the last snapshot LSN received from the leader.
-     * All logs with LSN less than or equal to the last snapshot LSN are considered as part of the baseline resync, which
-     * doesn't need any more operations (e.g., replay, commit).
+     * All logs with LSN less than or equal to the last snapshot LSN are considered as part of the baseline resync,
+     * which doesn't need any more operations (e.g., replay, commit).
      *
      * \param lsn The LSN to be checked.
      * \return true if the LSN is within the last snapshot LSN, false otherwise.
      */
-    bool need_skip_processing(const repl_lsn_t lsn) {
-        return lsn <= m_rd_sb->last_snapshot_lsn;
-    }
+    bool need_skip_processing(const repl_lsn_t lsn) { return lsn <= m_rd_sb->last_snapshot_lsn; }
+
+    // pause/resume statemachine(commiting thread)
+    void pause_statemachine();
+    void resume_statemachine();
+
+    void enter_emergency();
+    void leave_emergency();
+
+    // clear reqs that has allocated blks on the given chunk.
+    void clear_chunk_req(chunk_num_t chunk_id);
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
@@ -399,6 +410,13 @@ private:
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
 
     void report_blk_metrics_if_needed(repl_req_ptr_t rreq);
+    ReplServiceError init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,
+                                  sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
+                                  cshared< ReplDevListener >& listener);
+
+    bool is_in_emergency() { return m_in_emergency.load(std::memory_order_acquire); }
+
+    uint64_t get_pending_init_req_num() { return m_pending_init_req_num.load(std::memory_order_acquire); }
 };
 
 } // namespace homestore

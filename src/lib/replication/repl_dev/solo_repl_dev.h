@@ -70,8 +70,19 @@ public:
     }
 
     repl_lsn_t get_last_commit_lsn() const override { return 0; }
+    repl_lsn_t get_last_append_lsn() override { return 0; };
 
     uint32_t get_blk_size() const override;
+
+    // pause/resume statemachine(commiting thread)
+    void pause_statemachine() override { return; }
+    void resume_statemachine() override { return; }
+
+    void enter_emergency() override { return; }
+    void leave_emergency() override { return; }
+
+    // clear reqs that has allocated blks on the given chunk.
+    void clear_chunk_req(chunk_num_t chunk_id) override { return; }
 
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
