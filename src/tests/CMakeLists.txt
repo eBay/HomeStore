@@ -131,7 +131,7 @@ if (${io_tests})
         add_test(NAME DataService-Epoll COMMAND test_data_service)
         add_test(NAME RaftReplDev-Epoll COMMAND test_raft_repl_dev)
         # add_test(NAME RaftReplDevDynamic-Epoll COMMAND test_raft_repl_dev_dynamic)
-        # add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev)
+        add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev)
     endif()
 
     can_build_spdk_io_tests(spdk_tests)

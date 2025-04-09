@@ -55,7 +55,7 @@ class BenchLogStore {
 public:
     friend class SampleDB;
     BenchLogStore() {
-        m_logdev_id = logstore_service().create_new_logdev();
+        m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
         m_log_store = logstore_service().create_new_log_store(m_logdev_id, true /* append_mode */);
         m_log_store->register_log_found_cb(bind_this(BenchLogStore::on_log_found, 3));
         m_nth_entry.store(0);

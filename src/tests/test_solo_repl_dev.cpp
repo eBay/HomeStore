@@ -99,6 +99,7 @@ public:
 
         void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                        cintrusive< repl_req_ctx >& ctx) override {
+            LOGINFO("Received on_commit lsn={}", lsn);
             if (ctx == nullptr) {
                 m_test.validate_replay(*repl_dev(), lsn, header, key, blkids);
             } else {
@@ -232,8 +233,8 @@ public:
         uint32_t size = blkids.blk_count() * g_block_size;
         if (size) {
             auto read_sgs = HSTestHelper::create_sgs(size, size);
-            LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
-                     blkids.to_string());
+            LOGINFO("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
+                    blkids.to_string());
             rdev.async_read(blkids, read_sgs, size)
                 .thenValue([this, hdr = *jhdr, read_sgs, lsn, blkids, &rdev](auto&& err) {
                     RELEASE_ASSERT(!err, "Error during async_read");
@@ -243,8 +244,8 @@ public:
                         HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr.data_pattern);
                         iomanager.iobuf_free(uintptr_cast(iov.iov_base));
                     }
-                    LOGDEBUG("[{}] Replay of lsn={} blkid={} validated successfully",
-                             boost::uuids::to_string(rdev.group_id()), lsn, blkids.to_string());
+                    LOGINFO("[{}] Replay of lsn={} blkid={} validated successfully",
+                            boost::uuids::to_string(rdev.group_id()), lsn, blkids.to_string());
                     m_task_waiter.one_complete();
                 });
         } else {
@@ -258,15 +259,15 @@ public:
             req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, req->write_sgs.size);
 
             auto const cap = hs()->repl_service().get_cap_stats();
-            LOGDEBUG("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
+            LOGINFO("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
 
             rdev.async_read(req->written_blkids, req->read_sgs, req->read_sgs.size)
                 .thenValue([this, &rdev, req](auto&& err) {
                     RELEASE_ASSERT(!err, "Error during async_read");
 
-                    LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
-                             boost::uuids::to_string(rdev.group_id()), req->lsn(), req->write_sgs.size,
-                             req->written_blkids.to_string());
+                    LOGINFO("[{}] Write complete with lsn={} for size={} blkids={}",
+                            boost::uuids::to_string(rdev.group_id()), req->lsn(), req->write_sgs.size,
+                            req->written_blkids.to_string());
                     auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,
                                      "journal hdr data size mismatch with actual size");
@@ -298,7 +299,9 @@ TEST_F(SoloReplDevTest, TestRandomSizedDataBlock) {
         uint32_t key_size = rand() % 512 + 8;
         this->write_io(key_size, nblks * g_block_size, g_block_size);
     });
+
     this->m_io_runner.execute().get();
+    LOGINFO("Step 2: Restart homestore and validate replay data.", g_block_size);
     this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 
@@ -306,6 +309,7 @@ TEST_F(SoloReplDevTest, TestHeaderOnly) {
     LOGINFO("Step 1: run on worker threads to schedule write");
     this->m_io_runner.set_task([this]() { this->write_io(0u, 0u, g_block_size); });
     this->m_io_runner.execute().get();
+    LOGINFO("Step 2: Restart homestore and validate replay data.", g_block_size);
     this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 

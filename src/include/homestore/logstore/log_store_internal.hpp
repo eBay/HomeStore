@@ -52,6 +52,12 @@ typedef std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t)
 
 typedef int64_t logid_t;
 
+VENUM(flush_mode_t, uint32_t, // Various flush modes (can be or'ed together)
+      INLINE = 1 << 0,        // Allow flush inline with the append
+      TIMER = 1 << 1,         // Allow timer based automatic flush
+      EXPLICIT = 1 << 2,      // Allow explcitly user calling flush
+);
+
 struct logdev_key {
     logid_t idx;
     off_t dev_offset;
@@ -172,4 +178,5 @@ struct logstore_superblk {
     logstore_seq_num_t m_first_seq_num{0};
 };
 #pragma pack()
+
 } // namespace homestore
