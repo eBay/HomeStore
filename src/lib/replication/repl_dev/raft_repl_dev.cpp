@@ -18,6 +18,7 @@
 // #include "common/homestore_flip.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
+#include "device/chunk.h"
 #include "device/device.h"
 #include "push_data_rpc_generated.h"
 #include "fetch_data_rpc_generated.h"
@@ -1406,6 +1407,7 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
                 m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
                 return nuraft::cb_func::ReturnCode::ReturnNull;
             }
+            report_blk_metrics_if_needed(req);
             reqs->emplace_back(std::move(req));
         }
 
@@ -1727,6 +1729,19 @@ bool RaftReplDev::is_resync_mode() {
                 leader_commited_lsn, my_log_idx, diff);
     }
     return resync_mode;
+}
+
+void RaftReplDev::report_blk_metrics_if_needed(repl_req_ptr_t rreq) {
+    auto chunk_id = rreq->local_blkid().chunk_num();
+    auto chunk = hs()->device_mgr()->get_chunk(chunk_id);
+    if (chunk->get_blk_usage() >= chunk->get_blk_usage_report_threshold()) {
+        auto local_blk_num = rreq->local_blkid().blk_num();
+        auto remote_blk_num = rreq->remote_blkid().blkid.blk_num();
+        // Focus only on cases where the locally allocated blocks exceed the proposer's allocated blocks,
+        // as this indicates that the member might encounter NO_SPACE_LEFT before the proposer.
+        auto blk_diff_with_remote = local_blk_num > remote_blk_num ? local_blk_num - remote_blk_num : 0;
+        HISTOGRAM_OBSERVE(m_metrics, blk_diff_with_proposer, blk_diff_with_remote);
+    }
 }
 
 } // namespace homestore

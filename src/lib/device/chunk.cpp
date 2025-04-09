@@ -29,6 +29,10 @@ std::string Chunk::to_string() const {
                        vdev_ordinal(), stream_id());
 }
 
+float Chunk::get_blk_usage() const {
+    return s_cast<float>(m_blk_allocator->get_used_blks()) / s_cast<float>(m_blk_allocator->get_total_blks());
+}
+
 void Chunk::set_user_private(const sisl::blob& data) {
     std::unique_lock lg{m_mgmt_mutex};
     m_chunk_info.set_user_private(data);

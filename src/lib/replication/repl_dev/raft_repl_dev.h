@@ -90,6 +90,13 @@ public:
         REGISTER_HISTOGRAM(rreq_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
 
+        // In the identical layout chunk, the blk num of the follower and leader is expected to be the same.
+        // However, due to the concurrency between the data channel and the raft channel, there might be some
+        // allocation differences on the same lsn. When a leader switch occurs, these differences could become garbage.
+        // This metric can partially reflect the potential amount of garbage.
+        REGISTER_HISTOGRAM(blk_diff_with_proposer,
+                           "allocated blk num diff on the same lsn with proposer when chunk usage >= 0.9");
+
         // Raft channel metrics
         REGISTER_HISTOGRAM(raft_end_of_append_batch_latency_us, "Raft end_of_append_batch latency in us",
                            "raft_logstore_append_latency", {"op", "end_of_append_batch"});
@@ -390,6 +397,8 @@ private:
     void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
+
+    void report_blk_metrics_if_needed(repl_req_ptr_t rreq);
 };
 
 } // namespace homestore

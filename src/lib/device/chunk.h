@@ -27,6 +27,7 @@ private:
     const uint32_t m_stream_id;
     uint32_t m_vdev_ordinal{0};
     shared< BlkAllocator > m_blk_allocator;
+    float blk_usage_report_threshold{0.9};
 
 public:
     static constexpr auto MAX_CHUNK_SIZE = std::numeric_limits< uint32_t >::max();
@@ -66,6 +67,8 @@ public:
     nlohmann::json get_status([[maybe_unused]] int log_level) const;
     const BlkAllocator* blk_allocator() const { return m_blk_allocator.get(); }
     BlkAllocator* blk_allocator_mutable() { return m_blk_allocator.get(); }
+    float get_blk_usage_report_threshold() const { return blk_usage_report_threshold; }
+    float get_blk_usage() const;
 
     ////////////// Setters /////////////////////
     void set_user_private(const sisl::blob& data);
