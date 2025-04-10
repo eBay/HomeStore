@@ -16,9 +16,9 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     }
 
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
+    RELEASE_ASSERT_NE(nullptr != rreq, "Failed to localize journal entry before appending log");
     ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
-
     RD_LOGT(rreq->traceID(), "Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
     return lsn;
 }
@@ -31,6 +31,7 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
     }
 
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
+    RELEASE_ASSERT(nullptr != rreq, "Failed to localize journal entry before overwriting log at index {}", index);
     HomeRaftLogStore::write_at(index, entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(index));
     RD_LOGT(rreq->traceID(), "Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
@@ -66,7 +67,8 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         // Wait for the fetch and write to be completed successfully.
         // It is essential to complete the data write before appending to the log. If the logs are flushed
         // before the data is written, a restart and subsequent log replay occurs, as the in-memory state is lost,
-        // it leaves us uncertain about whether the data was actually written, potentially leading to data inconsistency.
+        // it leaves us uncertain about whether the data was actually written, potentially leading to data
+        // inconsistency.
         std::move(fut).wait();
         HISTOGRAM_OBSERVE(m_rd.metrics(), data_channel_wait_latency_us, get_elapsed_time_us(cur_time));
     }
