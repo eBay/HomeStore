@@ -128,7 +128,7 @@ TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
 }
 
 TEST_F(RaftReplDevTest, Write_With_Handling_No_Space_Left) {
-    g_helper->set_basic_flip("fake_no_space_left", std::numeric_limits< int >::max(), 50);
+    g_helper->set_basic_flip("simulate_no_space_left", std::numeric_limits< int >::max(), 50);
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 

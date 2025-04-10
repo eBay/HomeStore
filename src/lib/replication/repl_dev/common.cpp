@@ -33,9 +33,9 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
     if (has_linked_data() && !has_state(repl_req_state_t::BLK_ALLOCATED)) {
         ReplServiceError alloc_status;
 #ifdef _PRERELEASE
-        if (iomgr_flip::instance()->test_flip("fake_no_space_left") && !is_proposer) {
+        if (iomgr_flip::instance()->test_flip("simulate_no_space_left") && !is_proposer) {
             LOGERROR("Simulate no space left on follower for testing purposes");
-            // TODO: support `fake_no_space_left` for the leader, do not throw exception in on-error in the test
+            // TODO: support `simulate_no_space_left` for the leader, do not throw exception in on-error in the test
             // framework, it will cause the leader to fail and exit.
             alloc_status = ReplServiceError::NO_SPACE_LEFT;
         } else {
