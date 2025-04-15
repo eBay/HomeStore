@@ -130,7 +130,11 @@ table Generic {
 
     cache_max_throttle_cnt : uint32 = 4; // writeback cache max q depth
 
-    cache_min_throttle_cnt : uint32 = 4; // writeback cache min q deoth
+    cache_min_throttle_cnt : uint32 = 4; // writeback cache min q depth
+
+    cache_hashmap_nbuckets : uint32 = 1000000; // num buckets for sisl::SimpleHashmap used in wbcache
+
+    cache_evictor_npartitions: uint32 = 1000; // num partitions for lru evictor in the cache
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level: uint32 = 1 (hotswap);
