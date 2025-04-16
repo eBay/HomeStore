@@ -508,8 +508,11 @@ public:
     virtual void pause_statemachine() = 0;
     virtual void resume_statemachine() = 0;
 
-    virtual void enter_emergency() = 0;
-    virtual void leave_emergency() = 0;
+    // complete all the requests that are in progress and start refusing new reqs
+    virtual void quiesce_reqs() = 0;
+
+    // start accepting new reqs
+    virtual void resume_accepting_reqs() = 0;
 
     // clear reqs that has allocated blks on the given chunk.
     virtual void clear_chunk_req(chunk_num_t chunk_id) = 0;

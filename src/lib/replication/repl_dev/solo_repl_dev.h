@@ -78,8 +78,8 @@ public:
     void pause_statemachine() override { return; }
     void resume_statemachine() override { return; }
 
-    void enter_emergency() override { return; }
-    void leave_emergency() override { return; }
+    void quiesce_reqs() override { return; }
+    void resume_accepting_reqs() override { return; }
 
     // clear reqs that has allocated blks on the given chunk.
     void clear_chunk_req(chunk_num_t chunk_id) override { return; }

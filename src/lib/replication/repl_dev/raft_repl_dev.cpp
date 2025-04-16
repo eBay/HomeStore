@@ -1776,7 +1776,7 @@ void RaftReplDev::resume_statemachine() {
     }
 }
 
-void RaftReplDev::enter_emergency() {
+void RaftReplDev::quiesce_reqs() {
     // all the block allocation happens in rreq->init. so after we wait for all the pending req has been initialized we
     // can make sure
     // 1 all the pending reqs has allocated their blocks
@@ -1793,7 +1793,7 @@ void RaftReplDev::enter_emergency() {
     }
 }
 
-void RaftReplDev::leave_emergency() { m_in_emergency.store(false, std::memory_order_release); }
+void RaftReplDev::resume_accepting_reqs() { m_in_emergency.store(false, std::memory_order_release); }
 
 void RaftReplDev::clear_chunk_req(chunk_num_t chunk_id) {
     RD_LOGD(NO_TRACE_ID,

@@ -360,8 +360,8 @@ public:
     void pause_statemachine();
     void resume_statemachine();
 
-    void enter_emergency();
-    void leave_emergency();
+    void quiesce_reqs();
+    void resume_accepting_reqs();
 
     // clear reqs that has allocated blks on the given chunk.
     void clear_chunk_req(chunk_num_t chunk_id);
