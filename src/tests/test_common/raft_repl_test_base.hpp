@@ -94,7 +94,7 @@ public:
         struct journal_header {
             uint64_t data_size;
             uint64_t data_pattern;
-            uint64_t key_id; //put it in header to test duplication in alloc_local_blks
+            uint64_t key_id; // put it in header to test duplication in alloc_local_blks
         };
         journal_header jheader;
         uint64_t key_id;
@@ -151,6 +151,9 @@ public:
         if (ctx->is_proposer()) { g_helper->runner().next_task(); }
     }
 
+    void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
+                   std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {}
+
     bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                        cintrusive< repl_req_ctx >& ctx) override {
         LOGINFOMOD(replication, "[Replica={}] Received pre-commit on lsn={} dsn={}", g_helper->replica_num(), lsn,
@@ -172,7 +175,7 @@ public:
                   cintrusive< repl_req_ctx >& ctx) override {
         LOGINFOMOD(replication, "[Replica={}] Received error={} on key={}", g_helper->replica_num(), enum_name(error),
                    *(r_cast< uint64_t const* >(key.cbytes())));
-        g_helper->runner().comp_promise_.setException(folly::make_exception_wrapper<ReplServiceError>(error));
+        g_helper->runner().comp_promise_.setException(folly::make_exception_wrapper< ReplServiceError >(error));
     }
 
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
@@ -318,8 +321,9 @@ public:
 
     void free_user_snp_ctx(void*& user_snp_ctx) override {}
 
-    ReplResult<blk_alloc_hints> get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size, cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
-        auto jheader = r_cast<test_req::journal_header const*>(header.cbytes());
+    ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size,
+                                                      cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
+        auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = jheader->key_id};
         auto iter = inmem_db_.find(k);
         if (iter != inmem_db_.end()) {
@@ -357,7 +361,7 @@ public:
                 test_common::HSTestHelper::create_sgs(data_size, max_size_per_iov, req->jheader.data_pattern);
         }
 
-        repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req, s_uniq_num);
+        repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req, false, s_uniq_num);
     }
 
     void validate_db_data() {
@@ -590,7 +594,8 @@ public:
                 LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
                 g_helper->runner().set_task([this, block_size, db, data_size]() {
                     static std::normal_distribution<> num_blks_gen{3.0, 2.0};
-                    uint64_t size = data_size == nullptr ? std::abs(std::lround(num_blks_gen(g_re))) * block_size : *data_size;
+                    uint64_t size =
+                        data_size == nullptr ? std::abs(std::lround(num_blks_gen(g_re))) * block_size : *data_size;
                     this->generate_writes(size, block_size, db);
                 });
                 if (wait_for_commit) { g_helper->runner().execute().get(); }
@@ -631,11 +636,11 @@ public:
             auto data_size = std::max(1L, std::abs(std::lround(num_blks_gen(g_re)))) * block_size;
             ASSERT_GT(data_size, 0);
             LOGINFO("data_size larger than 0, go ahead, data_size= {}.", data_size);
-            static std::atomic<uint32_t> s_uniq_num{0};
+            static std::atomic< uint32_t > s_uniq_num{0};
             auto req = intrusive(new TestReplicatedDB::test_req());
             req->jheader.data_size = data_size;
             req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
-            //overwrite the key_id with the id passed in
+            // overwrite the key_id with the id passed in
             req->jheader.key_id = id;
             req->key_id = id;
 
@@ -650,17 +655,15 @@ public:
             db->repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req);
         });
 
-        if (!wait_for_commit) {
-            return ReplServiceError::OK;
+        if (!wait_for_commit) { return ReplServiceError::OK; }
+        try {
+            g_helper->runner().execute().get();
+            LOGDEBUG("write data task complete, id={}", id)
+        } catch (const ReplServiceError& e) {
+            LOGERRORMOD(replication, "[Replica={}] Error in writing data: id={}, error={}", g_helper->replica_num(), id,
+                        enum_name(e));
+            return e;
         }
-       try {
-           g_helper->runner().execute().get();
-           LOGDEBUG("write data task complete, id={}", id)
-       } catch (const ReplServiceError& e) {
-           LOGERRORMOD(replication, "[Replica={}] Error in writing data: id={}, error={}", g_helper->replica_num(),
-                      id, enum_name(e));
-           return e;
-       }
 
         written_entries_ += 1;
         LOGINFO("wait_for_commit={}", written_entries_);

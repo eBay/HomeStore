@@ -270,6 +270,20 @@ public:
     virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                            cintrusive< repl_req_ctx >& ctx) = 0;
 
+    /// @brief Called when the log entry has been committed in the replica set.
+    ///
+    /// This function is called from a dedicated commit thread which is different from the original thread calling
+    /// replica_set::write(). There is only one commit thread, and lsn is guaranteed to be monotonically increasing.
+    ///
+    /// @param lsn - The log sequence number
+    /// @param header - Header originally passed with replica_set::write() api
+    /// @param key - Key originally passed with replica_set::write() api
+    /// @param blkids - List of independent blkids where data is written to the storage engine.
+    /// @param ctx - Context passed as part of the replica_set::write() api
+    ///
+    virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
+                           std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) = 0;
+
     /// @brief Called when the log entry has been received by the replica dev.
     ///
     /// On recovery, this is called from a random worker thread before the raft server is started. It is
@@ -416,10 +430,11 @@ public:
     /// cases
     /// @param value - vector of io buffers that contain value for the key. It is an optional field and if the value
     /// list size is 0, then only key is written to replicadev without data.
-    /// @param ctx - User supplied context which will be passed to listener
-    /// callbacks
+    /// @param ctx - User supplied context which will be passed to listener callbacks
+    /// @param part_of_batch Is write is part of a batch. If part of the batch, then submit_batch needs to be called at
+    /// the end
     virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                   repl_req_ptr_t ctx, trace_id_t tid = 0) = 0;
+                                   repl_req_ptr_t ctx, bool part_of_batch = false, trace_id_t tid = 0) = 0;
 
     /// @brief Reads the data and returns a future to continue on
     /// @param bid Block id to read
