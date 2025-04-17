@@ -111,7 +111,7 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
 }
 
 TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
-    g_helper->set_basic_flip("disable_leader_push_data");
+    g_helper->set_basic_flip("disable_leader_push_data", std::numeric_limits< int >::max(), 100);
     LOGINFO("Homestore replica={} setup completed, all the push_data from leader are disabled",
             g_helper->replica_num());
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
@@ -125,6 +125,37 @@ TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
     this->validate_data();
 
     g_helper->sync_for_cleanup_start();
+    g_helper->remove_flip("disable_leader_push_data");
+}
+
+TEST_F(RaftReplDevTest, Write_With_Handling_No_Space_Left) {
+    g_helper->set_basic_flip("simulate_no_space_left", std::numeric_limits< int >::max(), 50);
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    // this test is slow, so use a smaller number of entries to write in each attempt
+    uint64_t entries_per_attempt = 50;
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+
+    LOGINFO("Restart all the homestore replicas");
+    g_helper->restart();
+    g_helper->sync_for_test_start();
+
+    // Reassign the leader to replica 0, in case restart switched leaders
+    this->assign_leader(0);
+
+    LOGINFO("Post restart write the data again on the leader");
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    LOGINFO("Validate all data written (including pre-restart data) by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+    g_helper->remove_flip("simulate_no_space_left");
 }
 
 #endif
