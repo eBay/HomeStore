@@ -214,7 +214,7 @@ private:
 
     // pending create requests, including both raft and data channel
     std::atomic_uint64_t m_pending_init_req_num;
-    std::atomic< bool > m_in_emergency;
+    std::atomic< bool > m_in_quience;
 
 public:
     friend class RaftStateMachine;
@@ -414,7 +414,7 @@ private:
                                   sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
                                   cshared< ReplDevListener >& listener);
 
-    bool is_in_emergency() { return m_in_emergency.load(std::memory_order_acquire); }
+    bool is_in_quience() { return m_in_quience.load(std::memory_order_acquire); }
 
     uint64_t get_pending_init_req_num() { return m_pending_init_req_num.load(std::memory_order_acquire); }
 };

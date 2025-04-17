@@ -1781,8 +1781,8 @@ void RaftReplDev::quiesce_reqs() {
     // can make sure
     // 1 all the pending reqs has allocated their blocks
     // 2 no new pending reqs will be initialized again.
-    m_in_emergency.store(true, std::memory_order_release);
-    RD_LOGD(NO_TRACE_ID, "enter emergency state, waiting for all the pending req to be initialized");
+    m_in_quience.store(true, std::memory_order_release);
+    RD_LOGD(NO_TRACE_ID, "enter quience state, waiting for all the pending req to be initialized");
     while (true) {
         uint64_t pending_req_num = get_pending_init_req_num();
         if (pending_req_num) {
@@ -1793,7 +1793,7 @@ void RaftReplDev::quiesce_reqs() {
     }
 }
 
-void RaftReplDev::resume_accepting_reqs() { m_in_emergency.store(false, std::memory_order_release); }
+void RaftReplDev::resume_accepting_reqs() { m_in_quience.store(false, std::memory_order_release); }
 
 void RaftReplDev::clear_chunk_req(chunk_num_t chunk_id) {
     RD_LOGD(NO_TRACE_ID,
@@ -1840,10 +1840,10 @@ ReplServiceError RaftReplDev::init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, j
     }
 
     init_req_counter counter(m_pending_init_req_num);
-    if (is_in_emergency()) {
-        // In emergency state, reject any new requests.
-        RD_LOGD(rkey.traceID, "Rejecting new request in emergency state, rkey=[{}]", rkey.to_string());
-        return ReplServiceError::EMERGENCY_STATE;
+    if (is_in_quience()) {
+        // In quience state, reject any new requests.
+        RD_LOGD(rkey.traceID, "Rejecting new request in quience state, rkey=[{}]", rkey.to_string());
+        return ReplServiceError::QUIENCE_STATE;
     }
 
     return rreq->init(rkey, op_code, is_proposer, user_header, key, data_size, m_listener);
