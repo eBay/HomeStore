@@ -125,6 +125,7 @@ TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
     this->validate_data();
 
     g_helper->sync_for_cleanup_start();
+    g_helper->remove_flip("disable_leader_push_data");
 }
 
 TEST_F(RaftReplDevTest, Write_With_Handling_No_Space_Left) {
@@ -154,6 +155,7 @@ TEST_F(RaftReplDevTest, Write_With_Handling_No_Space_Left) {
     LOGINFO("Validate all data written (including pre-restart data) by reading them");
     this->validate_data();
     g_helper->sync_for_cleanup_start();
+    g_helper->remove_flip("simulate_no_space_left");
 }
 
 #endif
