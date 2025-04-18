@@ -63,8 +63,8 @@ void IndexCPContext::add_to_txn_journal(uint32_t index_ordinal, const IndexBuffe
     }
 }
 
-void IndexCPContext::add_to_dirty_list(const IndexBufferPtr& buf) {
-    m_dirty_buf_list.push_back(buf);
+void IndexCPContext::add_to_dirty_list(const IndexBufferPtr& buf, const BtreeNodePtr& node) {
+    m_dirty_buf_list.push_back(std::make_pair(buf, node));
     buf->set_state(index_buf_state_t::DIRTY);
     m_dirty_buf_count.increment(1);
 }
@@ -75,7 +75,7 @@ void IndexCPContext::prepare_flush_iteration() { m_dirty_buf_it = m_dirty_buf_li
 
 std::optional< IndexBufferPtr > IndexCPContext::next_dirty() {
     if (m_dirty_buf_it == m_dirty_buf_list.end()) { return std::nullopt; }
-    IndexBufferPtr ret = *m_dirty_buf_it;
+    IndexBufferPtr ret = (*m_dirty_buf_it).first;
     ++m_dirty_buf_it;
     return ret;
 }
@@ -88,12 +88,14 @@ std::string IndexCPContext::to_string() {
     // Display all buffers and its dependencies and state.
     std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
 
-    m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&parents](dirty_buf_entry_t entry) {
         // Add this buf to his children.
+        auto& buf = entry.first;
         parents[buf->m_up_buffer.get()].emplace_back(buf.get());
     });
 
-    m_dirty_buf_list.foreach_entry([&str, &parents](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&str, &parents](dirty_buf_entry_t entry) {
+        auto& buf = entry.first;
         fmt::format_to(std::back_inserter(str), "{}", buf->to_string());
         auto first = true;
         for (const auto& p : parents[buf.get()]) {
@@ -117,11 +119,13 @@ void IndexCPContext::to_string_dot(const std::string& filename) {
     // Mapping from a node to all its parents in the graph.
     std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
 
-    m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&parents](dirty_buf_entry_t entry) {
+        auto& buf = entry.first;
         // Add this buf to his children.
         parents[buf->m_up_buffer.get()].emplace_back(buf.get());
     });
-    m_dirty_buf_list.foreach_entry([&file, &parents, this](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&file, &parents, this](dirty_buf_entry_t entry) {
+        auto& buf = entry.first;
         std::vector< std::string > colors = {"lightgreen", "lightcoral", "lightyellow"};
         auto sbuf = BtreeNode::to_string_buf(buf->raw_buffer());
         auto pos = sbuf.find("LEAF");
@@ -149,7 +153,8 @@ uint16_t IndexCPContext::num_dags() {
     // count number of buffers whose up_buffers are nullptr
     uint16_t count = 0;
     std::unique_lock lg{m_flush_buffer_mtx};
-    m_dirty_buf_list.foreach_entry([&count](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&count](dirty_buf_entry_t entry) {
+        auto &buf = entry.first;
         if (buf->m_up_buffer == nullptr) { count++; }
     });
     return count;
@@ -176,7 +181,8 @@ std::string IndexCPContext::to_string_with_dags() {
 
     std::unique_lock lg{m_flush_buffer_mtx};
     // Create the graph
-    m_dirty_buf_list.foreach_entry([&get_insert_buf, &group_roots](IndexBufferPtr buf) {
+    m_dirty_buf_list.foreach_entry([&get_insert_buf, &group_roots](dirty_buf_entry_t entry) {
+        auto& buf = entry.first;
         if (buf->m_up_buffer == nullptr) {
             auto dgn = get_insert_buf(buf);
             group_roots.emplace_back(dgn);
