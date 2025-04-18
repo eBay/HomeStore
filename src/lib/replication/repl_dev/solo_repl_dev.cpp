@@ -28,7 +28,7 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
 }
 
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                    repl_req_ptr_t rreq, trace_id_t tid) {
+                                    repl_req_ptr_t rreq, bool part_of_batch, trace_id_t tid) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
 
     incr_pending_request_num();

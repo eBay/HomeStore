@@ -230,7 +230,7 @@ public:
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                           repl_req_ptr_t ctx, trace_id_t tid = 0) override;
+                           repl_req_ptr_t ctx, bool part_of_batch = false, trace_id_t tid = 0) override;
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                 bool part_of_batch = false, trace_id_t tid = 0) override;
     folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid, trace_id_t tid = 0) override;
