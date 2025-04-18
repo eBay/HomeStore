@@ -137,11 +137,15 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     HomeStoreDynamicConfig::init_settings_default();
 
     // Check if the max_grpc_message_size is large enough to hold the data and snapshot batch size
+    auto data_fetch_max_size_in_byte = HS_DYNAMIC_CONFIG(consensus.data_fetch_max_size_kb) * 1024ull;
+    RELEASE_ASSERT(data_fetch_max_size_in_byte <= INT_MAX, "data fetch size is larger than the grpc limit");
     if (HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < input.max_data_size ||
-        HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < input.max_snapshot_batch_size) {
-        LOGERROR("max_grpc_message_size {} is too small to hold max_data_size {} and max_snapshot_batch_size {}",
+        HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < input.max_snapshot_batch_size ||
+        HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < s_cast< int >(data_fetch_max_size_in_byte)) {
+        LOGERROR("max_grpc_message_size {} is too small to hold max_data_size {}, max_snapshot_batch_size {} and "
+                 "data_fetch_max_size {}",
                  HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size,
-                 input.max_snapshot_batch_size);
+                 input.max_snapshot_batch_size, data_fetch_max_size_in_byte);
         throw std::invalid_argument("max_grpc_message_size is insufficient for the configured data or snapshot sizes");
     }
 
