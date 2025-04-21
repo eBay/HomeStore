@@ -109,6 +109,9 @@ public:
             }
         }
 
+        void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
+                       std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {}
+
         AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
             return make_async_success<>();
         }
@@ -127,7 +130,8 @@ public:
         void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                          cintrusive< repl_req_ctx >& ctx) override {}
 
-        ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size, cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
+        ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size,
+                                                          cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
             return blk_alloc_hints{};
         }
 
