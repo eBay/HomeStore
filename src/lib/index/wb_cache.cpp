@@ -45,7 +45,7 @@ IndexWBCacheBase& wb_cache() {
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                            const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size) :
         m_vdev{vdev},
-        m_cache{evictor, 100000, node_size,
+        m_cache{evictor,  HS_DYNAMIC_CONFIG(generic.cache_hashmap_nbuckets), node_size,
                 [](const BtreeNodePtr& node) -> BlkId {
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
@@ -132,7 +132,7 @@ void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf
     } else {
         if (node != nullptr) { m_cache.upsert(node); }
         LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), buf->to_string());
-        r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
+        r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf, node);
         resource_mgr().inc_dirty_buf_size(m_node_size);
     }
 }

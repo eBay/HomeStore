@@ -39,7 +39,7 @@ SISL_OPTION_GROUP(
     (num_iters, "", "num_iters", "number of iterations for rand ops",
      ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
-     ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
@@ -190,6 +190,34 @@ TYPED_TEST(BtreeTest, RandomInsert) {
         this->put(vec[i], btree_put_type::INSERT);
     }
     this->get_all();
+}
+
+TYPED_TEST(BtreeTest, TriggerCacheEviction) {
+    // restart homestore with smaller cache %
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.resource_limits.cache_size_percent = 1u;
+        HS_SETTINGS_FACTORY().save();
+    });
+    
+    this->restart_homestore();
+
+    LOGINFO("TriggerCacheEviction test start");
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    LOGINFO("Step 1: Do insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT);
+        // this->print();
+    }
+
+    this->get_all();
+
+    // reset cache pct
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.resource_limits.cache_size_percent = 65u;
+        HS_SETTINGS_FACTORY().save();
+    });
+
+    LOGINFO("TriggerCacheEviction test end");
 }
 
 TYPED_TEST(BtreeTest, SequentialRemove) {

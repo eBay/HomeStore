@@ -133,13 +133,15 @@ public:
     };
 #pragma pack()
 
+    using dirty_buf_entry_t = std::pair< IndexBufferPtr, BtreeNodePtr >;
+
 public:
     std::atomic< uint64_t > m_num_nodes_added{0};
     std::atomic< uint64_t > m_num_nodes_removed{0};
-    sisl::ConcurrentInsertVector< IndexBufferPtr > m_dirty_buf_list;
+    sisl::ConcurrentInsertVector< dirty_buf_entry_t > m_dirty_buf_list;
     sisl::atomic_counter< int64_t > m_dirty_buf_count{0};
     std::mutex m_flush_buffer_mtx;
-    sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
+    sisl::ConcurrentInsertVector< dirty_buf_entry_t >::iterator m_dirty_buf_it;
 
     iomgr::FiberManagerLib::mutex m_txn_journal_mtx;
     sisl::io_blob_safe m_txn_journal_buf;
@@ -156,7 +158,9 @@ public:
 
     sisl::io_blob_safe const& journal_buf() const { return m_txn_journal_buf; }
 
-    void add_to_dirty_list(const IndexBufferPtr& buf);
+    // The BtreeNodePtr is added added only to increment the ref count
+    // which is used by the wbcache to evict the node
+    void add_to_dirty_list(const IndexBufferPtr& buf, const BtreeNodePtr& node);
     bool any_dirty_buffers() const;
     void prepare_flush_iteration();
     std::optional< IndexBufferPtr > next_dirty();
