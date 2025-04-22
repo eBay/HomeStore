@@ -16,6 +16,7 @@
 #include <homestore/meta_service.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
+#include <boost/uuid/uuid.hpp>
 #include "common/homestore_assert.hpp"
 #include "replication/service/generic_repl_svc.h"
 #include "replication/service/raft_repl_service.h"
@@ -78,7 +79,7 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
+SoloReplService::~SoloReplService(){};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -144,7 +145,26 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
 }
 
 folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_t group_id) {
-    return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::NOT_IMPLEMENTED);
+    // RD_LOGI("Removing repl dev for group_id={}", boost::uuids::to_string(group_id));
+    auto rdev = get_repl_dev(group_id);
+    if (rdev.hasError()) { return folly::makeSemiFuture(rdev.error()); }
+
+    auto rdev_ptr = rdev.value();
+
+    // 1. Firstly stop the repl dev which waits for any outstanding requests to finish
+    rdev_ptr->stop();
+
+    // detaches both ways:
+    // detach rdev from its listener and listener from rdev;
+    rdev_ptr->detach_listener();
+    {
+        // remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
+        // this instance;
+        std::unique_lock lg(m_rd_map_mtx);
+        m_rd_map.erase(group_id);
+    }
+
+    return folly::makeSemiFuture(ReplServiceError::OK);
 }
 
 void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) {
