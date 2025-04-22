@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'sds-builder-2204' }
+    agent { label 'sds-builder-v5' }
     triggers {
           cron('TZ=US/Pacific\nH H(0-2) * * *')
     }
@@ -8,7 +8,7 @@ pipeline {
         ORG = 'sds'
         ECR_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
-        CONAN_USER = 'sds'
+        CONAN_USER = 'oss'
         failed_stage = ""
     }
     stages {
@@ -26,6 +26,7 @@ pipeline {
                     VER = sh(script: "grep -m 1 ' version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     NIGHTLY_TAG = "master-nightly-debug-4.0"
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
+                    CONAN_FLAGS="--name ${PROJECT} --user ${CONAN_USER} --channel ${NIGHTLY_TAG}"
                     failed_stage = ""
                 }
             }
@@ -40,20 +41,25 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create --build missing -o homestore:sanitize=True -pr debug . ${PROJECT}/${VER}@"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_index_crash_recovery' -exec cp {} .jenkins/test_index_crash_recovery \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_home_raft_logstore' -exec cp {} .jenkins/test_home_raft_logstore \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_log_store_long_run' -exec cp {} .jenkins/test_log_store_long_run \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_data_service' -exec cp {} .jenkins/test_data_service \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_raft_repl_dev' -exec cp {} .jenkins/test_raft_repl_dev \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_solo_repl_dev' -exec cp {} .jenkins/test_solo_repl_dev \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/index_test.py' -exec install -Dm755 {} .jenkins/index_test.py \\; "
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\; "
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/data_test.py' -exec install -Dm755 {} .jenkins/data_test.py \\; "
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/long_running.py' -exec install -Dm755 {} .jenkins/long_running.py \\; "
+                        sh '''
+                            hostname
+                            echo $NODE_NAME
+                            conan create --build missing -s:h build_type=Debug -o ${PROJECT}/*:sanitize=True ${CONAN_FLAGS} .
+                            
+                            find /home/jenkins -type f -wholename '*/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;
+                            find /home/jenkins -type f -wholename '*/test_index_crash_recovery' -exec cp {} .jenkins/test_index_crash_recovery \\;
+                            find /home/jenkins -type f -wholename '*/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;
+                            find /home/jenkins -type f -wholename '*/test_log_store' -exec cp {} .jenkins/test_log_store \\;
+                            find /home/jenkins -type f -wholename '*/test_home_raft_logstore' -exec cp {} .jenkins/test_home_raft_logstore \\;
+                            find /home/jenkins -type f -wholename '*/test_log_store_long_run' -exec cp {} .jenkins/test_log_store_long_run \\;
+                            find /home/jenkins -type f -wholename '*/test_data_service' -exec cp {} .jenkins/test_data_service \\;
+                            find /home/jenkins -type f -wholename '*/test_raft_repl_dev' -exec cp {} .jenkins/test_raft_repl_dev \\;
+                            find /home/jenkins -type f -wholename '*/test_solo_repl_dev' -exec cp {} .jenkins/test_solo_repl_dev \\;
+                            find /home/jenkins -type f -wholename '*/scripts/index_test.py' -exec install -Dm755 {} .jenkins/index_test.py \\;
+                            find /home/jenkins -type f -wholename '*/scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\;
+                            find /home/jenkins -type f -wholename '*/scripts/data_test.py' -exec install -Dm755 {} .jenkins/data_test.py \\;
+                            find /home/jenkins -type f -wholename '*/scripts/long_running.py' -exec install -Dm755 {} .jenkins/long_running.py \\;
+                        '''
                     }
                     post {
                         failure {
