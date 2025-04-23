@@ -50,7 +50,7 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     return ReplServiceError::OK;
 }
 
-repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entry& lentry, int64_t lsn /*repl_lsn*/) {
+repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entry& lentry, int64_t lsn) {
     // Validate the journal entry and see if it needs to be transformed
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry.get_buf().data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
