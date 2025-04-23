@@ -1381,7 +1381,7 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
         auto raft_req = r_cast< nuraft::req_msg* >(param->ctx);
         auto const& entries = raft_req->log_entries();
 
-        auto start_lsn = to_repl_lsn(raft_req->get_last_log_idx() + 1);
+        auto start_lsn = raft_req->get_last_log_idx() + 1;
         if (entries.size() == 0) {
             RD_LOGT(NO_TRACE_ID, "Raft channel: Received no entry, leader committed lsn {}",
                     raft_req->get_commit_idx());
