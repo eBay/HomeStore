@@ -190,6 +190,8 @@ public:
     }
 
     virtual void TearDown() override {
+        hs()->repl_service().remove_repl_dev(m_repl_dev1->group_id());
+        hs()->repl_service().remove_repl_dev(m_repl_dev2->group_id());
         m_repl_dev1.reset();
         m_repl_dev2.reset();
         m_helper.shutdown_homestore();

@@ -154,15 +154,18 @@ folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_
     // 1. Firstly stop the repl dev which waits for any outstanding requests to finish
     rdev_ptr->stop();
 
-    // detaches both ways:
+    // 2. detaches both ways:
     // detach rdev from its listener and listener from rdev;
     rdev_ptr->detach_listener();
     {
-        // remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
+        // 3. remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
         // this instance;
         std::unique_lock lg(m_rd_map_mtx);
         m_rd_map.erase(group_id);
     }
+
+    // 4. now destroy the upper layer's listener instance;
+    m_repl_app->destroy_repl_dev_listener(group_id);
 
     return folly::makeSemiFuture(ReplServiceError::OK);
 }
