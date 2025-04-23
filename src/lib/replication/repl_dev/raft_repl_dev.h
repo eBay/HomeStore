@@ -253,7 +253,7 @@ public:
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
-    repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx() + 1; /*to_repl_lsn*/ }
+    repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx(); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
 
