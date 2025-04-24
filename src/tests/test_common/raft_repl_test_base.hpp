@@ -125,16 +125,17 @@ public:
     TestReplicatedDB() = default;
     virtual ~TestReplicatedDB() = default;
 
-    void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
-                   cintrusive< repl_req_ctx >& ctx) override {
+    void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
+                   std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
+        ASSERT_EQ(blkids.size(), 1);
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
         Value v{.lsn_ = lsn,
                 .data_size_ = jheader->data_size,
                 .data_pattern_ = jheader->data_pattern,
-                .blkid_ = blkids,
+                .blkid_ = blkids[0],
                 .id_ = k.id_};
 
         LOGINFOMOD(replication, "[Replica={}] Received commit on lsn={} dsn={} key={} value[blkid={} pattern={}]",
@@ -150,9 +151,6 @@ public:
 
         if (ctx->is_proposer()) { g_helper->runner().next_task(); }
     }
-
-    void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
-                   std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {}
 
     bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                        cintrusive< repl_req_ctx >& ctx) override {

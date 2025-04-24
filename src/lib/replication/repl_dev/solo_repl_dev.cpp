@@ -61,7 +61,7 @@ void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
             if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
             data_service().commit_blk(rreq->local_blkid());
-            m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
+            m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), {rreq->local_blkid()}, rreq);
             decr_pending_request_num();
         });
 }
@@ -92,7 +92,7 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     auto cur_lsn = m_commit_upto.load();
     if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
-    m_listener->on_commit(lsn, header, key, blkid, nullptr);
+    m_listener->on_commit(lsn, header, key, {blkid}, nullptr);
 }
 
 folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,

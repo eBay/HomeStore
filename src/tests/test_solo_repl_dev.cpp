@@ -97,20 +97,18 @@ public:
         Listener(SoloReplDevTest& test) : m_test{test} {}
         virtual ~Listener() = default;
 
-        void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
-                       cintrusive< repl_req_ctx >& ctx) override {
+        void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
+                       std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received on_commit lsn={}", lsn);
+            HS_REL_ASSERT(!blkids.empty(), "Invalid blkids size");
             if (ctx == nullptr) {
-                m_test.validate_replay(*repl_dev(), lsn, header, key, blkids);
+                m_test.validate_replay(*repl_dev(), lsn, header, key, blkids[0]);
             } else {
                 auto req = boost::static_pointer_cast< test_repl_req >(ctx);
-                req->written_blkids = std::move(blkids);
+                req->written_blkids = blkids[0];
                 m_test.on_write_complete(*repl_dev(), req);
             }
         }
-
-        void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
-                       std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {}
 
         AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
             return make_async_success<>();
