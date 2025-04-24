@@ -1342,9 +1342,6 @@ void RaftReplDev::permanent_destroy() {
     logstore_service().destroy_log_dev(m_data_journal->logdev_id());
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::PERMANENT_DESTROYED; });
 
-    // callback to consuemr to clean up the listner or any resources associated with the listener itself;
-    m_repl_svc->destroy_repl_dev_listener();
-
     // we should destroy repl_dev superblk only after all the resources are cleaned up, so that is crash recovery
     // occurs, we have a chance to find the stale repl_dev and reclaim all the stale resources.
     m_rd_sb.destroy();
