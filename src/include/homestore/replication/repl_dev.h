@@ -264,20 +264,6 @@ public:
     /// @param lsn - The log sequence number
     /// @param header - Header originally passed with replica_set::write() api
     /// @param key - Key originally passed with replica_set::write() api
-    /// @param blkids - List of blkids where data is written to the storage engine.
-    /// @param ctx - Context passed as part of the replica_set::write() api
-    ///
-    virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
-                           cintrusive< repl_req_ctx >& ctx) = 0;
-
-    /// @brief Called when the log entry has been committed in the replica set.
-    ///
-    /// This function is called from a dedicated commit thread which is different from the original thread calling
-    /// replica_set::write(). There is only one commit thread, and lsn is guaranteed to be monotonically increasing.
-    ///
-    /// @param lsn - The log sequence number
-    /// @param header - Header originally passed with replica_set::write() api
-    /// @param key - Key originally passed with replica_set::write() api
     /// @param blkids - List of independent blkids where data is written to the storage engine.
     /// @param ctx - Context passed as part of the replica_set::write() api
     ///
@@ -402,7 +388,7 @@ public:
     virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) { return; }
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id){};
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

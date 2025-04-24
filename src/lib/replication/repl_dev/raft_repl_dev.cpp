@@ -1020,7 +1020,7 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     } else if (rreq->op_code() == journal_type_t::HS_CTRL_REPLACE) {
         replace_member(rreq);
     } else {
-        m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
+        m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), {rreq->local_blkid()}, rreq);
     }
 
     if (!recovery) {
