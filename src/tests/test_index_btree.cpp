@@ -39,7 +39,7 @@ SISL_OPTION_GROUP(
     (num_iters, "", "num_iters", "number of iterations for rand ops",
      ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
-     ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("7000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",

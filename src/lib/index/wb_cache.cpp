@@ -51,7 +51,7 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair<
                 },
                 [](const sisl::CacheRecord& rec) -> bool {
                     const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
-                    return (hnode.m_value->m_refcount.test_le(1));
+                    return static_cast< IndexBtreeNode* >(hnode.m_value.get())->m_idx_buf->is_clean();
                 }},
         m_node_size{node_size},
         m_meta_blk{sb.first} {
@@ -132,7 +132,7 @@ void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf
     } else {
         if (node != nullptr) { m_cache.upsert(node); }
         LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), buf->to_string());
-        r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf, node);
+        r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
         resource_mgr().inc_dirty_buf_size(m_node_size);
     }
 }
