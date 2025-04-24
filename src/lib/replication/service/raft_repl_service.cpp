@@ -412,6 +412,7 @@ folly::SemiFuture< ReplServiceError > RaftReplService::remove_repl_dev(group_id_
     }
 
     auto ret = std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->destroy_group();
+
     decr_pending_request_num();
     return ret;
 }
