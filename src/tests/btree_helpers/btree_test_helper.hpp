@@ -327,7 +327,8 @@ public:
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
             req.enable_route_tracing();
             const auto ret = m_bt->get(req);
-            ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
+            ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map" << 
+                " - status=" << enum_name(ret);
             ASSERT_EQ((const V&)req.value(), value)
                 << "Found value in btree doesn't return correct data for key=" << key;
         });

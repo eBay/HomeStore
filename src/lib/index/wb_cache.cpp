@@ -45,13 +45,13 @@ IndexWBCacheBase& wb_cache() {
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                            const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size) :
         m_vdev{vdev},
-        m_cache{evictor, 100000, node_size,
+        m_cache{evictor,  HS_DYNAMIC_CONFIG(generic.cache_hashmap_nbuckets), node_size,
                 [](const BtreeNodePtr& node) -> BlkId {
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
                 [](const sisl::CacheRecord& rec) -> bool {
                     const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
-                    return (hnode.m_value->m_refcount.test_le(1));
+                    return static_cast< IndexBtreeNode* >(hnode.m_value.get())->m_idx_buf->is_clean();
                 }},
         m_node_size{node_size},
         m_meta_blk{sb.first} {
