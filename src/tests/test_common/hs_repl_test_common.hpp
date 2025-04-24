@@ -17,6 +17,8 @@
  */
 
 #pragma once
+#include "raft_repl_test_base.hpp"
+
 #include <mutex>
 #include <condition_variable>
 #include <map>
@@ -34,6 +36,8 @@
 #include <sisl/settings/settings.hpp>
 #include <sisl/grpc/rpc_client.hpp>
 #include "test_common/homestore_test_common.hpp"
+
+#include <replication/service/raft_repl_service.h>
 
 SISL_OPTION_GROUP(test_repl_common_setup,
                   (replicas, "", "replicas", "Total number of replicas",
@@ -298,6 +302,19 @@ public:
             auto v = hs()->repl_service().create_repl_dev(repl_group_id, members).get();
             ASSERT_EQ(v.hasValue(), true)
                 << "Error in creating repl dev for group_id=" << boost::uuids::to_string(repl_group_id).c_str();
+            auto& raftService = dynamic_cast< RaftReplService& >(hs()->repl_service());
+            auto follower_priority = raftService.compute_raft_follower_priority();
+            auto repl_dev = v.value();
+            ASSERT_EQ(my_replica_id_, repl_dev->get_leader_id());
+            auto peer_info = repl_dev->get_replication_status();
+            for (auto pinfo : peer_info) {
+                LOGINFO("Replica={} has priority={}", boost::uuids::to_string(pinfo.id_), pinfo.priority_);
+                if (pinfo.id_ == my_replica_id_) {
+                    ASSERT_EQ(raft_leader_priority, pinfo.priority_);
+                } else {
+                    ASSERT_EQ(follower_priority, pinfo.priority_);
+                }
+            }
         }
     }
 

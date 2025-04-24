@@ -1168,7 +1168,10 @@ std::vector< peer_info > RaftReplDev::get_replication_status() const {
     for (auto const& pinfo : rep_status) {
         pi.emplace_back(peer_info{.id_ = boost::lexical_cast< replica_id_t >(pinfo.id_),
                                   .replication_idx_ = pinfo.last_log_idx_,
-                                  .last_succ_resp_us_ = pinfo.last_succ_resp_us_});
+                                  .last_succ_resp_us_ = pinfo.last_succ_resp_us_,
+                                  .priority_ = pinfo.priority_,
+                                  .is_learner_ = pinfo.is_learner_,
+                                  .is_new_joiner_ = pinfo.is_new_joiner_});
     }
     return pi;
 }
@@ -1271,8 +1274,8 @@ nuraft::ptr< nuraft::cluster_config > RaftReplDev::load_config() {
 
     if (!js.contains("config")) {
         auto cluster_conf = nuraft::cs_new< nuraft::cluster_config >();
-        cluster_conf->get_servers().push_back(
-            nuraft::cs_new< nuraft::srv_config >(m_raft_server_id, my_replica_id_str()));
+        cluster_conf->get_servers().push_back(nuraft::cs_new< nuraft::srv_config >(
+            m_raft_server_id, 0, my_replica_id_str(), "", false, raft_leader_priority));
         js["config"] = serialize_cluster_config(*cluster_conf);
     }
     return deserialize_cluster_config(js["config"]);

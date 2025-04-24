@@ -59,6 +59,17 @@ ReplServiceError RaftReplService::to_repl_error(nuraft::cmd_result_code code) {
     return ret;
 }
 
+// NuRaft priority decay coefficient is set to 0.8(currently not configurable). For more details, please refer to
+// https://github.com/eBay/NuRaft/blob/master/docs/leader_election_priority.md
+int32_t RaftReplService::compute_raft_follower_priority() {
+    auto max_wait_round = std::min(raft_priority_election_round_upper_limit,
+                                   HS_DYNAMIC_CONFIG(consensus.max_wait_rounds_of_priority_election));
+    if (max_wait_round == 0) { return raft_leader_priority; }
+    auto priority = 1 + static_cast< int32_t >(
+                        std::ceil(raft_leader_priority * std::pow(raft_priority_decay_coefficient, max_wait_round)));
+    return priority;
+}
+
 RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {
     m_config_sb_bufs.reserve(100);
     meta_service().register_handler(
@@ -344,14 +355,18 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
             return make_async_error< shared< ReplDev > >(to_repl_error(status.error()));
         }
 
+        auto follower_priority = compute_raft_follower_priority();
+
         auto my_id = m_repl_app->get_my_repl_id();
         for (auto& member : members) {
             if (member == my_id) { continue; } // Skip myself
             do {
-                auto const result = m_msg_mgr->add_member(group_id, member).get();
+                auto srv_config = nuraft::srv_config(nuraft_mesg::to_server_id(member), 0, boost::uuids::to_string(member), "",
+                                                     false, follower_priority);
+                auto const result = m_msg_mgr->add_member(group_id, srv_config).get();
                 if (result) {
-                    LOGINFOMOD(replication, "Groupid={}, new member={} added", boost::uuids::to_string(group_id),
-                               boost::uuids::to_string(member));
+                    LOGINFOMOD(replication, "Groupid={}, new member={} added with priority={}", boost::uuids::to_string(group_id),
+                               boost::uuids::to_string(member), follower_priority);
                     break;
                 } else if (result.error() != nuraft::CONFIG_CHANGING) {
                     LOGWARNMOD(replication, "Groupid={}, add member={} failed with error={}",

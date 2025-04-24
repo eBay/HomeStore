@@ -33,6 +33,9 @@ namespace homestore {
 
 constexpr auto cert_change_timeout = std::chrono::seconds(1200);
 constexpr auto cert_check_sleep = std::chrono::seconds(1);
+constexpr int32_t raft_leader_priority = 100;
+constexpr double raft_priority_decay_coefficient = 0.8;
+constexpr uint32_t raft_priority_election_round_upper_limit = 5;
 
 struct repl_dev_superblk;
 class RaftReplDev;
@@ -57,6 +60,7 @@ public:
     ~RaftReplService() override;
 
     static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
+    int32_t compute_raft_follower_priority();
 
     ///////////////////// Overrides of nuraft_mesg::MessagingApplication ////////////////////
     std::string lookup_peer(nuraft_mesg::peer_id_t const&) override;
