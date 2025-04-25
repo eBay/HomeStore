@@ -43,7 +43,7 @@ public:
 
     virtual AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
                                              const replica_member_info& member_in,
-                                             uint32_t commit_quorum = 0) const = 0;
+                                             uint32_t commit_quorum = 0, uint64_t trace_id = 0) const = 0;
 
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in

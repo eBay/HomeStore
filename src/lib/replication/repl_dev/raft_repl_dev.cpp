@@ -137,12 +137,10 @@ bool RaftReplDev::join_group() {
 }
 
 AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_out,
-                                              const replica_member_info& member_in, uint32_t commit_quorum) {
-    // Fixme: traceID for replace member
-    uint64_t trace_id = 0;
-
+                                              const replica_member_info& member_in, uint32_t commit_quorum,
+                                              uint64_t trace_id) {
     if (is_stopping()) {
-        LOGINFO("repl dev is being shutdown!");
+        LOGINFO("repl dev is being shutdown! trace_id={}", trace_id);
         return make_async_error<>(ReplServiceError::STOPPING);
     }
     incr_pending_request_num();
