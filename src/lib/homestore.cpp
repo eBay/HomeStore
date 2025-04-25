@@ -261,7 +261,7 @@ void HomeStore::do_start() {
     const auto& inp_params = HomeStoreStaticConfig::instance().input;
 
     uint64_t cache_size = resource_mgr().get_cache_size();
-    m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, 1000);
+    m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, HS_DYNAMIC_CONFIG(generic.cache_evictor_npartitions));
 
     if (m_before_services_starting_cb) { m_before_services_starting_cb(); }
 
