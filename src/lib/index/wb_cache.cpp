@@ -816,8 +816,8 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 }
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
-#ifdef _PRERELEASE
     static std::once_flag flag;
+#ifdef _PRERELEASE
     if (hs()->crash_simulator().is_crashed()) {
         std::call_once(flag, []() { LOGINFO("Crash simulation is ongoing; aid simulation by not flushing."); });
         return;
