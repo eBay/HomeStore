@@ -25,7 +25,7 @@
 #include <sisl/utility/enum.hpp>
 #include <iomgr/iomgr_flip.hpp>
 #include <boost/algorithm/string.hpp>
-
+#include "common/homestore_config.hpp"
 #include "test_common/range_scheduler.hpp"
 #include "shadow_map.hpp"
 
@@ -44,8 +44,17 @@ struct BtreeTestHelper {
     void SetUp() {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
+        if (SISL_OPTIONS.count("disable_merge")) {
+            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+                s.btree.merge_turned_on = false;
+                HS_SETTINGS_FACTORY().save();
+            });
+        }
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.btree.max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
+            HS_SETTINGS_FACTORY().save();
+        });
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
-        if (SISL_OPTIONS.count("disable_merge")) { m_cfg.m_merge_turned_on = false; }
 
         if (m_is_multi_threaded) {
             std::mutex mtx;
@@ -225,16 +234,14 @@ public:
         rreq.enable_route_tracing();
         bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
-        if(care_success) {
+        if (care_success) {
             ASSERT_EQ(removed, m_shadow_map.exists(*pk))
                 << "Removal of key " << pk->key() << " status doesn't match with shadow";
             if (removed) { m_shadow_map.remove_and_check(*pk, *existing_v); }
-        }else {
+        } else {
             // Do not care if the key is not present in the btree, just cleanup the shadow map
             m_shadow_map.erase(*pk);
         }
-
-
     }
 
     void remove_random() {

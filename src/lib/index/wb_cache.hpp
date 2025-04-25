@@ -61,6 +61,13 @@ public:
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const;
     void recover(sisl::byte_view sb) override;
+    struct DagNode {
+        IndexBufferPtr buffer;
+        std::vector< shared< DagNode > > children;
+    };
+
+    using DagPtr = std::shared_ptr< DagNode >;
+    using DagMap = std::map< IndexBufferPtr, DagPtr >;
 
 private:
     void start_flush_threads();
@@ -77,6 +84,9 @@ private:
                                 IndexBufferPtrList& bufs);
 
     void recover_buf(IndexBufferPtr const& buf);
+    void parent_recover(IndexBufferPtr const& buf);
+    std::string to_string_dag_bufs(DagMap& dags, cp_id_t cp_id = 0);
+    DagMap generate_dag_buffers(std::map< BlkId, IndexBufferPtr >& bufmap);
     bool was_node_committed(IndexBufferPtr const& buf);
     void load_buf(IndexBufferPtr const& buf);
     void update_up_buffer_counters(IndexBufferPtr const& buf);

@@ -37,7 +37,8 @@ public:
         uint8_t has_inplace_parent : 1; // Do we have parent_id in the list of ids. It will be first
         uint8_t has_inplace_child : 1;  // Do we have child_id in the list of ids. It will be second
         uint8_t is_parent_meta : 1;     // Is the parent buffer a meta buffer
-        uint8_t reserved1 : 5;
+        uint8_t free_node_level : 4;      // Free/created node level
+        uint8_t reserved1 : 1;
         uint8_t num_new_ids;
         uint8_t num_freed_ids;
         uint8_t reserved{0};
@@ -48,6 +49,7 @@ public:
                 has_inplace_parent{0x0},
                 has_inplace_child{0x0},
                 is_parent_meta{0x0},
+                free_node_level{0x0},
                 num_new_ids{0},
                 num_freed_ids{0},
                 index_ordinal{ordinal} {}

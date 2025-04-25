@@ -89,6 +89,7 @@ public:
     // the following methods are used wb_cache , which will not used by upper layer. so graceful shutdown just skips
     // them for now.
     void repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf);
+    void parent_recover(uint32_t ordinal, IndexBufferPtr const& node_buf);
     void update_root(uint32_t ordinal, IndexBufferPtr const& node_buf);
 
     IndexWBCacheBase& wb_cache() {

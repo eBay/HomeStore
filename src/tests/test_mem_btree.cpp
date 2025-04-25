@@ -42,6 +42,8 @@ SISL_OPTION_GROUP(
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
+    (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
+     ""),
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_fibers, "", "num_fibers", "number of fibers", ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
@@ -107,13 +109,18 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 #ifdef _PRERELEASE
         this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
 #endif
+        this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
+        this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
+        //if TestType is PrefixIntervalBtreeTest print here something
+        if constexpr (std::is_same_v<TestType, PrefixIntervalBtreeTest>) {
+            this->m_cfg.m_merge_turned_on = false;
+        }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 };
 
-// TODO Enable PrefixIntervalBtreeTest later
-using BtreeTypes = testing::Types< /* PrefixIntervalBtreeTest, */ FixedLenBtreeTest, VarKeySizeBtreeTest,
-                                   VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+using BtreeTypes = testing::Types<  FixedLenBtreeTest, VarKeySizeBtreeTest,
+                                   VarValueSizeBtreeTest, VarObjSizeBtreeTest, PrefixIntervalBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
 TYPED_TEST(BtreeTest, SequentialInsert) {
@@ -308,6 +315,11 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 #ifdef _PRERELEASE
         this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
 #endif
+        this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
+        this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
+        if constexpr (std::is_same_v<TestType, PrefixIntervalBtreeTest>) {
+            this->m_cfg.m_merge_turned_on = false;
+        }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 
