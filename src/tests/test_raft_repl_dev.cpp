@@ -484,6 +484,80 @@ TEST_F(RaftReplDevTest, LargeDataWrite) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, PriorityLeaderElection) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    if (g_helper->replica_num() == 0) {
+        auto leader = this->wait_and_get_leader_id();
+        ASSERT_EQ(leader, g_helper->my_replica_id());
+    }
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+
+    LOGINFO("Restart leader");
+    if (g_helper->replica_num() == 0) { g_helper->restart_homestore(); }
+    g_helper->sync_for_test_start();
+
+    LOGINFO("Validate leader switched");
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+    auto leader = this->wait_and_get_leader_id();
+    if (g_helper->replica_num() == 0) { ASSERT_NE(leader, g_helper->my_replica_id()); }
+    g_helper->sync_for_verify_start();
+
+    if (leader == g_helper->my_replica_id()) {
+        LOGINFO("Resign and trigger a priority leader election");
+        // resign and trigger a priority leader election
+        g_helper->restart_homestore();
+    }
+    g_helper->sync_for_test_start();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+    leader = this->wait_and_get_leader_id();
+    LOGINFO("Validate leader switched back to initial replica");
+    if (g_helper->replica_num() == 0) { ASSERT_EQ(leader, g_helper->my_replica_id()); }
+    g_helper->sync_for_verify_start();
+
+    LOGINFO("Post restart write the data again on the leader");
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    LOGINFO("Validate all data written (including pre-restart data) by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+}
+
+TEST_F(RaftReplDevTest, ComputePriority) {
+    g_helper->sync_for_test_start();
+    auto& raftService = dynamic_cast< RaftReplService& >(hs()->repl_service());
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.max_wait_rounds_of_priority_election = 0; });
+    HS_SETTINGS_FACTORY().save();
+    ASSERT_EQ(raftService.compute_raft_follower_priority(), raft_leader_priority);
+
+    for (auto i = 1; i <= int(raft_priority_election_round_upper_limit); i++) {
+        HS_SETTINGS_FACTORY().modifiable_settings(
+            [i](auto& s) { s.consensus.max_wait_rounds_of_priority_election = i; });
+        HS_SETTINGS_FACTORY().save();
+        auto follower_priority = raftService.compute_raft_follower_priority();
+        // Simulate nuraft algorithm
+        auto decayed_priority = raft_leader_priority;
+        for (auto j = 1; j <= i; j++) {
+            int gap = std::max((int)10, decayed_priority / 5);
+            decayed_priority = std::max(1, decayed_priority - gap);
+        }
+        LOGINFO("Follower priority={} decayed_priority={}", follower_priority, decayed_priority);
+        ASSERT_TRUE(follower_priority >= decayed_priority);
+    }
+    // Set back to default value
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.max_wait_rounds_of_priority_election = 2; });
+    HS_SETTINGS_FACTORY().save();
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;

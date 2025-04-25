@@ -284,6 +284,12 @@ table Consensus {
     // Reading snapshot objects will be done by a background thread asynchronously
     // instead of synchronous read by Raft worker threads
     use_bg_thread_for_snapshot_io: bool = true;
+
+    // Maximum number of election timeout rounds to wait during a prioritized leader election process.
+    // Every election timeout will compare its priority with the target_priority(max priority of the peers initially)
+    // then decay the target_priority and wait again until its priority >= target_priority. This setting helps us to set proper priority for peers.
+    // 0 means all members have the same priority.
+    max_wait_rounds_of_priority_election: uint32 = 2;
 }
 
 table HomeStoreSettings {

@@ -117,8 +117,8 @@ void SoloReplService::stop() {
     hs()->data_service().stop();
 }
 
-AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
-                                                                      std::set< replica_id_t > const& members) {
+AsyncReplResult< shared< ReplDev > >
+SoloReplService::create_repl_dev(group_id_t group_id, std::set< replica_id_t > const& members) {
     superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
