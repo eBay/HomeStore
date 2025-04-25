@@ -115,6 +115,8 @@ public:
         create_repl_dev_listener(homestore::group_id_t group_id) override {
             return helper_.get_listener(group_id);
         }
+        void destroy_repl_dev_listener(homestore::group_id_t) override {}
+
         void on_repl_devs_init_completed() { LOGINFO("Repl dev init completed CB called"); }
 
         std::pair< std::string, uint16_t > lookup_peer(homestore::replica_id_t replica_id) const override {

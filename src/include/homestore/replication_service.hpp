@@ -75,6 +75,10 @@ public:
     // Listener corresponding to the ReplDev which will be used to perform the precommit/commit/rollback.
     virtual shared< ReplDevListener > create_repl_dev_listener(group_id_t group_id) = 0;
 
+    // Called when the repl dev is destroyed. This interface provides the application a chance to cleanup any resources
+    // assocated with this listener;
+    virtual void destroy_repl_dev_listener(group_id_t group_id) = 0;
+
     // Called after all the repl devs are found upon restart of the homestore instance.
     // it is a nice place for upper layer to recovery anything depends on repl_devs
     virtual void on_repl_devs_init_completed() = 0;

@@ -156,6 +156,7 @@ public:
         shared< ReplDevListener > create_repl_dev_listener(uuid_t) override {
             return std::make_shared< Listener >(m_test);
         }
+        void destroy_repl_dev_listener(uuid_t) override {}
         void on_repl_devs_init_completed() { LOGINFO("Repl dev init completed CB called"); }
         std::pair< std::string, uint16_t > lookup_peer(uuid_t uuid) const override { return std::make_pair("", 0u); }
         replica_id_t get_my_repl_id() const override { return hs_utils::gen_random_uuid(); }
