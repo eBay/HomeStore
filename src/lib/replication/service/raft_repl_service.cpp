@@ -413,8 +413,6 @@ folly::SemiFuture< ReplServiceError > RaftReplService::remove_repl_dev(group_id_
 
     auto ret = std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->destroy_group();
 
-    m_repl_app->destroy_repl_dev_listener(group_id);
-
     decr_pending_request_num();
     return ret;
 }
@@ -592,6 +590,8 @@ void RaftReplService::gc_repl_devs() {
     // Therefore, we perform it outside the lock scope and then remove group from m_rd_map.
     for (const auto& group_id : groups_to_leave) {
         m_msg_mgr->leave_group(group_id);
+        // notify consumer to cleanup any resources associated with the listener itself;
+        m_repl_app->destroy_repl_dev_listener(group_id);
         {
             std::unique_lock lg(m_rd_map_mtx);
             m_rd_map.erase(group_id);
