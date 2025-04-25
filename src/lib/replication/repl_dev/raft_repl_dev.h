@@ -225,7 +225,7 @@ public:
     bool bind_data_service();
     bool join_group();
     AsyncReplResult<> replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
-                                     uint32_t commit_quorum);
+                                     uint32_t commit_quorum, uint64_t trace_id = 0);
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////

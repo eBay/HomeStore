@@ -79,7 +79,8 @@ protected:
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
     AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, uint32_t commit_quorum = 0) const override;
+                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                     uint64_t trace_id = 0) const override;
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
