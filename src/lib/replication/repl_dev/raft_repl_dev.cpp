@@ -338,7 +338,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     }
 
     auto status = init_req_ctx(
-        rreq, repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+        rreq, repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1), .traceID = tid},
         data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
         key, data.size, m_listener);
 
