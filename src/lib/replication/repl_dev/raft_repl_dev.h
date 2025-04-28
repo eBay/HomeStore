@@ -277,6 +277,7 @@ public:
     void handle_commit(repl_req_ptr_t rreq, bool recovery = false);
     void handle_config_commit(const repl_lsn_t lsn, raft_cluster_config_ptr_t& new_conf);
     void handle_rollback(repl_req_ptr_t rreq);
+    void handle_config_rollback(const repl_lsn_t lsn, raft_cluster_config_ptr_t& old_conf);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
     repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
                                       sisl::blob const& key, uint32_t data_size, bool is_data_channel,
@@ -355,10 +356,6 @@ public:
      * \return true if the LSN is within the last snapshot LSN, false otherwise.
      */
     bool need_skip_processing(const repl_lsn_t lsn) { return lsn <= m_rd_sb->last_snapshot_lsn; }
-
-    // pause/resume statemachine(commiting thread)
-    void pause_statemachine();
-    void resume_statemachine();
 
     void quiesce_reqs();
     void resume_accepting_reqs();

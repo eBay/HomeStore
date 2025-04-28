@@ -270,6 +270,12 @@ public:
     virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
                            std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) = 0;
 
+    /// @brief periodically called to notify the lastest committed lsn to the listener.
+    ///
+    /// @param lsn - The log sequence number
+    ///
+    virtual void notify_committed_lsn(int64_t lsn) = 0;
+
     /// @brief Called when the log entry has been received by the replica dev.
     ///
     /// On recovery, this is called from a random worker thread before the raft server is started. It is
@@ -306,6 +312,10 @@ public:
     /// @param ctx - Context passed as part of the ReplDev::async_alloc_write() api
     virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                              cintrusive< repl_req_ctx >& ctx) = 0;
+
+    /// @brief Called when the config log entry has been rolled back.
+    /// @param lsn - The log sequence number getting rolled back
+    virtual void on_config_rollback(int64_t lsn) = 0;
 
     /// @brief Called when the replDev is created after restart. The consumer is expected to recover all the modules
     /// necessary to replay/commit the logs.
@@ -385,10 +395,10 @@ public:
     /// @brief ask upper layer to handle no_space_left event
     // @param lsn - on which repl_lsn no_space_left happened
     // @param chunk_id - on which chunk no_space_left happened
-    virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) { return; }
+    virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) = 0;
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) {};
+    virtual void on_log_replay_done(const group_id_t& group_id){};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
@@ -504,10 +514,6 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }
-
-    // pause/resume statemachine(commiting thread)
-    virtual void pause_statemachine() = 0;
-    virtual void resume_statemachine() = 0;
 
     // complete all the requests that are in progress and start refusing new reqs
     virtual void quiesce_reqs() = 0;
