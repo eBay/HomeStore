@@ -622,7 +622,7 @@ protected:
                             cur_parent->set_edge_value(BtreeLinkInfo{child_node->node_id(),
                             child_node->link_version()});
                         } else {
-                            auto tsib_id = findTrueSibling(cur_parent);
+                            auto tsib_id = find_true_sibling(cur_parent);
                             if (tsib_id != empty_bnodeid) {
                                 cur_parent->set_next_bnode(tsib_id);
                                 LOGTRACEMOD(wbcache,
@@ -857,7 +857,7 @@ protected:
             return ret;
         }
 
-    bnodeid_t findTrueSibling(BtreeNodePtr const& node) {
+    bnodeid_t find_true_sibling(BtreeNodePtr const& node) {
         if (node == nullptr) return empty_bnodeid;
         bnodeid_t sibling_id = empty_bnodeid;
         if (node->has_valid_edge()) {
@@ -873,7 +873,7 @@ protected:
 
             if (sibling_node->is_node_deleted()) {
                 LOGTRACEMOD(wbcache, "Sibling node [{}] is not the sibling for parent_node {}", sibling_node->to_string(), node->to_string());
-                return findTrueSibling(sibling_node);
+                return find_true_sibling(sibling_node);
             } else {
                 return sibling_id;
             }
