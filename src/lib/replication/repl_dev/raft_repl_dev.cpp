@@ -1764,7 +1764,7 @@ void RaftReplDev::report_blk_metrics_if_needed(repl_req_ptr_t rreq) {
 
 void RaftReplDev::pause_statemachine() {
     if (!raft_server()->is_state_machine_execution_paused()) {
-        raft_server()->pause_state_machine_exeuction();
+        raft_server()->pause_state_machine_execution();
         while (!raft_server()->wait_for_state_machine_pause(100)) {
             RD_LOGD(NO_TRACE_ID, "wait for statemachine pause!");
         }
