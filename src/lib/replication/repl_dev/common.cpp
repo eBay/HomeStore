@@ -63,7 +63,7 @@ repl_req_ctx::~repl_req_ctx() {
 }
 
 void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
-    uint32_t val_size = has_linked_data() ? m_local_blkid.serialized_size() : 0;
+    uint32_t val_size = has_linked_data() ? blkids_serialized_size() : 0;
     uint32_t entry_size = sizeof(repl_journal_entry) + m_header.size() + m_key.size() + val_size;
 
     if (is_raft_buf) {
@@ -94,14 +94,25 @@ void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
     }
 
     if (has_linked_data()) {
-        auto const b = m_local_blkid.serialize();
-        std::memcpy(raw_ptr, b.cbytes(), b.size());
+        for (const auto& blkid : m_local_blkids) {
+            auto const b = blkid.serialize();
+            std::memcpy(raw_ptr, b.cbytes(), b.size());
+            raw_ptr += b.size();
+        }
     }
 }
 
 uint32_t repl_req_ctx::journal_entry_size() const {
     return sizeof(repl_journal_entry) + m_header.size() + m_key.size() +
-        (has_linked_data() ? m_local_blkid.serialized_size() : 0);
+        (has_linked_data() ? blkids_serialized_size() : 0);
+}
+
+uint32_t repl_req_ctx::blkids_serialized_size() const {
+    uint32_t blkids_serialized_size = 0;
+    for (const auto& blkid : m_local_blkids) {
+        blkids_serialized_size += blkid.serialized_size();
+    }
+    return blkids_serialized_size;
 }
 
 void repl_req_ctx::change_raft_journal_buf(raft_buf_ptr_t new_buf, bool adjust_hdr_key) {
@@ -128,7 +139,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
         // if the committed_blk_id is already present, use it and skip allocation and commitment
         LOGINFOMOD(replication, "[traceID={}] For Repl_key=[{}] data already exists, skip", rkey().traceID,
                    rkey().to_string());
-        m_local_blkid = hints_result.value().committed_blk_id.value();
+        m_local_blkids.emplace_back(hints_result.value().committed_blk_id.value());
         add_state(repl_req_state_t::BLK_ALLOCATED);
         add_state(repl_req_state_t::DATA_RECEIVED);
         add_state(repl_req_state_t::DATA_WRITTEN);
@@ -138,13 +149,18 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
         return ReplServiceError::OK;
     }
 
+    std::vector< BlkId > blkids;
     auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
-                                            hints_result.value(), m_local_blkid);
+                                            hints_result.value(), blkids);
     if (status != BlkAllocStatus::SUCCESS) {
         LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID,
                    rkey(), status);
         DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
         return ReplServiceError::NO_SPACE_LEFT;
+    }
+
+    for (auto& blkid : blkids) {
+        m_local_blkids.emplace_back(blkid);
     }
     add_state(repl_req_state_t::BLK_ALLOCATED);
     return ReplServiceError::OK;
@@ -246,7 +262,7 @@ std::string repl_req_ctx::to_string() const {
     return fmt::format("repl_key=[{}], lsn={} state=[{}] m_headersize={} m_keysize={} is_proposer={} "
                        "local_blkid={} remote_blkid={}",
                        m_rkey.to_string(), m_lsn, req_state_name(uint32_cast(state())), m_header.size(), m_key.size(),
-                       m_is_proposer, m_local_blkid.to_string(), m_remote_blkid.blkid.to_string());
+                       m_is_proposer, blkids_to_string(), m_remote_blkid.blkid.to_string());
 }
 
 std::string repl_req_ctx::to_compact_string() const {
@@ -255,7 +271,16 @@ std::string repl_req_ctx::to_compact_string() const {
     }
 
     return fmt::format("dsn={} term={} lsn={} op={} local_blkid={} state=[{}]", m_rkey.dsn, m_rkey.term, m_lsn,
-                       enum_name(m_op_code), m_local_blkid.to_string(), req_state_name(uint32_cast(state())));
+                       enum_name(m_op_code), blkids_to_string(), req_state_name(uint32_cast(state())));
+}
+
+std::string repl_req_ctx::blkids_to_string() const {
+    std::string str = fmt::format("[");
+    for (const auto& blkid : m_local_blkids) {
+        fmt::format_to(std::back_inserter(str), "{} ", blkid.to_string());
+    }
+    fmt::format_to(std::back_inserter(str), "]");
+    return str;
 }
 
 bool repl_req_ctx::is_expired() const {

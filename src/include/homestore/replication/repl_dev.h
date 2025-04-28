@@ -130,7 +130,16 @@ public:
 
     sisl::blob const& header() const { return m_header; }
     sisl::blob const& key() const { return m_key; }
-    MultiBlkId const& local_blkid() const { return m_local_blkid; }
+    MultiBlkId const& local_blkid() const {
+        // Currently used by raft repl dev only where a single blob is expected.
+        // Code checks if its a valid blkid so return a dummy blkid.
+        if (!m_local_blkids.empty())
+            return m_local_blkids[0];
+        else
+            return dummy_blkid;
+    }
+
+    std::vector< MultiBlkId >& local_blkids() { return m_local_blkids; }
     RemoteBlkId const& remote_blkid() const { return m_remote_blkid; }
     const char* data() const {
         DEBUG_ASSERT(m_data != nullptr,
@@ -141,6 +150,7 @@ public:
     bool has_state(repl_req_state_t s) const { return m_state.load() & uint32_cast(s); }
     repl_journal_entry const* journal_entry() const { return m_journal_entry; }
     uint32_t journal_entry_size() const;
+    uint32_t blkids_serialized_size() const;
     bool is_localize_pending() const { return m_is_jentry_localize_pending; }
     bool has_linked_data() const { return (m_op_code == journal_type_t::HS_DATA_LINKED); }
 
@@ -149,6 +159,7 @@ public:
     /////////////////////// Non modifiers methods //////////////////
     std::string to_string() const;
     std::string to_compact_string() const;
+    std::string blkids_to_string() const;
     Clock::time_point created_time() const { return m_start_time; }
     void set_created_time() { m_start_time = Clock::now(); }
     bool is_expired() const;
@@ -195,7 +206,7 @@ public:
     bool save_fetched_data(sisl::GenericClientResponse const& fetched_data, uint8_t const* data, uint32_t data_size);
 
     void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
-    void set_local_blkid(MultiBlkId const& lbid) { m_local_blkid = lbid; } // Only used during recovery
+    void set_local_blkids(std::vector< MultiBlkId > const& lbids) { m_local_blkids = std::move(lbids); }
     void set_is_volatile(bool is_volatile) { m_is_volatile.store(is_volatile); }
     void set_lsn(int64_t lsn);
     void add_state(repl_req_state_t s);
@@ -226,9 +237,10 @@ private:
     std::atomic< bool > m_is_volatile{true};                   // Is the log still in memory and not flushed to disk yet
 
     /////////////// Data related section /////////////////
-    MultiBlkId m_local_blkid;   // Local BlkId for the data
-    RemoteBlkId m_remote_blkid; // Corresponding remote blkid for the data
-    uint8_t const* m_data;      // Raw data pointer containing the actual data
+    static inline MultiBlkId dummy_blkid;
+    std::vector< MultiBlkId > m_local_blkids; // Local BlkId for the data
+    RemoteBlkId m_remote_blkid;               // Corresponding remote blkid for the data
+    uint8_t const* m_data;                    // Raw data pointer containing the actual data
 
     /////////////// Journal/Buf related section /////////////////
     std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > m_journal_buf; // Buf for the journal entry
@@ -400,7 +412,7 @@ public:
     virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) = 0;
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id){};
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
@@ -410,6 +422,39 @@ class ReplDev {
 public:
     ReplDev() = default;
     virtual ~ReplDev() { detach_listener(); }
+
+    /// @brief Allocates blkids from the storage engine to write the value into. Storage
+    /// engine returns a blkid_list in cases where single contiguous blocks are not
+    /// available.
+    ///
+    /// @param data_size - Size of the data.
+    /// @param hints - Specify block allocation hints.
+    /// @param out_blkids - List of bilkid's which may not be contiguous.
+    virtual std::error_code alloc_blks(uint32_t data_size, const blk_alloc_hints& hints,
+                                       std::vector< MultiBlkId >& out_blkids) = 0;
+
+    /// @brief  Write data locally using the specified blkid's. Data is split across the blkids.
+    /// @param blkids - List of blkid's where data will be written.
+    /// @param value - vector of io buffers that contain value for the key.
+    /// @param part_of_batch - Is write is part of a batch. If part of the batch, then submit_batch needs to be called
+    /// at the end
+    /// @return A Future with std::error_code to notify if it has successfully write the data or any error code in case
+    /// of failure
+    virtual folly::Future< std::error_code > async_write(const std::vector< MultiBlkId >& blkids,
+                                                         sisl::sg_list const& value, bool part_of_batch = false,
+                                                         trace_id_t tid = 0) = 0;
+
+    /// @brief Creates a log/journal entry with <header, key, blkid> and calls the on_commit listener callback.
+    /// @param blkids - List of blkid's where data was written.
+    /// @param header - Blob representing the header (it is opaque and will be copied
+    /// as-is to the journal entry)
+    /// @param key - Blob representing the key (it is opaque and will be copied as-is to
+    /// the journal entry).
+    /// @param data_size - Size of the data.
+    /// @param ctx - User supplied context which will be passed to listener callbacks
+    virtual void async_write_journal(const std::vector< MultiBlkId >& blkids, sisl::blob const& header,
+                                     sisl::blob const& key, uint32_t data_size, repl_req_ptr_t ctx,
+                                     trace_id_t tid = 0) = 0;
 
     /// @brief Replicate the data to the replica set. This method goes through the
     /// following steps:

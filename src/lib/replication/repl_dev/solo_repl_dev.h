@@ -39,7 +39,14 @@ public:
     SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~SoloReplDev() = default;
 
-    // TODO: implement graceful shutdown for solo repl dev
+    virtual std::error_code alloc_blks(uint32_t data_size, const blk_alloc_hints& hints,
+                                       std::vector< MultiBlkId >& out_blkids) override;
+    virtual folly::Future< std::error_code > async_write(const std::vector< MultiBlkId >& blkids,
+                                                         sisl::sg_list const& value, bool part_of_batch = false,
+                                                         trace_id_t tid = 0) override;
+    virtual void async_write_journal(const std::vector< MultiBlkId >& blkids, sisl::blob const& header,
+                                     sisl::blob const& key, uint32_t data_size, repl_req_ptr_t ctx,
+                                     trace_id_t tid = 0) override;
 
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                            repl_req_ptr_t ctx, bool part_of_batch = false, trace_id_t tid = 0) override;

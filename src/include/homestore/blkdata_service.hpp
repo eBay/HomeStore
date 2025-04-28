@@ -115,6 +115,18 @@ public:
                                                  bool part_of_batch = false);
 
     /**
+     * @brief : asynchronous write with input block ids;
+     *
+     * @param sgs : the data buffer that needs to be written
+     * @param hints : blk alloc hints
+     * @param in_blkids : input block ids that this write should be written to;
+     * @param cb : callback that will be triggered after write completes
+     * @param part_of_batch : is this write part of a batch;
+     */
+    folly::Future< std::error_code > async_write(sisl::sg_list const& sgs, std::vector< MultiBlkId > const& in_blkids,
+                                                 bool part_of_batch = false);
+
+    /**
      * @brief Asynchronously reads data from the specified block ID into the provided buffer.
      *
      * @param bid The ID of the block to read from.
@@ -147,7 +159,8 @@ public:
     BlkAllocStatus commit_blk(MultiBlkId const& bid);
 
     /**
-     * @brief Allocates a contiguous block of disk space of the given size.
+     * @brief Allocates a contiguous block of disk space of the given size. This API should be called that when consumer
+     * is expecting blks only allocated on same chunk.
      *
      * @param size The size of the block to allocate, in bytes.
      * @param hints Hints for how to allocate the block.
@@ -155,6 +168,17 @@ public:
      * @return The status of the block allocation attempt.
      */
     BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
+
+    /**
+     * @brief Allocates blocks of disk space of the given size.This API should be called when consumer is expecting blk
+     * allocation happen on different chunks is possible and acceptable.
+     *
+     * @param size The size of the block to allocate, in bytes.
+     * @param hints Hints for how to allocate the block.
+     * @param out_blkids Output parameter that will be filled with the IDs of the allocated blocks.
+     * @return The status of the block allocation attempt.
+     */
+    BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, std::vector< BlkId >& out_blkids);
 
     /**
      * @brief Asynchronously frees the specified block IDs.
