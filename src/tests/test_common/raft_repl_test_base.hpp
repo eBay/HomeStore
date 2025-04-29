@@ -176,6 +176,18 @@ public:
         g_helper->runner().comp_promise_.setException(folly::make_exception_wrapper< ReplServiceError >(error));
     }
 
+    void notify_committed_lsn(int64_t lsn) override {
+        LOGINFOMOD(replication, "[Replica={}] Received notify_committed_lsn={}", g_helper->replica_num(), lsn);
+    }
+
+    void on_config_rollback(int64_t lsn) override {
+        LOGINFOMOD(replication, "[Replica={}] Received config rollback at lsn={}", g_helper->replica_num(), lsn);
+    }
+    void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {
+        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}, chunk_id={}", g_helper->replica_num(),
+                   lsn, chunk_id);
+    }
+
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
         std::lock_guard< std::mutex > lock(m_snapshot_lock);
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();

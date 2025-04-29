@@ -246,7 +246,7 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
 
 void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
     RD_LOGD(NO_TRACE_ID, "Raft channel: Rollback cluster conf , log_idx = {}", log_idx);
-    // TODO:add more logic here if necessary
+    m_rd.handle_config_rollback(s_cast< repl_lsn_t >(log_idx), conf);
 }
 
 void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& params) {

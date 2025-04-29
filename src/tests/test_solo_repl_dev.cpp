@@ -141,6 +141,9 @@ public:
         }
         void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {}
         void on_destroy(const group_id_t& group_id) override {}
+        void notify_committed_lsn(int64_t lsn) override {}
+        void on_config_rollback(int64_t lsn) override {}
+        void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {}
     };
 
     class Application : public ReplApplication {
