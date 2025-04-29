@@ -271,8 +271,10 @@ public:
                            std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief periodically called to notify the lastest committed lsn to the listener.
+    /// NOTE: this callback will block the thread of flushing the latest committed lsn into repl_dev superblk as DC_LSN,
+    /// pls take care if there is any heavy or blocking operation in this callback.
     ///
-    /// @param lsn - The log sequence number
+    /// @param lsn - The lasted committed log sequence number so far
     ///
     virtual void notify_committed_lsn(int64_t lsn) = 0;
 
