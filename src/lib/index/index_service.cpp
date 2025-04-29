@@ -88,6 +88,9 @@ void IndexService::start() {
     std::unique_lock lg(m_index_map_mtx);
     for (const auto& [_, tbl] : m_index_map) {
         tbl->recovery_completed();
+#ifdef _PRERELEASE
+        tbl->audit_tree();
+#endif
     }
     // Force taking cp after recovery done. This makes sure that the index table is in consistent state and dirty buffer
     // after recovery can be added to dirty list for flushing in the new cp
@@ -158,6 +161,16 @@ void IndexService::repair_index_node(uint32_t ordinal, IndexBufferPtr const& nod
         tbl->repair_node(node_buf);
     } else {
         HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", ordinal);
+    }
+}
+
+void IndexService::parent_recover(uint32_t ordinal, IndexBufferPtr const& node_buf) {
+    auto tbl = get_index_table(node_buf->m_index_ordinal);
+    if (tbl) {
+        tbl->delete_stale_children(node_buf);
+    } else {
+        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected",
+                      node_buf->m_index_ordinal);
     }
 }
 
@@ -264,7 +277,7 @@ void IndexBuffer::remove_down_buffer(const IndexBufferPtr& buf) {
             }
         }
     }
-    HS_DBG_ASSERT(found, "Down buffer is linked to up_buf, but up_buf doesn't have down_buf in its list");
+    HS_DBG_ASSERT(found, "Down buffer {} is linked to up_buf, but up_buf {} doesn't have down_buf in its list", buf->to_string(), buf->m_up_buffer? buf->m_up_buffer->to_string(): std::string("nulptr"));
 #endif
 }
 

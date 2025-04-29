@@ -34,7 +34,7 @@ if (${build_nonio_tests})
 
     set(TEST_MEMBTREE_SOURCE_FILES test_mem_btree.cpp)
     add_executable(test_mem_btree ${TEST_MEMBTREE_SOURCE_FILES})
-    target_link_libraries(test_mem_btree ${COMMON_TEST_DEPS} GTest::gtest)
+    target_link_libraries(test_mem_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME MemBtree COMMAND test_mem_btree)
     set_tests_properties(MemBtree PROPERTIES TIMEOUT 1200)
 

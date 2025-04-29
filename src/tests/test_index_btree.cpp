@@ -49,6 +49,8 @@ SISL_OPTION_GROUP(
     (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
      ::cxxopts::value< bool >()->default_value("1"), ""),
+    (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
+     ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 

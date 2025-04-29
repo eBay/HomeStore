@@ -334,11 +334,11 @@ void Btree< K, V >::_start_of_lock(const BtreeNodePtr& node, locktype_t ltype, c
     info.node = node.get();
     if (ltype == locktype_t::WRITE) {
         bt_thread_vars()->wr_locked_nodes.push_back(info);
-        LOGTRACEMOD(btree, "ADDING node {} to write locked nodes list, its size={}", (void*)info.node,
+        LOGTRACEMOD(btree, "ADDING node {} to write locked nodes list, its size={}", info.node->node_id(),
                     bt_thread_vars()->wr_locked_nodes.size());
     } else if (ltype == locktype_t::READ) {
         bt_thread_vars()->rd_locked_nodes.push_back(info);
-        LOGTRACEMOD(btree, "ADDING node {} to read locked nodes list, its size={}", (void*)info.node,
+        LOGTRACEMOD(btree, "ADDING node {} to read locked nodes list, its size={}", info.node->node_id(),
                     bt_thread_vars()->rd_locked_nodes.size());
     } else {
         DEBUG_ASSERT(false, "Invalid locktype_t {}", ltype);
@@ -355,7 +355,7 @@ bool Btree< K, V >::remove_locked_node(const BtreeNodePtr& node, locktype_t ltyp
         if (info.node == node.get()) {
             *out_info = info;
             pnode_infos->pop_back();
-            LOGTRACEMOD(btree, "REMOVING node {} from {} locked nodes list, its size = {}", (void*)info.node,
+            LOGTRACEMOD(btree, "REMOVING node {} from {} locked nodes list, its size = {}",info.node->node_id(),
                         (ltype == locktype_t::WRITE) ? "write" : "read", pnode_infos->size());
             return true;
         } else if (pnode_infos->size() > 1) {
@@ -364,7 +364,7 @@ bool Btree< K, V >::remove_locked_node(const BtreeNodePtr& node, locktype_t ltyp
                 *out_info = info;
                 pnode_infos->at(pnode_infos->size() - 2) = pnode_infos->back();
                 pnode_infos->pop_back();
-                LOGTRACEMOD(btree, "REMOVING node {} from {} locked nodes list, its size = {}", (void*)info.node,
+                LOGTRACEMOD(btree, "REMOVING node {} from {} locked nodes list, its size = {}", info.node->node_id(),
                             (ltype == locktype_t::WRITE) ? "write" : "read", pnode_infos->size());
                 return true;
             }
@@ -390,7 +390,7 @@ template < typename K, typename V >
 uint64_t Btree< K, V >::end_of_lock(const BtreeNodePtr& node, locktype_t ltype) {
     btree_locked_node_info info;
     if (!remove_locked_node(node, ltype, &info)) {
-        DEBUG_ASSERT(false, "Expected node = {} is not there in locked_node_list", (void*)node.get());
+        DEBUG_ASSERT(false, "Expected node = {} is not there in locked_node_list", node->node_id());
         return 0;
     }
     // DEBUG_ASSERT_EQ(node.get(), info.node);

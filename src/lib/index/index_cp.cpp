@@ -58,6 +58,7 @@ void IndexCPContext::add_to_txn_journal(uint32_t index_ordinal, const IndexBuffe
             rec->append(op_t::child_new, buf->blkid());
         }
         for (auto const& buf : freed_bufs) {
+            rec->free_node_level = buf->m_node_level;
             rec->append(op_t::child_freed, buf->blkid());
         }
     }
@@ -235,7 +236,78 @@ std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
         cur_ptr += rec->size();
         LOGTRACEMOD(wbcache, "Recovered txn record: {}: {}", t, rec->to_string());
     }
+    auto modifyBuffer = [](IndexBufferPtr& buffer) {
+        IndexBufferPtr up_buf = buffer->m_up_buffer;
+        auto real_up_buf = up_buf;
+        while (real_up_buf && real_up_buf->m_node_freed) {
+            real_up_buf = real_up_buf->m_up_buffer;
+        }
+        if (real_up_buf != up_buf) {
+            up_buf->remove_down_buffer(buffer);
+            buffer->m_up_buffer = real_up_buf;
+            real_up_buf->add_down_buffer(buffer);
+            LOGTRACEMOD(wbcache, "Change upbuffer from {} to {}", up_buf->to_string(),
+                        buffer->m_up_buffer->to_string());
+        }
+    };
+#if 0
+        auto dag_print = [](const std::map< BlkId, IndexBufferPtr >& dags, std::string delimiter) {
+            int index = 1;
+            for (const auto& [blkid, bufferPtr] : dags) {
+                LOGTRACEMOD(wbcache, "{}{} - blkid {} buffer {} ", delimiter, index++, blkid.to_integer(),
+                            bufferPtr->to_string());
+            }
+        };
+        LOGTRACEMOD(wbcache,"Before modify : \n ");
+        dag_print(buf_map, "Before: ");
+#endif
+    for (auto& [blkid, bufferPtr] : buf_map) {
+        modifyBuffer(bufferPtr);
+    }
+    //    LOGTRACEMOD(wbcache,"\n\n\nAFTER modify : \n ");
+    //    dag_print(buf_map, "After: ");
 
+    auto sanityCheck = [](const std::map< BlkId, IndexBufferPtr >& dags) {
+        for (const auto& [blkid, bufferPtr] : dags) {
+            auto up_buffer = bufferPtr->m_up_buffer;
+            if (up_buffer) {
+                HS_REL_ASSERT(
+                    !up_buffer->m_node_freed,
+                    "Sanity check failed: Buffer {} blkdid {} has an up_buffer {} blkid that is marked as freed.",
+                    bufferPtr->to_string(), blkid.to_integer(), up_buffer->to_string(),
+                    up_buffer->blkid().to_integer());
+                HS_REL_ASSERT_EQ(up_buffer->m_created_cp_id, -1,
+                                 "Sanity check failed: Buffer {} has an up_buffer {} that just created",
+                                 bufferPtr->to_string(), up_buffer->to_string());
+                HS_REL_ASSERT_EQ(up_buffer->m_index_ordinal, bufferPtr->m_index_ordinal,
+                                 "Sanity check failed: Buffer {} has an up_buffer {} that has different index_ordinal.",
+                                 bufferPtr->to_string(), up_buffer->to_string());
+                HS_REL_ASSERT(!bufferPtr->is_meta_buf(),
+                              "Sanity check failed: down buffer {} is meta buffer of up buffer {}",
+                              bufferPtr->to_string(), up_buffer->to_string());
+                HS_REL_ASSERT(
+                    !up_buffer->m_wait_for_down_buffers.testz(),
+                    "Sanity check failed: Buffer {} has an up_buffer {} that has zero m_wait_for_down_buffers.",
+                    bufferPtr->to_string(), up_buffer->to_string());
+#ifdef _PRERELEASE
+                HS_DBG_ASSERT(up_buffer->is_in_down_buffers(bufferPtr),
+                              "Sanity check failed: up_buffer {} has't {} as a down_buffer.", up_buffer->to_string(),
+                              bufferPtr->to_string());
+#endif
+            }
+            HS_REL_ASSERT(!bufferPtr->m_node_freed || bufferPtr->m_wait_for_down_buffers.testz(),
+                          "Sanity check failed: Freed buffer {} has non-zero m_wait_for_down_buffers.",
+                          bufferPtr->to_string());
+#ifdef _PRERELEASE
+            HS_DBG_ASSERT(bufferPtr->m_wait_for_down_buffers.test_eq(bufferPtr->m_down_buffers.size()),
+                          "Sanity check failed: Buffer {} has a mismatch between down_buffers_count and "
+                          "m_wait_for_down_buffers.",
+                          bufferPtr->to_string());
+#endif
+        }
+    };
+
+    sanityCheck(buf_map);
     return buf_map;
 }
 
@@ -264,7 +336,14 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
         }
 
         if (up_buf) {
-            auto real_up_buf = (up_buf->m_created_cp_id == cpg->id()) ? up_buf->m_up_buffer : up_buf;
+            auto real_up_buf = up_buf;
+            if (up_buf->m_created_cp_id == cpg->id()) {
+                real_up_buf = up_buf->m_up_buffer;
+            } else if (up_buf->m_node_freed) {
+                real_up_buf = up_buf->m_up_buffer;
+                LOGTRACEMOD(wbcache, "\n\n change upbuffer from {} to {}\n\n", up_buf->to_string(),
+                            real_up_buf->to_string());
+            }
 
 #ifndef NDEBUG
             //  if (!is_sibling_link || (buf->m_up_buffer == real_up_buf)) { return buf;}
@@ -299,6 +378,7 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
     for (uint8_t idx{0}; idx < rec->num_freed_ids; ++idx) {
         auto freed_buf = rec_to_buf(rec, false /* is_meta */, rec->blk_id(cur_idx++),
                                     inplace_child_buf ? inplace_child_buf : parent_buf);
+        freed_buf->m_node_level = rec->free_node_level;
         freed_buf->m_node_freed = true;
     }
 }
@@ -337,6 +417,9 @@ std::string IndexCPContext::txn_record::to_string() const {
 
     fmt::format_to(std::back_inserter(str), ", freed_ids=[");
     add_to_string(str, idx, num_freed_ids);
+    if (num_freed_ids) {
+        fmt::format_to(std::back_inserter(str), ", freed_node_level= {}", (uint8_t)(free_node_level));
+    };
     fmt::format_to(std::back_inserter(str), "{}", (is_parent_meta ? ", parent is meta" : ""));
     return str;
 }

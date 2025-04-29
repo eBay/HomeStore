@@ -250,19 +250,19 @@ struct BtreeConfig {
     uint64_t m_min_keys_in_node{0};
 #endif
     bool m_rebalance_turned_on{false};
-    bool m_merge_turned_on{true};
 
     btree_node_type m_leaf_node_type{btree_node_type::VAR_OBJECT};
     btree_node_type m_int_node_type{btree_node_type::VAR_KEY};
     std::string m_btree_name; // Unique name for the btree
-
+    bool m_merge_turned_on{true};
+    uint8_t m_max_merge_level{1};
 private:
     uint32_t m_suggested_min_size; // Precomputed values
     uint32_t m_ideal_fill_size;
 
 public:
     BtreeConfig(uint32_t node_size, const std::string& btree_name = "") :
-            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name} {
+            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name}{
         set_node_data_size(node_size - 512); // Just put estimate at this point of time.
     }
 

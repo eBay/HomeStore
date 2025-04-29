@@ -21,8 +21,8 @@ def run_test(options, type):
     print("Test completed")
 
 
-def run_crash_test(options):
-    cmd_opts = f"--gtest_filter=IndexCrashTest/0.long_running_put_crash --gtest_break_on_failure --log_mods=wbcache:trace --max_keys_in_node={options['max_keys_in_node']} --num_entries_per_rounds={options['num_entries_per_rounds']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} --num_rounds={options['num_rounds']} {options['dev_list']} "
+def run_crash_test(options, crash_type='put', type=0):
+    cmd_opts = f"--gtest_filter=IndexCrashTest/{type}.long_running_{crash_type}_crash --gtest_break_on_failure --min_keys_in_node={options['min_keys_in_node']} --max_keys_in_node={options['max_keys_in_node']} --num_entries_per_rounds={options['num_entries_per_rounds']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} --num_rounds={options['num_rounds']} {options['dev_list']} "
     # print(f"Running test with options: {cmd_opts}")
     try:
         subprocess.check_call(f"{options['dirpath']}test_index_crash_recovery {cmd_opts}", stderr=subprocess.STDOUT,
@@ -99,7 +99,19 @@ def long_running_crash_put(options):
     options['run_time'] = 14400  # 4 hours
     options['preload_size'] = 1024
     print(f"options: {options}")
-    run_crash_test(options)
+    run_crash_test(options, 'put', 0)
+    print("Long running crash put completed")
+
+def long_running_crash_remove(options):
+    print("Long running crash remove started")
+    options['num_entries'] = 1000
+    options['init_device'] = True
+    options['run_time'] = 14400  # 4 hours
+    options['num_entries_per_rounds'] = 100
+    options['min_keys_in_node'] = 2
+    options['max_keys_in_node'] = 10
+    print(f"options: {options}")
+    run_crash_test(options, 'remove', 0)
     print("Long running crash put completed")
 
 
@@ -120,9 +132,14 @@ def main():
 
 def long_running(*args):
     options = parse_arguments()
+    for i in range(50):
+        print(f"Iteration {i + 1}")
+        long_running_crash_remove(options)
+    for i in range(5):
+        print(f"Iteration {i + 1}")
+        long_running_crash_put(options)
     long_runnig_index(options)
     long_running_clean_shutdown(options)
-    long_running_crash_put(options)
 
 
 if __name__ == "__main__":

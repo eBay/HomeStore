@@ -49,6 +49,8 @@ SISL_OPTION_GROUP(
      ""),
     (min_keys_in_node, "", "min_keys_in_node", "min_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("6"),
      ""),
+    (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("1"), ""),
+    (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
@@ -329,6 +331,15 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Reset btree with uuid {} - erase shadow map {}", boost::uuids::to_string(uuid), m_shadow_filename);
     }
 
+    void destroy_btree() {
+        hs()->index_service().remove_index_table(this->m_bt);
+        this->m_bt->destroy();
+        this->trigger_cp(true);
+        this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
+        this->m_shadow_map.save(m_shadow_filename);
+        LOGINFO("destroy btree - erase shadow map {}", m_shadow_filename);
+    }
+
     void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
         this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
         LOGINFO("\n\n\n\n\n\n shutdown homestore for index service Test\n\n\n\n\n");
@@ -441,8 +452,9 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Sanity check passed for {} keys!", count);
     }
 
-    void crash_and_recover(OperationList& operations, std::string filename = "") {
-         // this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
+    void crash_and_recover(std::string& flip, OperationList& operations, std::string filename = "") {
+        this->remove_flip(flip);
+        //          this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
 
@@ -461,7 +473,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree file after recovery : {}", rec_filename);
             this->visualize_keys(rec_filename);
         }
-         // this->print_keys("Post crash and recovery, btree structure: ");
+        //          this->print_keys("Post crash and recovery, btree structure: ");
         sanity_check(operations);
         //        Added to the index service right after recovery. Not needed here
         //        test_common::HSTestHelper::trigger_cp(true);
@@ -473,7 +485,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree after reapply {}", re_filename);
             this->visualize_keys(re_filename);
         }
-         // this->print_keys("Post reapply, btree structure: ");
+        //          this->print_keys("Post reapply, btree structure: ");
 
         this->get_all();
         LOGINFO("After reapply: {} keys in shadow map and actually {} in tress", this->m_shadow_map.size(),
@@ -580,7 +592,7 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
             //          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
-        this->crash_and_recover(operations, fmt::format("recover_tree_crash_{}.dot", i + 1));
+        this->crash_and_recover(flips[i], operations, fmt::format("recover_tree_crash_{}.dot", i + 1));
         if (renew_btree_after_crash) { this->reset_btree(); };
     }
 }
@@ -709,8 +721,7 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
             }
         } else {
             // remove the flips so that they do not get triggered erroneously
-            this->remove_flip(flip);
-            this->crash_and_recover(operations, fmt::format("long_tree_{}", round));
+            this->crash_and_recover(flip, operations, fmt::format("long_tree_{}", round));
         }
         if (elapsed_time - last_progress_time > 30) {
             last_progress_time = elapsed_time;
@@ -726,13 +737,162 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
         // this->print_keys(fmt::format("reapply: after round {}", round));
         if (renew_btree_after_crash) { this->reset_btree(); };
     }
+    this->destroy_btree();
+    log_obj_life_counter();
+}
+
+TYPED_TEST(IndexCrashTest, long_running_remove_crash) {
+
+    // Define the lambda function
+    auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    auto const rounds = SISL_OPTIONS["num_rounds"].as< uint32_t >();
+    auto const num_entries_per_rounds = SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >();
+    bool load_mode = SISL_OPTIONS.count("load_from_file");
+    bool save_mode = SISL_OPTIONS.count("save_to_file");
+    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
+    vector< std::string > flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"/*,
+                                   "crash_flush_on_freed_child"*/};
+
+    std::string flip = "";
+    OperationList operations;
+    auto m_start_time = Clock::now();
+    auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
+    double elapsed_time, progress_percent, last_progress_time = 0;
+    bool renew_btree_after_crash = false;
+    auto cur_flip_idx = 0;
+    std::uniform_int_distribution<> dis(1, 100);
+    int flip_percentage = 90; // Set the desired percentage here
+    bool normal_execution = true;
+    bool clean_shutdown = true;
+    // if it is safe then delete all previous save files
+    if (save_mode) {
+        std::filesystem::remove_all("/tmp/operations_*.txt");
+        std::filesystem::remove_all("/tmp/flips_history.txt");
+    }
+    // init tree
+    LOGINFO("Step 0: Fill up the tree with {} entries", num_entries);
+    if (load_mode) {
+        operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
+    } else {
+        operations = generator.generateOperations(num_entries, true /* reset */);
+        if (save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
+    }
+    //    auto opstr = SequenceGenerator::printOperations(operations);
+    //    LOGINFO("Lets before crash print operations\n{}", opstr);
+
+    for (auto [k, _] : operations) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    generator.setPutFrequency(0);
+    generator.setRemoveFrequency(100);
+
+    // Trigger the cp to make sure middle part is successful
+    LOGINFO("Step 0-1: Flush all the entries so far");
+    test_common::HSTestHelper::trigger_cp(true);
+    this->get_all();
+    this->m_shadow_map.save(this->m_shadow_filename);
+    //     this->print_keys("reapply: after preload");
+    this->visualize_keys("tree_after_preload.dot");
+
+    for (uint32_t round = 1; round <= rounds && !time_to_stop() && this->tree_key_count() >= num_entries_per_rounds;
+         round++) {
+        LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, rounds);
+        //        this->print_keys(fmt::format("before round {}",round));
+        bool print_time = false;
+        elapsed_time = get_elapsed_time_sec(m_start_time);
+        if (load_mode) {
+            std::ifstream file("/tmp/flips_history.txt");
+            std::string line;
+            bool found = false;
+            for (uint32_t i = 0; i < round && std::getline(file, line); i++) {
+                if (i == round - 1) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found && !line.empty()) {
+                if (line == "normal") {
+                    normal_execution = true;
+                } else {
+                    normal_execution = false;
+                    flip = line;
+                    LOGINFO("Step 1-{}: Set flag {}", round, flip);
+                    this->set_basic_flip(flip, 1, 100);
+                }
+            }
+            file.close();
+        } else {
+            if (dis(g_re) <= flip_percentage) {
+                flip = flips[cur_flip_idx++ % flips.size()];
+                LOGINFO("Step 1-{}: Set flag {}", round, flip);
+                this->set_basic_flip(flip, 1, 100);
+                normal_execution = false;
+            } else {
+                normal_execution = true;
+                LOGINFO("Step 1-{}: No flip set", round);
+            }
+            if (save_mode) {
+                // save the filp name to a file for later use
+                std::ofstream file("/tmp/flips_history.txt", std::ios::app);
+                if (file.is_open()) { file << (normal_execution ? "normal" : flip) << "\n"; }
+                file.close();
+            }
+        }
+        if (load_mode) {
+            operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
+        } else {
+            operations = generator.generateOperations(num_entries_per_rounds, renew_btree_after_crash /* reset */);
+            if (save_mode) {
+                SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
+            }
+        }
+        //        LOGINFO("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
+        for (auto [k, _] : operations) {
+            this->remove_one(k, true /* expect_success */);
+            if (!time_to_stop()) {
+                static bool print_alert = false;
+                if (print_alert) {
+                    LOGINFO("It is time to stop but let's finish this round and then stop!");
+                    print_alert = false;
+                }
+            }
+        }
+        if (normal_execution) {
+            if (clean_shutdown) {
+                this->m_shadow_map.save(this->m_shadow_filename);
+                this->restart_homestore();
+            } else {
+                test_common::HSTestHelper::trigger_cp(true);
+                this->get_all();
+            }
+        } else {
+            this->crash_and_recover(flip, operations, fmt::format("long_tree_{}", round));
+        }
+        if (elapsed_time - last_progress_time > 30) {
+            last_progress_time = elapsed_time;
+            print_time = true;
+        }
+        if (print_time) {
+            LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
+                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
+                    round, rounds, round * 100.0 / rounds, elapsed_time, this->m_run_time,
+                    elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
+                    this->tree_key_count() * 100.0 / num_entries);
+        }
+        // this->print_keys(fmt::format("reapply: after round {}", round));
+        if (renew_btree_after_crash) { this->reset_btree(); };
+    }
+    this->print_keys(fmt::format("tree at end"));
+    this->destroy_btree();
+    log_obj_life_counter();
 }
 
 // Basic reverse and forward order remove with different flip points
 TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
     vector< std::string > flip_points = {
-        "crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child",
-        // "crash_flush_on_freed_child",
+        "crash_flush_on_merge_at_parent",
+        "crash_flush_on_merge_at_left_child",
+        "crash_flush_on_freed_child",
     };
 
     for (size_t i = 0; i < flip_points.size(); ++i) {
@@ -742,7 +902,7 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
         LOGINFO("=== Testing flip point: {} - {} ===", i + 1, flip_point);
 
         // Populate some keys [1,num_entries) and trigger cp to persist
-        LOGINFO("Step {}-1: Populate some keys and flush", i + 1);
+        LOGINFO("Step {}-0: Populate some keys and flush", i + 1);
         auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
         for (auto k = 0u; k < num_entries; ++k) {
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
@@ -750,10 +910,8 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
         test_common::HSTestHelper::trigger_cp(true);
         this->m_shadow_map.save(this->m_shadow_filename);
 
-        this->visualize_keys("tree_merge_full.dot");
-
         // Split keys into batches and remove the last one in reverse order
-        LOGINFO("Step {}-2: Set crash flag, remove some keys in reverse order", i + 1);
+        LOGINFO("\n\n\n\n\n\n\n\n\n\n\n\n\n\nStep {}-1: Set crash flag {}", i + 1, flip_point);
         int batch_num = 4;
         {
             int n = batch_num;
@@ -763,20 +921,21 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             for (auto k = r; k >= l; --k) {
                 ops.emplace_back(k, OperationType::Remove);
             }
-            LOGINFO("Step {}-2-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, r, l);
-
+            LOGINFO("Step {}-1-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, r, l);
+            this->print_keys(fmt::format("Print before Step {}-1-1: Remove keys in batch {}/{} ({} to {})", i + 1, n,
+                                         batch_num, r, l));
             this->set_basic_flip(flip_point);
             for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
-            this->visualize_keys("tree_merge_before_first_crash.dot");
-
-            LOGINFO("Step {}-2-2: Trigger cp to crash", i + 1);
-            this->crash_and_recover(ops);
+            LOGINFO("Step {}-1-2: Trigger cp to crash", i + 1);
+            this->crash_and_recover(flip_point, ops);
         }
+        this->print_keys(fmt::format("Print after recover Step {}1--3: flip {}", i + 1, flip_point));
 
         // Remove the next batch of keys in forward order
-        LOGINFO("Step {}-3: Remove another batch in ascending order", i + 1) {
+        LOGINFO("\n\n\n\n\n\n\n\n\n\n\n\n\n\nStep {}-2: Set crash flag {}", i + 1, flip_point);
+        {
             int n = batch_num - 1;
             auto r = num_entries * n / batch_num - 1;
             auto l = num_entries * (n - 1) / batch_num;
@@ -784,20 +943,21 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             for (auto k = l; k <= r; ++k) {
                 ops.emplace_back(k, OperationType::Remove);
             }
-            LOGINFO("Step {}-3-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
-
+            LOGINFO("Step {}-2-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
+            this->print_keys(fmt::format("Print before Step {}-2-1: Remove keys in batch {}/{} ({} to {})", i + 1, n,
+                                         batch_num, l, r));
             this->set_basic_flip(flip_point);
             for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
-            this->visualize_keys("tree_merge_before_second_crash.dot");
-
-            LOGINFO("Step {}-3-2: Trigger cp to crash", i + 1);
-            this->crash_and_recover(ops);
+            LOGINFO("Step {}-2-2: Trigger cp to crash", i + 1);
+            this->crash_and_recover(flip_point, ops);
         }
+        this->print_keys(fmt::format("Print after recover Step {}-2-3: flip {}", i + 1, flip_point));
 
         // Remove the next batch of keys in random order
-        LOGINFO("Step {}-4: Remove another batch in random order", i + 1) {
+        LOGINFO("\n\n\n\n\n\n\n\n\n\n\n\n\n\nStep {}-3: Set crash flag {}", i + 1, flip_point);
+        {
             int n = batch_num - 2;
             auto r = num_entries * n / batch_num - 1;
             auto l = num_entries * (n - 1) / batch_num;
@@ -805,22 +965,43 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
             generator.fillRange(l, r);
             OperationList ops = generator.generateOperations(r - l + 1, false);
 
-            LOGINFO("Step {}-4-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
+            LOGINFO("Step {}-3-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
 
             this->set_basic_flip(flip_point);
             for (auto [k, _] : ops) {
                 this->remove_one(k, true);
             }
-            this->visualize_keys("tree_merge_before_third_crash.dot");
+            this->print_keys(fmt::format("Print before Step {}-3: Remove keys in batch {}/{} ({} to {})", i + 1, n,
+                                         batch_num, l, r));
 
+            LOGINFO("Step {}-3-2: Trigger cp to crash", i + 1);
+            this->crash_and_recover(flip_point, ops);
+        }
+        this->print_keys(fmt::format("Print after recover Step {}-3-3: flip {}", i + 1, flip_point));
+
+        // Remove the next batch of keys in random order
+        LOGINFO("\n\n\n\n\n\n\n\n\n\n\n\n\n\nStep {}-4: Set crash flag {} Remove another batch in ascending order",
+                i + 1, flip_point);
+        {
+            int n = batch_num - 3;
+            auto r = num_entries * n / batch_num - 1;
+            auto l = num_entries * (n - 1) / batch_num;
+            SequenceGenerator generator(0, 100, l, r);
+            generator.fillRange(l, r);
+            OperationList ops = generator.generateOperations(r - l + 1, false);
+
+            LOGINFO("Step {}-4-1: Remove keys in batch {}/{} ({} to {})", i + 1, n, batch_num, l, r);
+            this->print_keys(fmt::format("Print before Step {}-4-1: Remove keys in batch {}/{} ({} to {})", i + 1, n,
+                                         batch_num, l, r));
+            this->set_basic_flip(flip_point);
+            for (auto [k, _] : ops) {
+                this->remove_one(k, true);
+            }
             LOGINFO("Step {}-4-2: Trigger cp to crash", i + 1);
-            this->crash_and_recover(ops);
+            this->crash_and_recover(flip_point, ops);
         }
+        this->print_keys(fmt::format("Print after recover Step {}-4-3: flip {}", i + 1, flip_point));
 
-        LOGINFO("Step {}-5: Cleanup the tree", i + 1);
-        for (auto k = 0u; k < num_entries; ++k) {
-            this->remove_one(k, false);
-        }
         test_common::HSTestHelper::trigger_cp(true);
         this->get_all();
     }
@@ -962,10 +1143,13 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_index_crash_recovery, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_index_crash_recovery");
     spdlog::set_pattern("[%D %T%z] [%^%L%$] [%t] %v");
-
     if (SISL_OPTIONS.count("seed")) {
         auto seed = SISL_OPTIONS["seed"].as< uint64_t >();
         LOGINFO("Using seed {} to sow the random generation", seed);
+        g_re.seed(seed);
+    } else {
+        auto seed = std::chrono::system_clock::now().time_since_epoch().count();
+        LOGINFO("No seed provided. Using randomly generated seed: {}", seed);
         g_re.seed(seed);
     }
 

@@ -166,6 +166,14 @@ public:
 
         nentries = std::min(nentries, other.total_entries() - start_idx);
         nentries = std::min(nentries, this->get_available_entries());
+#ifdef _PRERELEASE
+        const uint64_t max_keys = this->max_keys_in_node();
+        if(max_keys){
+                if(this->total_entries() + nentries > max_keys) {
+                        nentries = max_keys - this->total_entries();
+                }
+        }
+#endif
         uint32_t sz = nentries * get_nth_obj_size(0);
         if (sz != 0) { std::memcpy(get_nth_obj(this->total_entries()), other.get_nth_obj_const(start_idx), sz); }
         this->add_entries(nentries);
@@ -213,10 +221,10 @@ public:
 
     std::string to_string(bool print_friendly = false) const override {
         auto snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
-        auto str = fmt::format("{}id={} level={} nEntries={} {} {} ",
+        auto str = fmt::format("{}id={} level={} nEntries={} {} {} {}",
                                (print_friendly ? "------------------------------------------------------------\n" : ""),
                                this->node_id(), this->level(), this->total_entries(),
-                               (this->is_leaf() ? "LEAF" : "INTERIOR"), snext);
+                               (this->is_leaf() ? "LEAF" : "INTERIOR"), snext, this->is_node_deleted()? "  Deleted" : " LIVE");
         if (this->has_valid_edge()) {
             fmt::format_to(std::back_inserter(str), " edge={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -379,9 +387,9 @@ public:
         return (this->node_data_area_const() + (get_nth_obj_size(ind) * ind));
     }
 
-    void set_nth_key(uint32_t ind, BtreeKey* key) {
+    void set_nth_key(uint32_t ind, const BtreeKey& key) {
         uint8_t* entry = this->node_data_area() + (get_nth_obj_size(ind) * ind);
-        sisl::blob const b = key->serialize();
+        sisl::blob const b = key.serialize();
         memcpy(entry, b.cbytes(), b.size());
     }
 
