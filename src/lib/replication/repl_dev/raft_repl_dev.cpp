@@ -1043,6 +1043,13 @@ void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config
     }
 }
 
+void RaftReplDev::handle_config_rollback(const repl_lsn_t lsn, raft_cluster_config_ptr_t& conf) {
+    RD_LOGD(NO_TRACE_ID, "roll back config on lsn {}", lsn);
+    // keep this variable in case it is needed later
+    (void)conf;
+    m_listener->on_config_rollback(lsn);
+}
+
 void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
     if (err == ReplServiceError::OK) { return; }
     RD_LOGE(rreq->traceID(), "Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
@@ -1465,12 +1472,14 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
 }
 
 void RaftReplDev::flush_durable_commit_lsn() {
+    auto const lsn = m_commit_upto_lsn.load();
+    m_listener->notify_committed_lsn(lsn);
+
     if (is_destroyed()) {
         RD_LOGI(NO_TRACE_ID, "Raft repl dev is destroyed, ignore flush durable commit lsn");
         return;
     }
 
-    auto const lsn = m_commit_upto_lsn.load();
     RD_LOGT(NO_TRACE_ID, "Flushing durable commit lsn to {}", lsn);
     std::unique_lock lg{m_sb_mtx};
     m_rd_sb->durable_commit_lsn = lsn;
@@ -1759,22 +1768,6 @@ void RaftReplDev::report_blk_metrics_if_needed(repl_req_ptr_t rreq) {
         // as this indicates that the member might encounter NO_SPACE_LEFT before the proposer.
         auto blk_diff_with_remote = local_blk_num > remote_blk_num ? local_blk_num - remote_blk_num : 0;
         HISTOGRAM_OBSERVE(m_metrics, blk_diff_with_proposer, blk_diff_with_remote);
-    }
-}
-
-void RaftReplDev::pause_statemachine() {
-    if (!raft_server()->is_state_machine_execution_paused()) {
-        raft_server()->pause_state_machine_execution();
-        while (!raft_server()->wait_for_state_machine_pause(100)) {
-            RD_LOGD(NO_TRACE_ID, "wait for statemachine pause!");
-        }
-    }
-}
-
-void RaftReplDev::resume_statemachine() {
-    if (raft_server()->is_state_machine_execution_paused()) {
-        raft_server()->resume_state_machine_execution();
-        RD_LOGD(NO_TRACE_ID, "statemachine is resumed!");
     }
 }
 

@@ -79,10 +79,6 @@ public:
 
     uint32_t get_blk_size() const override;
 
-    // pause/resume statemachine(commiting thread)
-    void pause_statemachine() override { return; }
-    void resume_statemachine() override { return; }
-
     void quiesce_reqs() override { return; }
     void resume_accepting_reqs() override { return; }
 
