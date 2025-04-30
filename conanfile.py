@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.13.3"
+    version = "6.13.4"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -65,7 +65,12 @@ class HomestoreConan(ConanFile):
 
     def layout(self):
         self.folders.source = "."
-        self.folders.build = join("build", str(self.settings.build_type))
+        if self.options.get_safe("sanitize"):
+            self.folders.build = join("build", "Sanitized")
+        elif self.options.get_safe("coverage"):
+            self.folders.build = join("build", "Coverage")
+        else:
+            self.folders.build = join("build", str(self.settings.build_type))
         self.folders.generators = join(self.folders.build, "generators")
 
         self.cpp.source.includedirs = ["src/include"]
