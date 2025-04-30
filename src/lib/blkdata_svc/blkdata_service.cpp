@@ -110,6 +110,11 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
 
 folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                             bool part_of_batch) {
+    return async_read(std::vector<MultiBlkId>{blkid}, sgs, size, part_of_batch);
+}
+
+folly::Future< std::error_code > BlkDataService::async_read(std::vector<MultiBlkId> const& blkids, sisl::sg_list& sgs, uint32_t size,
+                                                             bool part_of_batch) {
     if (is_stopping()) return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
     incr_pending_request_num();
     // TODO: sg_iovs_t should not be passed by value. We need it pass it as const&, but that is failing because
@@ -125,22 +130,22 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
             });
     };
 
-    if (blkid.num_pieces() == 1) {
-        decr_pending_request_num();
-        return do_read(blkid.to_single_blkid(), sgs.iovs, size, part_of_batch);
-    } else {
-        static thread_local std::vector< folly::Future< std::error_code > > s_futs;
-        s_futs.clear();
-
-        sisl::sg_iterator sg_it{sgs.iovs};
-        auto blkid_it = blkid.iterate();
-        while (auto const bid = blkid_it.next()) {
-            uint32_t const sz = bid->blk_count() * m_blk_size;
-            s_futs.emplace_back(do_read(*bid, sg_it.next_iovs(sz), sz, part_of_batch));
+    static thread_local std::vector< folly::Future< std::error_code > > s_futs;
+    s_futs.clear();
+    for(auto const& blkid : blkids) {
+        if (blkid.num_pieces() == 1) {
+             s_futs.emplace_back(do_read(blkid.to_single_blkid(), sgs.iovs, size, part_of_batch));
+        } else {
+            sisl::sg_iterator sg_it{sgs.iovs};
+            auto blkid_it = blkid.iterate();
+            while (auto const bid = blkid_it.next()) {
+                uint32_t const sz = bid->blk_count() * m_blk_size;
+                s_futs.emplace_back(do_read(*bid, sg_it.next_iovs(sz), sz, part_of_batch));
+            }
         }
-        decr_pending_request_num();
-        return collect_all_futures(s_futs);
     }
+    decr_pending_request_num();
+    return collect_all_futures(s_futs);
 }
 
 folly::Future< std::error_code > BlkDataService::async_alloc_write(const sisl::sg_list& sgs,

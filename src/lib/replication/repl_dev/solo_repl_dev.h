@@ -46,6 +46,9 @@ public:
 
     folly::Future< std::error_code > async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
                                                 bool part_of_batch = false, trace_id_t tid = 0) override;
+        
+    virtual folly::Future< std::error_code > async_read(std::vector<MultiBlkId> const& blkids, sisl::sg_list& sgs, uint32_t size,
+                                                    bool part_of_batch = false, trace_id_t tid = 0) override;
 
     folly::Future< std::error_code > async_free_blks(int64_t lsn, MultiBlkId const& blkid, trace_id_t tid = 0) override;
 

@@ -107,6 +107,18 @@ folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, 
     return result;
 }
 
+folly::Future< std::error_code > SoloReplDev::async_read(std::vector<MultiBlkId> const& blkids, sisl::sg_list& sgs, uint32_t size,
+    bool part_of_batch, trace_id_t tid) {
+    if (is_stopping()) {
+        LOGINFO("repl dev is being shutdown!");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    }
+    incr_pending_request_num();
+    auto result = data_service().async_read(blkids, sgs, size, part_of_batch);
+    decr_pending_request_num();
+    return result;
+}
+
 folly::Future< std::error_code > SoloReplDev::async_free_blks(int64_t, MultiBlkId const& bid, trace_id_t tid) {
     if (is_stopping()) {
         LOGINFO("repl dev is being shutdown!");

@@ -229,6 +229,11 @@ public:
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
+    folly::Future< std::error_code > async_read(std::vector<MultiBlkId> const& blkids, sisl::sg_list& sgs, uint32_t size,
+        bool part_of_batch = false, trace_id_t tid = 0) override {
+            RD_REL_ASSERT(false, "NOT SUPPORTED");
+            return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_not_supported));
+    }
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                            repl_req_ptr_t ctx, bool part_of_batch = false, trace_id_t tid = 0) override;
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,

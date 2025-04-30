@@ -140,6 +140,18 @@ public:
                                                 bool part_of_batch = false);
 
     /**
+     * @brief Asynchronously reads data from the specified block ID.
+     *
+     * @param bids List of block IDs to read from.
+     * @param sgs The scatter-gather list to store the read data.
+     * @param part_of_batch Whether this read is part of a batch.
+     *
+     * @return A `folly::Future` that will contain the error code of the read operation.
+     */
+    folly::Future< std::error_code > async_read(std::vector<MultiBlkId> const& bids, sisl::sg_list& sgs, uint32_t size,
+                                                bool part_of_batch = false);
+
+    /**
      * @brief Commits the block with the given MultiBlkId.
      *
      * @param bid The MultiBlkId of the block to commit.

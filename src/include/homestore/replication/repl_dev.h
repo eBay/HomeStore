@@ -445,6 +445,17 @@ public:
     virtual folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                         bool part_of_batch = false, trace_id_t tid = 0) = 0;
 
+
+    /// @brief Reads the data and returns a future to continue on
+    /// @param blkids List of block ids to read
+    /// @param sgs Scatter gather buffer list to which blkids are to be read into
+    /// @param part_of_batch Is read is part of a batch. If part of the batch, then submit_batch needs to be called at
+    /// the end
+    /// @return A Future with std::error_code to notify if it has successfully read the data or any error code in case
+    /// of failure
+    virtual folly::Future< std::error_code > async_read(std::vector<MultiBlkId> const& blkids, sisl::sg_list& sgs, uint32_t size,
+                                                        bool part_of_batch = false, trace_id_t tid = 0) = 0;                                       
+        
     /// @brief After data is replicated and on_commit to the listener is called. the blkids can be freed.
     ///
     /// @param lsn - LSN of the old blkids that is being freed
