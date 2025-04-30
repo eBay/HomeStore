@@ -44,16 +44,9 @@ struct BtreeTestHelper {
     void SetUp() {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
-        if (SISL_OPTIONS.count("disable_merge")) {
-            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                s.btree.merge_turned_on = false;
-                HS_SETTINGS_FACTORY().save();
-            });
-        }
-        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-            s.btree.max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
-            HS_SETTINGS_FACTORY().save();
-        });
+        m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
+        if (SISL_OPTIONS.count("disable_merge")){m_cfg.m_merge_turned_on = false;}
+
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
 
         if (m_is_multi_threaded) {

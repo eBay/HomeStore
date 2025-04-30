@@ -214,6 +214,7 @@ jobs:
       with:
         limit-access-to-actor: true
         detached: true
+        connect-timeout-seconds: 60
       if: ${{ inputs.testing == 'True' }}
 
     - name: Create and Test Package
