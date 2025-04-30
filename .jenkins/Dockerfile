@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM hub.tess.io/sds/sds_develop:4.x-latest
+FROM hub.tess.io/sds/sds_develop:7.x-latest
 LABEL description="Automated HomeStore compilation"
 
 WORKDIR /output
