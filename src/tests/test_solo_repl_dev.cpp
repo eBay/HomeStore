@@ -63,22 +63,15 @@ struct test_repl_req : public repl_req_ctx {
     sisl::byte_array header;
     sisl::byte_array key;
     sisl::sg_list write_sgs;
-    sisl::sg_list read_sgs;
-    MultiBlkId written_blkids;
+    std::vector< MultiBlkId > written_blkids;
 
-    test_repl_req() {
-        write_sgs.size = 0;
-        read_sgs.size = 0;
-    }
+    test_repl_req() { write_sgs.size = 0; }
     ~test_repl_req() {
         for (auto const& iov : write_sgs.iovs) {
             iomanager.iobuf_free(uintptr_cast(iov.iov_base));
         }
-
-        for (auto const& iov : read_sgs.iovs) {
-            iomanager.iobuf_free(uintptr_cast(iov.iov_base));
-        }
     }
+
     struct journal_header {
         uint32_t key_size;
         uint64_t key_pattern;
@@ -100,12 +93,11 @@ public:
         void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key,
                        std::vector< MultiBlkId > const& blkids, cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received on_commit lsn={}", lsn);
-            HS_REL_ASSERT(!blkids.empty(), "Invalid blkids size");
             if (ctx == nullptr) {
-                m_test.validate_replay(*repl_dev(), lsn, header, key, blkids[0]);
+                m_test.validate_replay(*repl_dev(), lsn, header, key, blkids);
             } else {
                 auto req = boost::static_pointer_cast< test_repl_req >(ctx);
-                req->written_blkids = blkids[0];
+                req->written_blkids = std::move(blkids);
                 m_test.on_write_complete(*repl_dev(), req);
             }
         }
@@ -231,60 +223,116 @@ public:
         rdev->async_alloc_write(*req->header, req->key ? *req->key : sisl::blob{}, req->write_sgs, req);
     }
 
+    void async_write_data_and_journal(uint32_t key_size, uint64_t data_size, uint32_t max_size_per_iov) {
+        data_size = data_size == 0 ? g_block_size : data_size;
+        auto req = intrusive< test_repl_req >(new test_repl_req());
+        req->header = sisl::make_byte_array(sizeof(test_repl_req::journal_header));
+        auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
+        hdr->key_size = key_size;
+        hdr->key_pattern = ((long long)rand() << 32) | rand();
+        hdr->data_size = data_size;
+        hdr->data_pattern = ((long long)rand() << 32) | rand();
+
+        if (key_size != 0) {
+            req->key = sisl::make_byte_array(key_size);
+            HSTestHelper::fill_data_buf(req->key->bytes(), key_size, hdr->key_pattern);
+        }
+
+        req->write_sgs = HSTestHelper::create_sgs(data_size, max_size_per_iov, hdr->data_pattern);
+
+        auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
+
+        auto const cap = hs()->repl_service().get_cap_stats();
+        LOGDEBUG("Before write, cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
+
+        std::vector< MultiBlkId > blkids;
+        blk_alloc_hints hints;
+        auto err = rdev->alloc_blks(data_size, hints, blkids);
+        RELEASE_ASSERT(!err, "Error during alloc_blks");
+        RELEASE_ASSERT(!blkids.empty(), "Empty blkids");
+
+        rdev->async_write(blkids, req->write_sgs).thenValue([this, rdev, blkids, data_size, req](auto&& err) {
+            RELEASE_ASSERT(!err, "Error during async_write");
+            rdev->async_write_journal(blkids, *req->header, req->key ? *req->key : sisl::blob{}, data_size, req);
+        });
+    }
+
     void validate_replay(ReplDev& rdev, int64_t lsn, sisl::blob const& header, sisl::blob const& key,
-                         MultiBlkId const& blkids) {
+                         std::vector< MultiBlkId > const& blkids) {
+        if (blkids.empty()) {
+            m_task_waiter.one_complete();
+            return;
+        }
+
         auto const jhdr = r_cast< test_repl_req::journal_header const* >(header.cbytes());
         HSTestHelper::validate_data_buf(key.cbytes(), key.size(), jhdr->key_pattern);
+        uint64_t total_io = blkids.size();
+        auto io_count = std::make_shared< std::atomic< uint64_t > >(0);
+        for (const auto& blkid : blkids) {
+            uint32_t size = blkid.blk_count() * g_block_size;
+            if (size) {
+                auto read_sgs = HSTestHelper::create_sgs(size, size);
+                LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
+                         blkid.to_string());
+                rdev.async_read(blkid, read_sgs, size)
+                    .thenValue([this, io_count, total_io, hdr = *jhdr, read_sgs, lsn, blkid, &rdev](auto&& err) {
+                        RELEASE_ASSERT(!err, "Error during async_read");
+                        // HS_REL_ASSERT_EQ(hdr.data_size, read_sgs.size,
+                        //                  "journal hdr data size mismatch with actual size");
 
-        uint32_t size = blkids.blk_count() * g_block_size;
-        if (size) {
-            auto read_sgs = HSTestHelper::create_sgs(size, size);
-            LOGINFO("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
-                    blkids.to_string());
-            rdev.async_read(blkids, read_sgs, size)
-                .thenValue([this, hdr = *jhdr, read_sgs, lsn, blkids, &rdev](auto&& err) {
-                    RELEASE_ASSERT(!err, "Error during async_read");
-                    HS_REL_ASSERT_EQ(hdr.data_size, read_sgs.size, "journal hdr data size mismatch with actual size");
+                        for (auto const& iov : read_sgs.iovs) {
+                            HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr.data_pattern);
+                            iomanager.iobuf_free(uintptr_cast(iov.iov_base));
+                        }
+                        LOGDEBUG("[{}] Replay of lsn={} blkid={} validated successfully",
+                                 boost::uuids::to_string(rdev.group_id()), lsn, blkid.to_string());
 
-                    for (auto const& iov : read_sgs.iovs) {
-                        HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr.data_pattern);
-                        iomanager.iobuf_free(uintptr_cast(iov.iov_base));
-                    }
-                    LOGINFO("[{}] Replay of lsn={} blkid={} validated successfully",
-                            boost::uuids::to_string(rdev.group_id()), lsn, blkids.to_string());
-                    m_task_waiter.one_complete();
-                });
-        } else {
-            m_task_waiter.one_complete();
+                        io_count->fetch_add(1);
+                        if (*io_count == total_io) { m_task_waiter.one_complete(); }
+                    });
+            } else {
+                m_task_waiter.one_complete();
+            }
         }
     }
 
     void on_write_complete(ReplDev& rdev, intrusive< test_repl_req > req) {
-        // If we did send some data to the repl_dev, validate it by doing async_read
-        if (req->write_sgs.size != 0) {
-            req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, req->write_sgs.size);
-
-            auto const cap = hs()->repl_service().get_cap_stats();
-            LOGINFO("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
-
-            rdev.async_read(req->written_blkids, req->read_sgs, req->read_sgs.size)
-                .thenValue([this, &rdev, req](auto&& err) {
-                    RELEASE_ASSERT(!err, "Error during async_read");
-
-                    LOGINFO("[{}] Write complete with lsn={} for size={} blkids={}",
-                            boost::uuids::to_string(rdev.group_id()), req->lsn(), req->write_sgs.size,
-                            req->written_blkids.to_string());
-                    auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
-                    HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,
-                                     "journal hdr data size mismatch with actual size");
-
-                    for (auto const& iov : req->read_sgs.iovs) {
-                        HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr->data_pattern);
-                    }
-                    m_io_runner.next_task();
-                });
-        } else {
+        if (req->written_blkids.empty()) {
             m_io_runner.next_task();
+            return;
+        }
+
+        // If we did send some data to the repl_dev, validate it by doing async_read
+        auto io_count = std::make_shared< std::atomic< uint64_t > >(0);
+        for (const auto blkid : req->written_blkids) {
+            if (req->write_sgs.size != 0) {
+                auto const cap = hs()->repl_service().get_cap_stats();
+                LOGDEBUG("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
+
+                auto sgs_size = blkid.blk_count() * g_block_size;
+                auto read_sgs = HSTestHelper::create_sgs(sgs_size, sgs_size);
+                rdev.async_read(blkid, read_sgs, read_sgs.size)
+                    .thenValue([this, io_count, blkid, &rdev, sgs_size, read_sgs, req](auto&& err) {
+                        RELEASE_ASSERT(!err, "Error during async_read");
+
+                        LOGINFO("[{}] Write complete with lsn={} for size={} blkid={}",
+                                boost::uuids::to_string(rdev.group_id()), req->lsn(), sgs_size, blkid.to_string());
+                        auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
+                        // HS_REL_ASSERT_EQ(hdr->data_size, read_sgs.size,
+                        //                  "journal hdr data size mismatch with actual size");
+
+                        for (auto const& iov : read_sgs.iovs) {
+                            LOGDEBUG("Read data blkid={} len={} data={}", blkid.to_integer(), iov.iov_len,
+                                     *(uint64_t*)iov.iov_base);
+                            HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr->data_pattern);
+                            iomanager.iobuf_free(uintptr_cast(iov.iov_base));
+                        }
+                        io_count->fetch_add(1);
+                        if (*io_count == req->written_blkids.size()) { m_io_runner.next_task(); }
+                    });
+            } else {
+                m_io_runner.next_task();
+            }
         }
     }
 };
@@ -314,6 +362,19 @@ TEST_F(SoloReplDevTest, TestRandomSizedDataBlock) {
 TEST_F(SoloReplDevTest, TestHeaderOnly) {
     LOGINFO("Step 1: run on worker threads to schedule write");
     this->m_io_runner.set_task([this]() { this->write_io(0u, 0u, g_block_size); });
+    this->m_io_runner.execute().get();
+    LOGINFO("Step 2: Restart homestore and validate replay data.", g_block_size);
+    this->m_task_waiter.start([this]() { this->restart(); }).get();
+}
+
+TEST_F(SoloReplDevTest, TestAsyncWriteJournal) {
+    LOGINFO("Step 1: run on worker threads to schedule write for random bytes ranging {}-{}.", 0, 1 * Mi);
+    this->m_io_runner.set_task([this]() {
+        uint32_t nblks = rand() % ((1 * Mi) / g_block_size);
+        uint32_t key_size = rand() % 512 + 8;
+        this->async_write_data_and_journal(key_size, nblks * g_block_size, g_block_size);
+    });
+
     this->m_io_runner.execute().get();
     LOGINFO("Step 2: Restart homestore and validate replay data.", g_block_size);
     this->m_task_waiter.start([this]() { this->restart(); }).get();

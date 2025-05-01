@@ -208,10 +208,35 @@ folly::Future< std::error_code > BlkDataService::async_write(sisl::sg_list const
     }
 }
 
+folly::Future< std::error_code >
+BlkDataService::async_write(sisl::sg_list const& sgs, std::vector< MultiBlkId > const& blkids, bool part_of_batch) {
+    if (is_stopping()) return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    incr_pending_request_num();
+    static thread_local std::vector< folly::Future< std::error_code > > s_futs;
+    s_futs.clear();
+    for (const auto& blkid : blkids) {
+        s_futs.emplace_back(async_write(sgs, blkid, part_of_batch));
+    }
+    decr_pending_request_num();
+    return collect_all_futures(s_futs);
+}
+
 BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints, MultiBlkId& out_blkids) {
     if (is_stopping()) return BlkAllocStatus::FAILED;
     incr_pending_request_num();
-    HS_DBG_ASSERT_EQ(size % m_blk_size, 0, "Non aligned size requested");
+    HS_DBG_ASSERT_EQ(size % m_blk_size, 0, "Non aligned size requested size={} blk_size={}", size, m_blk_size);
+    blk_count_t nblks = static_cast< blk_count_t >(size / m_blk_size);
+
+    auto ret = m_vdev->alloc_blks(nblks, hints, out_blkids);
+    decr_pending_request_num();
+    return ret;
+}
+
+BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints,
+                                          std::vector< BlkId >& out_blkids) {
+    if (is_stopping()) return BlkAllocStatus::FAILED;
+    incr_pending_request_num();
+    HS_DBG_ASSERT_EQ(size % m_blk_size, 0, "Non aligned size requested size={} blk_size={}", size, m_blk_size);
     blk_count_t nblks = static_cast< blk_count_t >(size / m_blk_size);
 
     auto ret = m_vdev->alloc_blks(nblks, hints, out_blkids);
@@ -271,8 +296,8 @@ void BlkDataService::start() {
 
 void BlkDataService::stop() {
     start_stopping();
-    // we have no way to track the completion of each async io in detail which should be done in iomanager level, so we
-    // just wait for 3 seconds, and we expect each io will be completed within this time.
+    // we have no way to track the completion of each async io in detail which should be done in iomanager level, so
+    // we just wait for 3 seconds, and we expect each io will be completed within this time.
 
     // TODO: find a better solution to track the completion of these aysnc calls
     std::this_thread::sleep_for(std::chrono::milliseconds(3000));

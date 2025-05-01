@@ -337,10 +337,13 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         }
     }
 
-    auto status = init_req_ctx(
-        rreq, repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1), .traceID = tid},
-        data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true /* is_proposer */, header,
-        key, data.size, m_listener);
+    auto status = init_req_ctx(rreq,
+                               repl_key{.server_id = server_id(),
+                                        .term = raft_server()->get_term(),
+                                        .dsn = m_next_dsn.fetch_add(1),
+                                        .traceID = tid},
+                               data.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED,
+                               true /* is_proposer */, header, key, data.size, m_listener);
 
     if (status != ReplServiceError::OK) {
         RD_LOGI(tid, "Initializing rreq failed error={}, failing this req", status);
@@ -1659,7 +1662,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
         MultiBlkId entry_blkid;
         entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
         data_size = entry_blkid.blk_count() * get_blk_size();
-        rreq->set_local_blkid(entry_blkid);
+        rreq->set_local_blkids({entry_blkid});
         rreq->add_state(repl_req_state_t::BLK_ALLOCATED);
         rreq->add_state(repl_req_state_t::DATA_RECEIVED);
     }

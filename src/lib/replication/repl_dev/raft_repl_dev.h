@@ -229,6 +229,24 @@ public:
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
+    virtual std::error_code alloc_blks(uint32_t size, const blk_alloc_hints& hints,
+                                       std::vector< MultiBlkId >& out_blkids) override {
+        RD_REL_ASSERT(false, "NOT SUPPORTED");
+        return std::make_error_code(std::errc::operation_not_supported);
+    }
+    virtual folly::Future< std::error_code > async_write(const std::vector< MultiBlkId >& blkids,
+                                                         sisl::sg_list const& value, bool part_of_batch = false,
+                                                         trace_id_t tid = 0) override {
+        RD_REL_ASSERT(false, "NOT SUPPORTED");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_not_supported));
+    }
+
+    virtual void async_write_journal(const std::vector< MultiBlkId >& blkids, sisl::blob const& header,
+                                     sisl::blob const& key, uint32_t data_size, repl_req_ptr_t ctx,
+                                     trace_id_t tid = 0) override {
+        RD_REL_ASSERT(false, "NOT SUPPORTED");
+    }
+
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                            repl_req_ptr_t ctx, bool part_of_batch = false, trace_id_t tid = 0) override;
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
