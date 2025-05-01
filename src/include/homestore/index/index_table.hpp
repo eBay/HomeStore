@@ -60,8 +60,6 @@ public:
 
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg) :
             Btree< K, V >{cfg}, m_sb{"index"} {
-        this->m_bt_cfg.m_merge_turned_on = HS_DYNAMIC_CONFIG(btree.merge_turned_on);
-        this->m_bt_cfg.m_max_merge_level = HS_DYNAMIC_CONFIG(btree.max_merge_level);
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
@@ -79,8 +77,6 @@ public:
     }
 
     IndexTable(superblk< index_table_sb >&& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg}, m_sb{std::move(sb)} {
-        this->m_bt_cfg.m_merge_turned_on = HS_DYNAMIC_CONFIG(btree.merge_turned_on);
-        this->m_bt_cfg.m_max_merge_level = HS_DYNAMIC_CONFIG(btree.max_merge_level);
         m_sb_buffer = std::make_shared< MetaIndexBuffer >(m_sb);
 
         // After recovery, we see that root node is empty, which means that after btree is created, we crashed.

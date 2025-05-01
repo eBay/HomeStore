@@ -57,12 +57,6 @@ table Btree {
     max_nodes_to_rebalance: uint32 = 3;
 
     mem_btree_page_size: uint32 = 8192;
-
-    /* Maximum level of btree merge operation enabled while removig keys. */
-    max_merge_level: uint8 = 1;
-
-    /* Merge enabled */
-    merge_turned_on: bool = true;
 }
 
 table Cache {
