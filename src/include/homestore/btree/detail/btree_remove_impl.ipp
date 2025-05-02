@@ -34,7 +34,8 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
         if constexpr (std::is_same_v< ReqT, BtreeSingleRemoveRequest >) {
             if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval))) { ++removed_count; }
         } else if constexpr (std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > >) {
-            removed_count = to_variant_node(my_node)->multi_remove(req.working_range(), req.m_filter_cb);
+            removed_count =
+                to_variant_node(my_node)->multi_remove(req.working_range(), req.m_filter_cb, req.m_app_context);
             modified = (removed_count != 0);
             req.shift_working_range();
         } else if constexpr (std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >) {

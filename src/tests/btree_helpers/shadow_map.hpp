@@ -3,7 +3,6 @@
 
 #include "btree_test_kvs.hpp"
 
-
 template < typename K, typename V >
 class ShadowMap {
 private:
@@ -12,11 +11,11 @@ private:
     uint32_t m_max_keys;
     using mutex = iomgr::FiberManagerLib::shared_mutex;
     mutex m_mutex;
-//#define SHOWM(X) cout << #X " = " << (X) << endl
-//    void testPrint(std::map< uint32_t, std::string >& m_map, int i) {
-//        SHOWM(m[i]);
-//        SHOWM(m.find(i)->first);
-//    }
+    // #define SHOWM(X) cout << #X " = " << (X) << endl
+    //     void testPrint(std::map< uint32_t, std::string >& m_map, int i) {
+    //         SHOWM(m[i]);
+    //         SHOWM(m.find(i)->first);
+    //     }
 public:
     ShadowMap(uint32_t num_keys) : m_range_scheduler(num_keys), m_max_keys{num_keys} {}
 
@@ -41,7 +40,7 @@ public:
         for (uint32_t i{0}; i < count; ++i) {
             K key{start_k + i};
             V range_value{val};
-            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i); }
+            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i, nullptr); }
             m_map.insert_or_assign(key, range_value);
         }
         m_range_scheduler.put_keys(start_k, start_k + count - 1);
