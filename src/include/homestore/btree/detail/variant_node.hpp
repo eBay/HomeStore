@@ -195,8 +195,8 @@ public:
     /// is used as a filter to remove anything that needn't be updated.
     /// @return A status code indicating whether the operation was successful.
     ///
-    virtual btree_status_t put(BtreeKey const &key, BtreeValue const &val, btree_put_type put_type,
-                               BtreeValue *existing_val, put_filter_cb_t const &filter_cb = nullptr) {
+    virtual btree_status_t put(BtreeKey const& key, BtreeValue const& val, btree_put_type put_type,
+                               BtreeValue* existing_val, put_filter_cb_t const& filter_cb = nullptr) {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
                          get_persistent_header_const()->to_string());
         auto ret = btree_status_t::success;
@@ -210,7 +210,7 @@ public:
             if (existing_val) { get_nth_value(idx, existing_val, true); }
             if (filter_cb &&
                 filter_cb(get_nth_key< K >(idx, false), get_nth_value(idx, false), val) !=
-                put_filter_decision::replace) {
+                    put_filter_decision::replace) {
                 LOGINFO("Filter callback rejected the update for key {}", key.to_string());
                 return btree_status_t::filtered_out;
             }
@@ -229,7 +229,7 @@ public:
             }
             update(idx, key, val);
         } else if (put_type == btree_put_type::UPSERT) {
-            found ? update(idx, key, val) : (void) insert(idx, key, val);
+            found ? update(idx, key, val) : (void)insert(idx, key, val);
         } else {
             DEBUG_ASSERT(false, "Wrong put_type {}", put_type);
         }
@@ -251,13 +251,14 @@ public:
     ///     put_filter_decision::replace, the entry is upserted with the new value.
     ///     put_filter_decision::remove, the entry is removed from the node.
     ///     put_filter_decision::keep, the entry is not modified and the method moves on to the next entry.
+    /// @param app_ctx User supplied private context data.
     /// @return Btree status typically .
     ///         If all keys were upserted successfully, the method returns btree_status_t::success.
     ///         If the method ran out of space in the node, the method returns the key that was last put and the status
     ///         as btree_status_t::has_more
     virtual btree_status_t multi_put(BtreeKeyRange< K > const& keys, BtreeKey const&, BtreeValue const& val,
                                      btree_put_type put_type, K* last_failed_key,
-                                     put_filter_cb_t const& filter_cb = nullptr) {
+                                     put_filter_cb_t const& filter_cb = nullptr, void* app_ctx = nullptr) {
         if (put_type != btree_put_type::UPDATE) {
             DEBUG_ASSERT(false, "For non-interval keys multi-put should be really update and cannot insert");
             return btree_status_t::not_supported;
@@ -291,7 +292,8 @@ public:
     }
 
     ///////////////////////////////////////// Remove related APIs of the node /////////////////////////////////////////
-    virtual uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr) {
+    virtual uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr,
+                                  void* usr_ctx = nullptr) {
         DEBUG_ASSERT_EQ(this->is_leaf(), true, "Multi put entries on node are supported only for leaf nodes");
 
         // Match the key range to get start and end idx. If none of the ranges here matches, we have to return not_found

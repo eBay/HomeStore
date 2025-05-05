@@ -176,12 +176,13 @@ public:
     ///                        batch_upsert_decision_t::remove, the entry is removed from the node.
     ///                        batch_upsert_decision_t::keep, the entry is not modified and the method moves on to the
     ///                        next entry.
+    /// @param app_ctx User supplied private context data.
     /// @return An optional key that was not upserted due to lack of space in the node.
     ///         If all keys were upserted successfully, the method returns std::nullopt.
     ///         If the method ran out of space in the node, the method returns the key that was last upserted
     btree_status_t multi_put(BtreeKeyRange< K > const& keys, BtreeKey const& first_input_key, BtreeValue const& val,
-                             btree_put_type put_type, K* last_failed_key,
-                             put_filter_cb_t const& filter_cb = nullptr) override {
+                             btree_put_type put_type, K* last_failed_key, put_filter_cb_t const& filter_cb = nullptr,
+                             void* app_ctx = nullptr) override {
         DEBUG_ASSERT_EQ(this->is_leaf(), true, "Multi put entries on node are supported only for leaf nodes");
         if constexpr (std::is_base_of_v< BtreeIntervalKey, K > && std::is_base_of_v< BtreeIntervalValue, V >) {
             uint32_t modified{0};
@@ -189,7 +190,7 @@ public:
             uint16_t prefix_slot{std::numeric_limits< uint16_t >::max()};
             K cur_key = keys.start_key();
 
-            if (!keys.is_start_inclusive()) { cur_key.shift(1); }
+            if (!keys.is_start_inclusive()) { cur_key.shift(1, app_ctx); }
             if (!has_room(1u)) { return btree_status_t::space_not_avail; }
             bool upserted_all{false};
 
@@ -233,11 +234,11 @@ public:
                         prefix_slot = add_prefix(cur_key, val);
                     }
                     V new_val{s_cast< V const& >(val)};
-                    new_val.shift(s_cast< K const& >(cur_key).distance(first_input_key));
+                    new_val.shift(s_cast< K const& >(cur_key).distance(first_input_key), app_ctx);
                     write_suffix(idx, prefix_slot, cur_key, new_val);
                 }
 
-                cur_key.shift(1);
+                cur_key.shift(1, app_ctx);
                 if (!has_room(1u)) { break; }
 
                 if (decision != put_filter_decision::remove) { ++idx; }
@@ -274,11 +275,12 @@ public:
      *
      * @return Returns number of objects removed
      */
-    uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr) override {
+    uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr,
+                          void* app_ctx = nullptr) override {
         DEBUG_ASSERT_EQ(this->is_leaf(), true, "remove_batch api is supported only for leaf node");
         if constexpr (std::is_base_of_v< BtreeIntervalKey, K > && std::is_base_of_v< BtreeIntervalValue, V >) {
             K cur_key = keys.start_key();
-            if (!keys.is_start_inclusive()) { cur_key.shift(1); }
+            if (!keys.is_start_inclusive()) { cur_key.shift(1, app_ctx); }
             uint32_t num_removed{0};
 
             auto [_, idx] = this->find(cur_key, nullptr, false);

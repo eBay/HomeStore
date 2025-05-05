@@ -175,15 +175,15 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
     if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
         K last_failed_key;
         ret = to_variant_node(my_node)->multi_put(req.working_range(), req.input_range().start_key(), *req.m_newval,
-                                                  req.m_put_type, &last_failed_key, req.m_filter_cb);
+                                                  req.m_put_type, &last_failed_key, req.m_filter_cb, req.m_app_context);
         if (ret == btree_status_t::has_more) {
             req.shift_working_range(std::move(last_failed_key), true /* make it including last_failed_key */);
         } else if (ret == btree_status_t::success) {
             req.shift_working_range();
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-        ret = to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val,
-                                            req.m_filter_cb);
+        ret =
+            to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val, req.m_filter_cb);
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
     }
 

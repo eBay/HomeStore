@@ -92,12 +92,11 @@ struct NodeTest : public testing::Test {
 
         auto expected_status = btree_status_t::success;
         if (m_shadow_map.contains(key)) {
-            expected_status = put_type != btree_put_type::INSERT
-                                  ? btree_status_t::success
-                                  : btree_status_t::already_exists;
+            expected_status =
+                put_type != btree_put_type::INSERT ? btree_status_t::success : btree_status_t::already_exists;
         }
-        ASSERT_EQ(status, expected_status) << "Expected put of key " << k << " of put_type " << enum_name(put_type)
-                                       << " to be " << expected_status;
+        ASSERT_EQ(status, expected_status)
+            << "Expected put of key " << k << " of put_type " << enum_name(put_type) << " to be " << expected_status;
         if (expected_status == btree_status_t::success) {
             m_shadow_map.insert(std::make_pair(key, value));
         } else {
@@ -131,7 +130,7 @@ struct NodeTest : public testing::Test {
         for (uint32_t i{0}; i < count; ++i) {
             K key{k + i};
             V range_value{value};
-            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i); }
+            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i, nullptr); }
 
             if (m_shadow_map.find(key) != m_shadow_map.end()) {
                 if (put_type != btree_put_type::INSERT) { m_shadow_map.insert_or_assign(key, range_value); }
