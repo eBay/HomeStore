@@ -45,7 +45,7 @@ IndexWBCacheBase& wb_cache() {
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                            const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size) :
         m_vdev{vdev},
-        m_cache{evictor,  HS_DYNAMIC_CONFIG(generic.cache_hashmap_nbuckets), node_size,
+        m_cache{evictor, HS_DYNAMIC_CONFIG(generic.cache_hashmap_nbuckets), node_size,
                 [](const BtreeNodePtr& node) -> BlkId {
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
@@ -597,7 +597,9 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                     buf->m_node_freed = false;
                     r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = false;
                     m_vdev->commit_blk(buf->m_blkid);
-                    // it can happen when children moved to one of right parent sibling and then the previous node is deleted but not commited during crash (upbuffer is not committed). but its children already committed. and freed (or changed)
+                    // it can happen when children moved to one of right parent sibling and then the previous node is
+                    // deleted but not commited during crash (upbuffer is not committed). but its children already
+                    // committed. and freed (or changed)
                     if (buf->m_node_level) { potential_parent_recovered_bufs.insert(buf); }
                 } else {
                     LOGINFO("deleting and creating new buf {}", buf->to_string());
@@ -638,7 +640,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                                buf->to_string());
                     update_up_buffer_counters(buf->m_up_buffer);
                 }
-//                buf->m_up_buffer = nullptr;
+                //                buf->m_up_buffer = nullptr;
             }
         }
     }
@@ -653,25 +655,23 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
 #endif
     uint32_t cnt = 0;
-    LOGTRACEMOD(wbcache, "Potential parent recovered bufs (#of bufs = {})",
-                potential_parent_recovered_bufs.size());
+    LOGTRACEMOD(wbcache, "Potential parent recovered bufs (#of bufs = {})", potential_parent_recovered_bufs.size());
     for (auto const& buf : potential_parent_recovered_bufs) {
         LOGTRACEMOD(wbcache, " {} - check stale recovered buf {}", cnt++, buf->to_string());
     }
     // This step is needed since there is a case where all(or some) children of an interior node is freed (after moving
     // to a previous sibling parent) and after crash, this node has stale links to its children
     cnt = 0;
-    std::vector<IndexBufferPtr> buffers_to_repair;
+    std::vector< IndexBufferPtr > buffers_to_repair;
     for (auto const& buf : potential_parent_recovered_bufs) {
         LOGTRACEMOD(wbcache, " {} - potential parent recovered buf {}", cnt, buf->to_string());
         parent_recover(buf);
         if (buf->m_bytes == nullptr || r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted) {
             // This buffer was marked as deleted during repair, so we also need to free it
             deleted_bufs.push_back(buf);
-        }else
-        {
-                // This buffer was not marked as deleted during repair, so we need to repair it
-                buffers_to_repair.push_back(buf);
+        } else {
+            // This buffer was not marked as deleted during repair, so we need to repair it
+            buffers_to_repair.push_back(buf);
         }
     }
     // let all unfreed buffers to be repaired first. This is important to let detect and remove all stale links first
@@ -837,8 +837,11 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     if (buf->is_meta_buf()) {
         LOGTRACEMOD(wbcache, "Flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
                     buf->to_string());
-        auto const& sb = r_cast< MetaIndexBuffer* >(buf.get())->m_sb;
-        if (!sb.is_empty()) { meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk()); }
+        auto const sb_buf = r_cast< MetaIndexBuffer* >(buf.get());
+        if (sb_buf->m_valid) {
+            auto const& sb = sb_buf->m_sb;
+            if (!sb.is_empty()) { meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk()); }
+        }
         process_write_completion(cp_ctx, buf);
     } else if (buf->m_node_freed) {
         LOGTRACEMOD(wbcache, "cp {} Not flushing buf {} as it was freed, its here for merely dependency", cp_ctx->id(),

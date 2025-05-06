@@ -277,7 +277,8 @@ void IndexBuffer::remove_down_buffer(const IndexBufferPtr& buf) {
             }
         }
     }
-    HS_DBG_ASSERT(found, "Down buffer {} is linked to up_buf, but up_buf {} doesn't have down_buf in its list", buf->to_string(), buf->m_up_buffer? buf->m_up_buffer->to_string(): std::string("nulptr"));
+    HS_DBG_ASSERT(found, "Down buffer {} is linked to up_buf, but up_buf {} doesn't have down_buf in its list",
+                  buf->to_string(), buf->m_up_buffer ? buf->m_up_buffer->to_string() : std::string("nulptr"));
 #endif
 }
 
@@ -307,6 +308,7 @@ MetaIndexBuffer::~MetaIndexBuffer() {
         hs_utils::iobuf_free(m_bytes, sisl::buftag::metablk);
         m_bytes = nullptr;
     }
+    m_valid = false;
 }
 
 void MetaIndexBuffer::copy_sb_to_buf() { std::memcpy(m_bytes, m_sb.raw_buf()->cbytes(), m_sb.size()); }
