@@ -52,7 +52,9 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     }
 }
 
+// destroy is only called in worker thread;
 void SoloReplDev::destroy() {
+    HS_REL_ASSERT(iomanager.am_i_worker_reactor(), "Destroy should be called in worker thread");
     while (!m_is_recovered) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
