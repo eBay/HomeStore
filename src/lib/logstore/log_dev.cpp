@@ -168,9 +168,10 @@ void LogDev::start_timer() {
 
 void LogDev::stop_timer() {
     if (m_flush_timer_hdl != iomgr::null_timer_handle) {
-        // cancel the timer
-        iomanager.run_on_wait(logstore_service().flush_thread(),
-                              [this]() { iomanager.cancel_timer(m_flush_timer_hdl, true); });
+        iomanager.run_on_forget(logstore_service().flush_thread(), [this]() {
+            iomanager.cancel_timer(m_flush_timer_hdl, true);
+            m_flush_timer_hdl = iomgr::null_timer_handle;
+        });
     }
 }
 

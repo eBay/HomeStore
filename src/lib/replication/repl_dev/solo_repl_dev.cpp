@@ -1,6 +1,7 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "replication/repl_dev/common.h"
+#include <homestore/homestore.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
@@ -10,6 +11,7 @@ namespace homestore {
 SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing) :
         m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->group_id} {
     if (load_existing) {
+        m_logdev_id = m_rd_sb->logdev_id;
         logstore_service().open_logdev(m_rd_sb->logdev_id, flush_mode_t::TIMER);
         logstore_service()
             .open_log_store(m_rd_sb->logdev_id, m_rd_sb->logstore_id, true /* append_mode */)
@@ -17,6 +19,7 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
                 m_data_journal = std::move(log_store);
                 m_rd_sb->logstore_id = m_data_journal->get_store_id();
                 m_data_journal->register_log_found_cb(bind_this(SoloReplDev::on_log_found, 3));
+                m_is_recovered = true;
             });
     } else {
         m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::TIMER);
@@ -24,6 +27,7 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
         m_rd_sb->logstore_id = m_data_journal->get_store_id();
         m_rd_sb->logdev_id = m_logdev_id;
         m_rd_sb.write();
+        m_is_recovered = true;
     }
 }
 
@@ -46,6 +50,17 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     } else {
         write_journal(std::move(rreq));
     }
+}
+
+// destroy is only called in worker thread;
+void SoloReplDev::destroy() {
+    HS_REL_ASSERT(iomanager.am_i_worker_reactor(), "Destroy should be called in worker thread");
+    while (!m_is_recovered) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    hs()->logstore_service().remove_log_store(m_logdev_id, m_data_journal->get_store_id());
+    hs()->logstore_service().destroy_log_dev(m_logdev_id);
 }
 
 void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
@@ -211,6 +226,7 @@ void SoloReplDev::cp_flush(CP*) {
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */ }
+void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
+}
 
 } // namespace homestore

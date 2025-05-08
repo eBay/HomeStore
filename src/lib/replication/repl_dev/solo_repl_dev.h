@@ -30,10 +30,11 @@ class CP;
 class SoloReplDev : public ReplDev {
 private:
     logdev_id_t m_logdev_id;
-    std::shared_ptr< HomeLogStore > m_data_journal;
+    std::shared_ptr< HomeLogStore > m_data_journal{nullptr};
     superblk< repl_dev_superblk > m_rd_sb;
     uuid_t m_group_id;
     std::atomic< logstore_seq_num_t > m_commit_upto{-1};
+    std::atomic< bool > m_is_recovered{false};
 
 public:
     SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing);
@@ -94,6 +95,8 @@ public:
 
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
+
+    void destroy();
 
 private:
     void write_journal(repl_req_ptr_t rreq);

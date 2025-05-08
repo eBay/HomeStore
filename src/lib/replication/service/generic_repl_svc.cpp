@@ -117,8 +117,8 @@ void SoloReplService::stop() {
     hs()->data_service().stop();
 }
 
-AsyncReplResult< shared< ReplDev > >
-SoloReplService::create_repl_dev(group_id_t group_id, std::set< replica_id_t > const& members) {
+AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
+                                                                      std::set< replica_id_t > const& members) {
     superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
@@ -154,17 +154,20 @@ folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_
     // 1. Firstly stop the repl dev which waits for any outstanding requests to finish
     rdev_ptr->stop();
 
-    // 2. detaches both ways:
+    // 2. Destroy the repl dev which will remove the logstore and free the memory;
+    dp_cast< SoloReplDev >(rdev_ptr)->destroy();
+
+    // 3. detaches both ways:
     // detach rdev from its listener and listener from rdev;
     rdev_ptr->detach_listener();
     {
-        // 3. remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
+        // 4. remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
         // this instance;
         std::unique_lock lg(m_rd_map_mtx);
         m_rd_map.erase(group_id);
     }
 
-    // 4. now destroy the upper layer's listener instance;
+    // 5. now destroy the upper layer's listener instance;
     m_repl_app->destroy_repl_dev_listener(group_id);
 
     return folly::makeSemiFuture(ReplServiceError::OK);
@@ -202,14 +205,14 @@ std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_
 
 folly::Future< bool > SoloReplServiceCPHandler::cp_flush(CP* cp) {
     repl_service().iterate_repl_devs([cp](cshared< ReplDev >& repl_dev) {
-        if (repl_dev) { std::dynamic_pointer_cast< SoloReplDev >(repl_dev)->cp_flush(cp); }
+        if (repl_dev) { dp_cast< SoloReplDev >(repl_dev)->cp_flush(cp); }
     });
     return folly::makeFuture< bool >(true);
 }
 
 void SoloReplServiceCPHandler::cp_cleanup(CP* cp) {
     repl_service().iterate_repl_devs([cp](cshared< ReplDev >& repl_dev) {
-        if (repl_dev) { std::dynamic_pointer_cast< SoloReplDev >(repl_dev)->cp_cleanup(cp); }
+        if (repl_dev) { dp_cast< SoloReplDev >(repl_dev)->cp_cleanup(cp); }
     });
 }
 
