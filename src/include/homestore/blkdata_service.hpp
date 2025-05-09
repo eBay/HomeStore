@@ -220,9 +220,32 @@ public:
      */
     void start();
 
+    /**
+     * @brief Gets the total capacity of the block data service.
+     *
+     * This function returns the total capacity of the block data service, in bytes.
+     *
+     * @return The total capacity of the block data service, in bytes.
+     */
     uint64_t get_total_capacity() const;
 
+    /**
+     * @brief Gets the used capacity of the block data service.
+     *
+     * This function returns the used capacity of the block data service, in bytes.
+     *
+     * @return The used capacity of the block data service, in bytes.
+     */
     uint64_t get_used_capacity() const;
+
+    /**
+     * @brief Gets the drive type of the data service.
+     *
+     * Data Service doesn't support mixed drive types.
+     *
+     * @return The drive type of the data service, HDD or NVME.
+     */
+    HSDevType get_dev_type() const;
 
     void stop();
 
