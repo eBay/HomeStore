@@ -61,6 +61,8 @@ void SoloReplDev::destroy() {
 
     hs()->logstore_service().remove_log_store(m_logdev_id, m_data_journal->get_store_id());
     hs()->logstore_service().destroy_log_dev(m_logdev_id);
+
+    m_rd_sb.destroy();
 }
 
 void SoloReplDev::write_journal(repl_req_ptr_t rreq) {

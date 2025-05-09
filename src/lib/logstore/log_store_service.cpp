@@ -157,6 +157,7 @@ logdev_id_t LogStoreService::create_new_logdev(flush_mode_t flush_mode) {
 
 void LogStoreService::destroy_log_dev(logdev_id_t logdev_id) {
     if (is_stopping()) return;
+    HS_LOG(INFO, logstore, "Destroying logdev {}", logdev_id);
     incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
@@ -194,6 +195,7 @@ std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
     m_id_logdev_map.insert(std::make_pair<>(logdev_id, logdev));
+    LOGINFO("Created logdev {}", logdev_id);
     return logdev;
 }
 
@@ -302,6 +304,7 @@ folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_i
 
 void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {
     if (is_stopping()) return;
+    HS_LOG(INFO, logstore, "Removing logstore {} from logdev {}", store_id, logdev_id);
     incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
@@ -311,6 +314,7 @@ void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t stor
         return;
     }
     it->second->remove_log_store(store_id);
+    HS_LOG(INFO, logstore, "Successfully removed logstore {} from logdev {}", store_id, logdev_id);
     decr_pending_request_num();
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }

@@ -34,6 +34,7 @@ BlkDataService::BlkDataService(shared< ChunkSelector > chunk_selector) :
         m_custom_chunk_selector{std::move(chunk_selector)} {
     m_blk_read_tracker = std::make_unique< BlkReadTracker >();
 }
+
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
@@ -310,6 +311,8 @@ void BlkDataService::stop() {
 uint64_t BlkDataService::get_total_capacity() const { return m_vdev->size(); }
 
 uint64_t BlkDataService::get_used_capacity() const { return m_vdev->used_size(); }
+
+HSDevType BlkDataService::get_dev_type() const { return static_cast< HSDevType >(m_vdev->get_dev_type()); }
 
 uint32_t BlkDataService::get_align_size() const { return m_vdev->align_size(); }
 
