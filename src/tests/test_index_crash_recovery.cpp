@@ -112,6 +112,17 @@ public:
     OperationList generateOperations(size_t numOperations, bool reset = false) {
         std::vector< Operation > operations;
         if (reset) { this->reset(); }
+        if(putFreq_ == 100 &&  end_range_ - start_range_ + 1 - in_use_key_cnt_.load() < numOperations) {
+            LOGDEBUG("All keys are in use, skipping operation generation. end_range_ {} start_range_ {} in_use_key_cnt_ {}, numOperations {}",
+                     end_range_, start_range_, in_use_key_cnt_.load(), numOperations);
+            return operations;    
+        }
+        if(removeFreq_ == 100 && in_use_key_cnt_.load() < numOperations) {
+            LOGDEBUG("Not enough keys are in use, skipping operation generation. in_use_key_cnt_ {} numOperations {}",
+                     in_use_key_cnt_.load(), numOperations);
+            return operations;    
+        }
+
         while (operations.size() < numOperations) {
             uint32_t key = keyDist_(g_re);
             auto [it, inserted] = keyStates.try_emplace(key, false);
@@ -122,9 +133,11 @@ public:
             if (operation == OperationType::Put && !inUse) {
                 operations.emplace_back(key, OperationType::Put);
                 inUse = true;
+                in_use_key_cnt_.fetch_add(1);
             } else if (operation == OperationType::Remove && inUse) {
                 operations.emplace_back(key, OperationType::Remove);
                 inUse = false;
+                in_use_key_cnt_.fetch_sub(1);
             }
         }
 
@@ -225,6 +238,7 @@ private:
     std::uniform_int_distribution<> keyDist_;
     std::discrete_distribution<> opTypeDist_;
     std::map< uint64_t, bool > keyStates;
+    std::atomic< uint64_t > in_use_key_cnt_{0};
 
     void updateOperationTypeDistribution() {
         opTypeDist_ =
@@ -233,6 +247,19 @@ private:
 };
 
 #ifdef _PRERELEASE
+
+struct long_running_crash_options {
+    uint32_t put_freq;
+    std::vector< std::string > put_flips{};
+    std::vector< std::string > remove_flips{};
+    uint32_t num_entries{SISL_OPTIONS["num_entries"].as< uint32_t >()};
+    uint32_t preload_size{SISL_OPTIONS["preload_size"].as< uint32_t >()};
+    uint32_t rounds{SISL_OPTIONS["num_rounds"].as< uint32_t >()};
+    uint32_t num_entries_per_rounds{SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >()};
+    bool load_mode{SISL_OPTIONS.count("load_from_file") > 0};
+    bool save_mode{SISL_OPTIONS.count("save_to_file") > 0};
+};
+
 template < typename TestType >
 struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
@@ -452,8 +479,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Sanity check passed for {} keys!", count);
     }
 
-    void crash_and_recover(std::string& flip, OperationList& operations, std::string filename = "") {
-        this->remove_flip(flip);
+    void crash_and_recover_common(OperationList& operations, std::string filename = "") {
         //          this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
@@ -494,7 +520,217 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             << "shadow map size and tree size mismatch";
     }
 
+    void crash_and_recover(std::string& flip, OperationList& operations, std::string filename = "") {
+        this->remove_flip(flip);
+        this->crash_and_recover_common(operations, filename);
+    }
+
+    void crash_and_recover(std::vector< std::string >& flips, OperationList& operations, std::string filename = "") {
+        for (auto const& flip : flips) {
+            this->remove_flip(flip);
+        }
+        this->crash_and_recover_common(operations, filename);
+    }
+
     uint32_t tree_key_count() { return this->m_bt->count_keys(this->m_bt->root_node_id()); }
+
+    void long_running_crash(long_running_crash_options const& crash_test_options) {
+        // set putFreq 100 for the initial load
+        SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, crash_test_options.num_entries - 1 /*end_range*/);
+
+        std::vector< std::string > flips;
+        OperationList operations;
+        auto m_start_time = Clock::now();
+        auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
+        double elapsed_time, progress_percent, last_progress_time = 0;
+        bool renew_btree_after_crash = false;
+        auto cur_put_flip_idx = 0;
+        auto cur_remove_flip_idx = 0;
+        std::uniform_int_distribution<> dis(1, 100);
+        int flip_percentage = 90; // Set the desired percentage here
+        bool normal_execution = true;
+        bool clean_shutdown = true;
+        // if it is safe then delete all previous save files
+        if (crash_test_options.save_mode) {
+            std::filesystem::remove_all("/tmp/operations_*.txt");
+            std::filesystem::remove_all("/tmp/flips_history.txt");
+        }
+        // init tree
+        LOGINFO("Step 0: Fill up the tree with {} entries", crash_test_options.preload_size);
+        if (crash_test_options.load_mode) {
+            operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
+        } else {
+            operations = generator.generateOperations(crash_test_options.preload_size, true /* reset */);
+            if (crash_test_options.save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
+        }
+        
+        LOGDEBUG("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
+        uint32_t num_keys{0};
+
+        for (auto [k, _] : operations) {
+            this->put(k, btree_put_type::INSERT, true /* expect_success */);
+            num_keys++;
+        }
+
+        generator.setPutFrequency(crash_test_options.put_freq);
+        generator.setRemoveFrequency(100 - crash_test_options.put_freq);
+
+        // Trigger the cp to make sure middle part is successful
+        LOGINFO("Step 0-1: Flush all the entries so far");
+        test_common::HSTestHelper::trigger_cp(true);
+        this->get_all();
+        this->m_shadow_map.save(this->m_shadow_filename);
+        // this->print_keys("reapply: after preload");
+        this->visualize_keys("tree_after_preload.dot");
+
+        for (uint32_t round = 1;
+            round <= crash_test_options.rounds && !time_to_stop(); round++) {
+            LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, crash_test_options.rounds);
+            bool print_time = false;
+            elapsed_time = get_elapsed_time_sec(m_start_time);
+
+            if (crash_test_options.load_mode) {
+                operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
+            } else {
+                operations = generator.generateOperations(crash_test_options.num_entries_per_rounds, renew_btree_after_crash /* reset */);
+                if (crash_test_options.save_mode) {
+                    SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
+                }
+            }
+            if(operations.empty()) {
+                LOGDEBUG("No operations generated, skipping round {}", round);
+                continue;
+            }
+
+            flips.clear();
+            if (crash_test_options.load_mode) {
+                std::ifstream file("/tmp/flips_history.txt");
+                std::string line;
+                bool found = false;
+                for (uint32_t i = 0; i < round && std::getline(file, line); i++) {
+                    if (i == round - 1) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found && !line.empty()) {
+                    if (line == "normal") {
+                        normal_execution = true;
+                    } else {
+                        normal_execution = false;
+                        std::istringstream iss(line);
+                        std::string flip;
+                        while (iss >> flip) {
+                            flips.emplace_back(flip);
+                        }
+                        auto log_str = fmt::format("Step 1-{}: Set flag", round);
+                        for(auto const& f : flips) {
+                            log_str += fmt::format(" {}", f);
+                            this->set_basic_flip(f, 1, 100);
+                        }
+                        LOGINFO("{}", log_str);
+                    }
+                }
+                file.close();
+            } else {
+                if (dis(g_re) <= flip_percentage) {
+                    if(!crash_test_options.put_flips.empty()) {
+                        flips.emplace_back(crash_test_options.put_flips[cur_put_flip_idx++ % crash_test_options.put_flips.size()]);
+                    }
+                    if(!crash_test_options.remove_flips.empty()) {
+                        flips.emplace_back(crash_test_options.remove_flips[cur_remove_flip_idx++ % crash_test_options.remove_flips.size()]);
+                    }
+                    auto log_str = fmt::format("Step 1-{}: Set flag", round);
+                    for(auto const& f : flips) {
+                        log_str += fmt::format(" {}", f);
+                        this->set_basic_flip(f, 1, 100);
+                    }
+                    LOGINFO("{}", log_str);
+                    normal_execution = false;
+                } else {
+                    normal_execution = true;
+                    LOGINFO("Step 1-{}: No flip set", round);
+                }
+                if (crash_test_options.save_mode) {
+                    // save the filp name to a file for later use
+                    std::ofstream file("/tmp/flips_history.txt", std::ios::app);
+                    if (file.is_open()) {
+                        std::string out_line{"normal"};
+                        if (!normal_execution) {
+                            out_line = flips[0];
+                            for (size_t i = 1; i < flips.size(); i++) {
+                                out_line += " " + flips[i];
+                            }
+                        }
+                        file << out_line << "\n";
+                    }
+                    file.close();
+                }
+            }
+            
+            LOGDEBUG("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
+            
+            for (auto [k, op] : operations) {
+                if (op == OperationType::Remove) {
+                    if(num_keys < 1) {
+                        // remove flips and continue
+                        for (auto const& flip : flips) {
+                            this->remove_flip(flip);
+                        }
+                        continue;
+                    }
+                    LOGDEBUG("Removing key {}", k);
+                    this->remove_one(k, true /* expect_success */);
+                    num_keys--;
+                } else {
+                    if (num_keys >= crash_test_options.num_entries) {
+                        // remove flips and continue
+                        for (auto const& flip : flips) {
+                            this->remove_flip(flip);
+                        }
+                        continue;
+                    }
+                    LOGDEBUG("Inserting key {}", k);
+                    this->put(k, btree_put_type::INSERT, true /* expect_success */);
+                    num_keys++;
+                }
+                if (!time_to_stop()) {
+                    static bool print_alert = false;
+                    if (print_alert) {
+                        LOGINFO("It is time to stop but let's finish this round and then stop!");
+                        print_alert = false;
+                    }
+                }
+            }
+            if (normal_execution) {
+                if (clean_shutdown) {
+                    this->m_shadow_map.save(this->m_shadow_filename);
+                    this->restart_homestore();
+                } else {
+                    test_common::HSTestHelper::trigger_cp(true);
+                    this->get_all();
+                }
+            } else {
+                // remove the flips so that they do not get triggered erroneously
+                this->crash_and_recover(flips, operations, fmt::format("long_tree_{}", round));
+            }
+            if (elapsed_time - last_progress_time > 30) {
+                last_progress_time = elapsed_time;
+                print_time = true;
+            }
+            if (print_time) {
+                LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
+                        "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
+                        round, crash_test_options.rounds, round * 100.0 / crash_test_options.rounds, elapsed_time, this->m_run_time,
+                        elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), crash_test_options.num_entries,
+                        this->tree_key_count() * 100.0 / crash_test_options.num_entries);
+            }
+            // this->print_keys(fmt::format("reapply: after round {}", round));
+            if (renew_btree_after_crash) { this->reset_btree(); };
+        }
+        this->destroy_btree();
+        log_obj_life_counter();
+    }
 
 protected:
     const std::string m_shadow_filename = "/tmp/shadow_map_index_recovery.txt";
@@ -598,293 +834,33 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
 }
 
 TYPED_TEST(IndexCrashTest, long_running_put_crash) {
-
-    // Define the lambda function
-    auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    auto const preload_size = SISL_OPTIONS["preload_size"].as< uint32_t >();
-    auto const rounds = SISL_OPTIONS["num_rounds"].as< uint32_t >();
-    auto const num_entries_per_rounds = SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >();
-    bool load_mode = SISL_OPTIONS.count("load_from_file");
-    bool save_mode = SISL_OPTIONS.count("save_to_file");
-    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
-    vector< std::string > flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
-                                   "crash_flush_on_split_at_right_child"};
-
-    std::string flip = "";
-    OperationList operations;
-    auto m_start_time = Clock::now();
-    auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
-    double elapsed_time, progress_percent, last_progress_time = 0;
-    bool renew_btree_after_crash = false;
-    auto cur_flip_idx = 0;
-    std::uniform_int_distribution<> dis(1, 100);
-    int flip_percentage = 90; // Set the desired percentage here
-    bool normal_execution = true;
-    bool clean_shutdown = true;
-    // if it is safe then delete all previous save files
-    if (save_mode) {
-        std::filesystem::remove_all("/tmp/operations_*.txt");
-        std::filesystem::remove_all("/tmp/flips_history.txt");
-    }
-    // init tree
-    LOGINFO("Step 0: Fill up the tree with {} entries", preload_size);
-    if (load_mode) {
-        operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
-    } else {
-        operations = generator.generateOperations(preload_size, true /* reset */);
-        if (save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
-    }
-    auto opstr = SequenceGenerator::printOperations(operations);
-    LOGINFO("Lets before crash print operations\n{}", opstr);
-
-    for (auto [k, _] : operations) {
-        this->put(k, btree_put_type::INSERT, true /* expect_success */);
-    }
-
-    // Trigger the cp to make sure middle part is successful
-    LOGINFO("Step 0-1: Flush all the entries so far");
-    test_common::HSTestHelper::trigger_cp(true);
-    this->get_all();
-    this->m_shadow_map.save(this->m_shadow_filename);
-    // this->print_keys("reapply: after preload");
-    this->visualize_keys("tree_after_preload.dot");
-
-    for (uint32_t round = 1;
-         round <= rounds && !time_to_stop() && this->tree_key_count() < num_entries - num_entries_per_rounds; round++) {
-        LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, rounds);
-        bool print_time = false;
-        elapsed_time = get_elapsed_time_sec(m_start_time);
-        if (load_mode) {
-            std::ifstream file("/tmp/flips_history.txt");
-            std::string line;
-            bool found = false;
-            for (uint32_t i = 0; i < round && std::getline(file, line); i++) {
-                if (i == round - 1) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found && !line.empty()) {
-                if (line == "normal") {
-                    normal_execution = true;
-                } else {
-                    normal_execution = false;
-                    flip = line;
-                    LOGINFO("Step 1-{}: Set flag {}", round, flip);
-                    this->set_basic_flip(flip, 1, 100);
-                }
-            }
-            file.close();
-        } else {
-            if (dis(g_re) <= flip_percentage) {
-                flip = flips[cur_flip_idx++ % flips.size()];
-                LOGINFO("Step 1-{}: Set flag {}", round, flip);
-                this->set_basic_flip(flip, 1, 100);
-                normal_execution = false;
-            } else {
-                normal_execution = true;
-                LOGINFO("Step 1-{}: No flip set", round);
-            }
-            if (save_mode) {
-                // save the filp name to a file for later use
-                std::ofstream file("/tmp/flips_history.txt", std::ios::app);
-                if (file.is_open()) { file << (normal_execution ? "normal" : flip) << "\n"; }
-                file.close();
-            }
-        }
-        if (load_mode) {
-            operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
-        } else {
-            operations = generator.generateOperations(num_entries_per_rounds, renew_btree_after_crash /* reset */);
-            if (save_mode) {
-                SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
-            }
-        }
-        LOGINFO("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
-        for (auto [k, _] : operations) {
-            this->put(k, btree_put_type::INSERT, true /* expect_success */);
-            if (!time_to_stop()) {
-                static bool print_alert = false;
-                if (print_alert) {
-                    LOGINFO("It is time to stop but let's finish this round and then stop!");
-                    print_alert = false;
-                }
-            }
-        }
-        if (normal_execution) {
-            if (clean_shutdown) {
-                this->m_shadow_map.save(this->m_shadow_filename);
-                this->restart_homestore();
-            } else {
-                test_common::HSTestHelper::trigger_cp(true);
-                this->get_all();
-            }
-        } else {
-            // remove the flips so that they do not get triggered erroneously
-            this->crash_and_recover(flip, operations, fmt::format("long_tree_{}", round));
-        }
-        if (elapsed_time - last_progress_time > 30) {
-            last_progress_time = elapsed_time;
-            print_time = true;
-        }
-        if (print_time) {
-            LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
-                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
-                    round, rounds, round * 100.0 / rounds, elapsed_time, this->m_run_time,
-                    elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
-                    this->tree_key_count() * 100.0 / num_entries);
-        }
-        // this->print_keys(fmt::format("reapply: after round {}", round));
-        if (renew_btree_after_crash) { this->reset_btree(); };
-    }
-    this->destroy_btree();
-    log_obj_life_counter();
+    long_running_crash_options crash_test_options{
+        .put_freq = 100,
+        .put_flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
+                      "crash_flush_on_split_at_right_child"},
+    };
+    this->long_running_crash(crash_test_options);
 }
 
 TYPED_TEST(IndexCrashTest, long_running_remove_crash) {
+    long_running_crash_options crash_test_options{
+        .put_freq = 0,
+        .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
+                         /*, "crash_flush_on_freed_child"*/},
+        .preload_size = SISL_OPTIONS["num_entries"].as< uint32_t >(),
+    };
+    this->long_running_crash(crash_test_options);
+}
 
-    // Define the lambda function
-    auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    auto const rounds = SISL_OPTIONS["num_rounds"].as< uint32_t >();
-    auto const num_entries_per_rounds = SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >();
-    bool load_mode = SISL_OPTIONS.count("load_from_file");
-    bool save_mode = SISL_OPTIONS.count("save_to_file");
-    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
-    vector< std::string > flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"/*,
-                                   "crash_flush_on_freed_child"*/};
-
-    std::string flip = "";
-    OperationList operations;
-    auto m_start_time = Clock::now();
-    auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
-    double elapsed_time, progress_percent, last_progress_time = 0;
-    bool renew_btree_after_crash = false;
-    auto cur_flip_idx = 0;
-    std::uniform_int_distribution<> dis(1, 100);
-    int flip_percentage = 90; // Set the desired percentage here
-    bool normal_execution = true;
-    bool clean_shutdown = true;
-    // if it is safe then delete all previous save files
-    if (save_mode) {
-        std::filesystem::remove_all("/tmp/operations_*.txt");
-        std::filesystem::remove_all("/tmp/flips_history.txt");
-    }
-    // init tree
-    LOGINFO("Step 0: Fill up the tree with {} entries", num_entries);
-    if (load_mode) {
-        operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
-    } else {
-        operations = generator.generateOperations(num_entries, true /* reset */);
-        if (save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
-    }
-    //    auto opstr = SequenceGenerator::printOperations(operations);
-    //    LOGINFO("Lets before crash print operations\n{}", opstr);
-
-    for (auto [k, _] : operations) {
-        this->put(k, btree_put_type::INSERT, true /* expect_success */);
-    }
-    generator.setPutFrequency(0);
-    generator.setRemoveFrequency(100);
-
-    // Trigger the cp to make sure middle part is successful
-    LOGINFO("Step 0-1: Flush all the entries so far");
-    test_common::HSTestHelper::trigger_cp(true);
-    this->get_all();
-    this->m_shadow_map.save(this->m_shadow_filename);
-    //     this->print_keys("reapply: after preload");
-    this->visualize_keys("tree_after_preload.dot");
-
-    for (uint32_t round = 1; round <= rounds && !time_to_stop() && this->tree_key_count() >= num_entries_per_rounds;
-         round++) {
-        LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, rounds);
-        //        this->print_keys(fmt::format("before round {}",round));
-        bool print_time = false;
-        elapsed_time = get_elapsed_time_sec(m_start_time);
-        if (load_mode) {
-            std::ifstream file("/tmp/flips_history.txt");
-            std::string line;
-            bool found = false;
-            for (uint32_t i = 0; i < round && std::getline(file, line); i++) {
-                if (i == round - 1) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found && !line.empty()) {
-                if (line == "normal") {
-                    normal_execution = true;
-                } else {
-                    normal_execution = false;
-                    flip = line;
-                    LOGINFO("Step 1-{}: Set flag {}", round, flip);
-                    this->set_basic_flip(flip, 1, 100);
-                }
-            }
-            file.close();
-        } else {
-            if (dis(g_re) <= flip_percentage) {
-                flip = flips[cur_flip_idx++ % flips.size()];
-                LOGINFO("Step 1-{}: Set flag {}", round, flip);
-                this->set_basic_flip(flip, 1, 100);
-                normal_execution = false;
-            } else {
-                normal_execution = true;
-                LOGINFO("Step 1-{}: No flip set", round);
-            }
-            if (save_mode) {
-                // save the filp name to a file for later use
-                std::ofstream file("/tmp/flips_history.txt", std::ios::app);
-                if (file.is_open()) { file << (normal_execution ? "normal" : flip) << "\n"; }
-                file.close();
-            }
-        }
-        if (load_mode) {
-            operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
-        } else {
-            operations = generator.generateOperations(num_entries_per_rounds, renew_btree_after_crash /* reset */);
-            if (save_mode) {
-                SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
-            }
-        }
-        //        LOGINFO("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
-        for (auto [k, _] : operations) {
-            this->remove_one(k, true /* expect_success */);
-            if (!time_to_stop()) {
-                static bool print_alert = false;
-                if (print_alert) {
-                    LOGINFO("It is time to stop but let's finish this round and then stop!");
-                    print_alert = false;
-                }
-            }
-        }
-        if (normal_execution) {
-            if (clean_shutdown) {
-                this->m_shadow_map.save(this->m_shadow_filename);
-                this->restart_homestore();
-            } else {
-                test_common::HSTestHelper::trigger_cp(true);
-                this->get_all();
-            }
-        } else {
-            this->crash_and_recover(flip, operations, fmt::format("long_tree_{}", round));
-        }
-        if (elapsed_time - last_progress_time > 30) {
-            last_progress_time = elapsed_time;
-            print_time = true;
-        }
-        if (print_time) {
-            LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
-                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
-                    round, rounds, round * 100.0 / rounds, elapsed_time, this->m_run_time,
-                    elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
-                    this->tree_key_count() * 100.0 / num_entries);
-        }
-        // this->print_keys(fmt::format("reapply: after round {}", round));
-        if (renew_btree_after_crash) { this->reset_btree(); };
-    }
-    this->print_keys(fmt::format("tree at end"));
-    this->destroy_btree();
-    log_obj_life_counter();
+TYPED_TEST(IndexCrashTest, long_running_put_remove_crash) {
+    long_running_crash_options crash_test_options{
+        .put_freq = 50,
+        .put_flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
+            "crash_flush_on_split_at_right_child"},
+        .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
+                         /*, "crash_flush_on_freed_child"*/},
+    };
+    this->long_running_crash(crash_test_options);
 }
 
 // Basic reverse and forward order remove with different flip points
