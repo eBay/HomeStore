@@ -721,7 +721,7 @@ public:
 
 private:
     void start_timer();
-    void stop_timer();
+    folly::Future< int > stop_timer();
 
     bool allow_inline_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::INLINE); }
     bool allow_timer_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::TIMER); }

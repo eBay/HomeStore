@@ -149,7 +149,10 @@ void LogDev::stop() {
     // after we call stop, we need to do any pending device truncations
     truncate();
     m_id_logstore_map.clear();
-    if (allow_timer_flush()) stop_timer();
+    if (allow_timer_flush()) {
+        auto f = stop_timer();
+        std::move(f).get();
+    }
 }
 
 void LogDev::destroy() {
@@ -167,13 +170,27 @@ void LogDev::start_timer() {
         });
 }
 
-void LogDev::stop_timer() {
+folly::Future< int > LogDev::stop_timer() {
+    // return future to the caller;
+    // this future will be completed when the timer is stopped
+    auto p = std::make_shared< folly::Promise< int > >();
+    auto f = p->getFuture();
+    iomanager.run_on_forget(logstore_service().flush_thread(), [this, p]() mutable {
+        if (m_flush_timer_hdl != iomgr::null_timer_handle) {
+            iomanager.cancel_timer(m_flush_timer_hdl, true);
+            m_flush_timer_hdl = iomgr::null_timer_handle;
+        }
+        p->setValue(0);
+    });
+#if 0
     if (m_flush_timer_hdl != iomgr::null_timer_handle) {
         iomanager.run_on_forget(logstore_service().flush_thread(), [this]() {
             iomanager.cancel_timer(m_flush_timer_hdl, true);
             m_flush_timer_hdl = iomgr::null_timer_handle;
         });
     }
+#endif
+    return f;
 }
 
 void LogDev::do_load(off_t device_cursor) {
