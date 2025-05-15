@@ -123,7 +123,7 @@ void RaftReplService::start() {
     // new_joiner_type fully disabled log pack behavior.
     // There is no callback available for handling and localizing the log entries within the pack, which could
     // result in data corruption.
-    r_params.use_new_joiner_type_ = true;
+    r_params.use_new_joiner_type_ = false;
     r_params.use_bg_thread_for_snapshot_io_ = HS_DYNAMIC_CONFIG(consensus.use_bg_thread_for_snapshot_io);
     r_params.return_method_ = nuraft::raft_params::async_handler;
     m_msg_mgr->register_mgr_type(params.default_group_type_, r_params);
@@ -476,9 +476,9 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     add_repl_dev(group_id, rdev);
 }
 
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                                  const replica_member_info& member_in, uint32_t commit_quorum,
-                                                  uint64_t trace_id) const {
+AsyncReplResult<> RaftReplService::start_replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                        const replica_member_info& member_in, uint32_t commit_quorum,
+                                                        uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
     incr_pending_request_num();
     auto rdev_result = get_repl_dev(group_id);
@@ -488,7 +488,52 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const rep
     }
 
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
-        ->replace_member(member_out, member_in, commit_quorum, trace_id)
+        ->start_replace_member(member_out, member_in, commit_quorum, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this](auto&& e) mutable {
+            if (e.hasError()) {
+                decr_pending_request_num();
+                return make_async_error<>(e.error());
+            }
+            decr_pending_request_num();
+            return make_async_success<>();
+        });
+}
+
+AsyncReplResult<> RaftReplService::complete_replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                           const replica_member_info& member_in, uint32_t commit_quorum,
+                                                           uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    incr_pending_request_num();
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
+    }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->complete_replace_member(member_out, member_in, commit_quorum, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this](auto&& e) mutable {
+            if (e.hasError()) {
+                decr_pending_request_num();
+                return make_async_error<>(e.error());
+            }
+            decr_pending_request_num();
+            return make_async_success<>();
+        });
+}
+
+AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target, uint32_t commit_quorum,
+                                    bool wait_and_verify, uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    incr_pending_request_num();
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
+    }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->flip_learner_flag(member, target, commit_quorum, wait_and_verify, trace_id)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
             if (e.hasError()) {

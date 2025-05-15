@@ -41,10 +41,16 @@ public:
     /// @return A Future which gets called after schedule to release (before garbage collection is kicked in)
     virtual folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) = 0;
 
-    virtual AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                             const replica_member_info& member_in,
-                                             uint32_t commit_quorum = 0, uint64_t trace_id = 0) const = 0;
+    virtual AsyncReplResult<> start_replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                   const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                                   uint64_t trace_id = 0) const = 0;
 
+    virtual AsyncReplResult<> complete_replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                      const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                                      uint64_t trace_id = 0) const = 0;
+
+    virtual AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target, uint32_t commit_quorum,
+                                        bool wait_and_verify = true, uint64_t trace_id = 0) const = 0;
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in
     /// @return ReplDev is opened or ReplServiceError::SERVER_NOT_FOUND if it doesn't exist
