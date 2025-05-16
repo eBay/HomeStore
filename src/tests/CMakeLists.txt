@@ -71,7 +71,7 @@ if (${io_tests})
     set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
     add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
     target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
-    add_test(NAME IndexBtree COMMAND test_index_btree --gtest_filter=*/0.*)
+    add_test(NAME IndexBtree COMMAND test_index_btree)
     set_property(TEST IndexBtree PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
     set_tests_properties(IndexBtree PROPERTIES TIMEOUT 1200)
 

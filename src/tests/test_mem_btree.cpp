@@ -50,8 +50,8 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
-    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node",
-     ::cxxopts::value< uint32_t >()->default_value("0"), ""),
+    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("0"),
+     ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"))
@@ -111,16 +111,14 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 #endif
         this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
         this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        //if TestType is PrefixIntervalBtreeTest print here something
-        if constexpr (std::is_same_v<TestType, PrefixIntervalBtreeTest>) {
-            this->m_cfg.m_merge_turned_on = false;
-        }
+        // if TestType is PrefixIntervalBtreeTest print here something
+        if constexpr (std::is_same_v< TestType, PrefixIntervalBtreeTest >) { this->m_cfg.m_merge_turned_on = false; }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 };
 
-using BtreeTypes = testing::Types<  FixedLenBtreeTest, VarKeySizeBtreeTest,
-                                   VarValueSizeBtreeTest, VarObjSizeBtreeTest, PrefixIntervalBtreeTest >;
+using BtreeTypes = testing::Types< FixedLenBtreeTest, PrefixIntervalBtreeTest, VarKeySizeBtreeTest,
+                                   VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
 TYPED_TEST(BtreeTest, SequentialInsert) {
@@ -317,9 +315,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 #endif
         this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
         this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        if constexpr (std::is_same_v<TestType, PrefixIntervalBtreeTest>) {
-            this->m_cfg.m_merge_turned_on = false;
-        }
+        if constexpr (std::is_same_v< TestType, PrefixIntervalBtreeTest >) { this->m_cfg.m_merge_turned_on = false; }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 
