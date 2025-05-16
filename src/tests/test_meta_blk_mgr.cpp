@@ -187,7 +187,7 @@ public:
     uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
 
     void do_write_to_full() {
-        static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
+        static constexpr uint64_t blkstore_overhead = 256 * 1024ul * 1024ul; // 256MB
         ssize_t free_size = uint64_cast(m_mbm->total_size() - m_mbm->used_size() - blkstore_overhead);
 
         HS_REL_ASSERT_GT(free_size, 0);
@@ -195,8 +195,10 @@ public:
 
         uint64_t size_written{0};
         while (free_size > 0) {
+            LOGDEBUG("free size: {}, total size: {}, used size: {}, available blks: {}", free_size, m_mbm->total_size(),
+                     m_mbm->used_size(), m_mbm->available_blks());
             // if it is overflow, 2 extra blocks are needed for ovf blk header and meta blk;
-            if (free_size -  2 * m_mbm->block_size()  >= gp.max_wrt_sz) {
+            if (free_size - 2 * m_mbm->block_size() >= gp.max_wrt_sz) {
                 size_written = do_sb_write(do_overflow(), 0);
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
