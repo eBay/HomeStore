@@ -313,5 +313,6 @@ public:
         }
         return ret;
     }
+    virtual void on_update_phys_buf() override {};
 };
 } // namespace homestore

@@ -133,7 +133,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     test_common::HSTestHelper m_helper;
 };
 
-using BtreeTypes = testing::Types< FixedLenBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
+using BtreeTypes = testing::Types< FixedLenBtree, PrefixIntervalBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 

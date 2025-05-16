@@ -472,7 +472,13 @@ protected:
     }
 
 public:
-    void update_phys_buf(uint8_t* buf) { m_phys_node_buf = buf; }
+    void update_phys_buf(uint8_t* buf) {
+        m_phys_node_buf = buf;
+        on_update_phys_buf();
+    }
+    // This method is called when the physical buffer is updated.
+    // Derived classes can override this method to perform additional actions.
+    virtual void on_update_phys_buf() = 0;
     persistent_hdr_t* get_persistent_header() { return r_cast< persistent_hdr_t* >(m_phys_node_buf); }
     const persistent_hdr_t* get_persistent_header_const() const {
         return r_cast< const persistent_hdr_t* >(m_phys_node_buf);
