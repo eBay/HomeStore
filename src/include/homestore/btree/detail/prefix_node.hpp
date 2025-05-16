@@ -160,7 +160,10 @@ public:
     }
 
     virtual ~FixedPrefixNode() = default;
-
+    virtual void on_update_phys_buf() override {
+        // Update the prefix bitset with the new buffer
+        prefix_bitset_ = sisl::CompactBitSet{sisl::blob{bitset_area(), prefix_bitset_.size() / 8}, false};
+    }
     ///////////////////////////// All overrides of BtreeIntervalNode ///////////////////////////////////
     /// @brief Upserts a batch of entries into a prefix node.
     ///
