@@ -143,8 +143,9 @@ void LogDev::stop() {
     }
 
     folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
-    for (auto& [_, store] : m_id_logstore_map)
+    for (auto& [_, store] : m_id_logstore_map) {
         store.log_store->stop();
+    }
 
     // after we call stop, we need to do any pending device truncations
     truncate();
@@ -182,14 +183,6 @@ folly::Future< int > LogDev::stop_timer() {
         }
         p->setValue(0);
     });
-#if 0
-    if (m_flush_timer_hdl != iomgr::null_timer_handle) {
-        iomanager.run_on_forget(logstore_service().flush_thread(), [this]() {
-            iomanager.cancel_timer(m_flush_timer_hdl, true);
-            m_flush_timer_hdl = iomgr::null_timer_handle;
-        });
-    }
-#endif
     return f;
 }
 
