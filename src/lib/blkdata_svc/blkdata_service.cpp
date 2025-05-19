@@ -222,6 +222,8 @@ BlkDataService::async_write(sisl::sg_list const& sgs, std::vector< MultiBlkId > 
     return collect_all_futures(s_futs);
 }
 
+void BlkDataService::submit_io_batch() { m_vdev->submit_batch(); }
+
 BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints, MultiBlkId& out_blkids) {
     if (is_stopping()) return BlkAllocStatus::FAILED;
     incr_pending_request_num();
