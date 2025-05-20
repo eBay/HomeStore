@@ -152,6 +152,13 @@ public:
                                                 bool part_of_batch = false);
 
     /**
+     * @brief Submit the io batch, which is a mandatory method to be called if read/write are issued with part_of_batch
+     * is set to true. In those cases, without this method, IOs might not be even issued. No-op if previous io requests
+     * are not part of batch.
+     * */
+    void submit_io_batch();
+
+    /**
      * @brief Commits the block with the given MultiBlkId.
      *
      * @param bid The MultiBlkId of the block to commit.
