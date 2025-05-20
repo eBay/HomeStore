@@ -17,6 +17,7 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <boost/intrusive_ptr.hpp>
 
+#include <iomgr/iomgr.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
 #include <homestore/logstore/log_store.hpp>
@@ -31,13 +32,15 @@ class SoloReplDev : public ReplDev {
 private:
     logdev_id_t m_logdev_id;
     std::shared_ptr< HomeLogStore > m_data_journal{nullptr};
-    superblk< repl_dev_superblk > m_rd_sb;
+    superblk< solo_repl_dev_superblk > m_rd_sb;
     uuid_t m_group_id;
     std::atomic< logstore_seq_num_t > m_commit_upto{-1};
     std::atomic< bool > m_is_recovered{false};
+    iomgr::io_fiber_t m_truncation_fiber;
+    iomgr::timer_handle_t m_truncation_timer_hdl{iomgr::null_timer_handle};
 
 public:
-    SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing);
+    SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~SoloReplDev() = default;
 
     virtual std::error_code alloc_blks(uint32_t data_size, const blk_alloc_hints& hints,
@@ -97,6 +100,7 @@ public:
     void cp_cleanup(CP* cp);
 
     void destroy();
+    void truncate();
 
 private:
     void write_journal(repl_req_ptr_t rreq);
