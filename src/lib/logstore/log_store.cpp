@@ -340,13 +340,6 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_n
 bool HomeLogStore::flush(logstore_seq_num_t upto_lsn) {
     if (is_stopping()) return false;
     incr_pending_request_num();
-    if (!m_logdev->allow_explicit_flush()) {
-        HS_LOG_ASSERT(false,
-                      "Explicit flush is turned off or calling flush on wrong thread for this logdev, ignoring flush");
-        decr_pending_request_num();
-        return false;
-    }
-
     m_logdev->flush_under_guard();
     decr_pending_request_num();
     return true;
