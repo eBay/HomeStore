@@ -267,6 +267,9 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         BT_NODE_LOG_ASSERT_EQ(child->is_node_deleted(), false, child);
 
         old_nodes.push_back(child);
+        // Todo: need a more precise calculation considering compacted size for prefix nodes because when merge happens
+        // compaction will occur for both leftmost and new nodes. This calculation makes available size not be balanced
+        // for the leftmost node and new nodes.
         total_size += child->occupied_size();
     }
 
@@ -323,6 +326,13 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 
         if ((old_nodes[i]->total_entries() - nentries) == 0) { // Entire node goes in
             available_size -= old_nodes[i]->occupied_size();
+            // For prefix nodes, compaction will make the size smaller, so we can compact saving to available size;
+            // hence it cannot get negative.
+            if (old_nodes[i]->get_node_type() == btree_node_type::PREFIX) {
+                auto cur_node = static_cast< FixedPrefixNode< K, V >* >(old_nodes[i].get());
+                available_size += cur_node->compact_saving();
+            }
+            BT_NODE_DBG_ASSERT_EQ(available_size >= 0, true, leftmost_node, "negative available size");
             if (i >= old_nodes.size() - 1) {
                 src_cursor.ith_node = i + 1;
                 src_cursor.nth_entry = std::numeric_limits< uint32_t >::max();
