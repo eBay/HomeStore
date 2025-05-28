@@ -250,7 +250,7 @@ public:
     }
 
     void range_remove_existing_random() {
-        static std::uniform_int_distribution< uint32_t > s_rand_range_generator{2, 5};
+        static std::uniform_int_distribution< uint32_t > s_rand_range_generator{2, 50};
 
         auto const [start_k, end_k] = m_shadow_map.pick_random_existing_keys(s_rand_range_generator(m_re));
         do_range_remove(start_k, end_k, true /* only_existing */);

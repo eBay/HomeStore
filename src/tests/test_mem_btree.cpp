@@ -111,8 +111,6 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 #endif
         this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
         this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        // if TestType is PrefixIntervalBtreeTest print here something
-        if constexpr (std::is_same_v< TestType, PrefixIntervalBtreeTest >) { this->m_cfg.m_merge_turned_on = false; }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 };
@@ -315,7 +313,6 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 #endif
         this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
         this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        if constexpr (std::is_same_v< TestType, PrefixIntervalBtreeTest >) { this->m_cfg.m_merge_turned_on = false; }
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 
@@ -347,6 +344,10 @@ int main(int argc, char* argv[]) {
     if (SISL_OPTIONS.count("seed")) {
         auto seed = SISL_OPTIONS["seed"].as< uint64_t >();
         LOGINFO("Using seed {} to sow the random generation", seed);
+        g_re.seed(seed);
+    } else {
+        auto seed = std::chrono::system_clock::now().time_since_epoch().count();
+        LOGINFO("No seed provided. Using randomly generated seed: {}", seed);
         g_re.seed(seed);
     }
     auto ret = RUN_ALL_TESTS();
