@@ -15,6 +15,10 @@
 #include "replication/log_store/repl_log_store.h"
 
 namespace homestore {
+struct replace_member_ctx_superblk {
+    replica_id_t replica_out;
+    replica_id_t replica_in;
+};
 
 #pragma pack(1)
 struct raft_repl_dev_superblk : public repl_dev_superblk {
@@ -26,6 +30,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint64_t last_applied_dsn;      // Last applied data sequence number
     uint8_t destroy_pending;        // Flag to indicate whether the group is in destroy pending state
     repl_lsn_t last_snapshot_lsn;   // Last snapshot LSN follower received from leader
+    replace_member_ctx_superblk replace_member_ctx; // Replace members context, used to track the replace member status
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
@@ -36,7 +41,7 @@ using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
-struct start_replace_members_ctx {
+struct replace_member_ctx {
     replica_member_info replica_out;
     replica_member_info replica_in;
 };
@@ -235,8 +240,8 @@ public:
     ReplServiceError do_remove_member(const replica_member_info& member, uint64_t trace_id = 0);
     ReplServiceError do_flip_learner(const replica_member_info& member, bool target, bool wait_and_verify,
                                      uint64_t trace_id = 0);
-    ReplServiceError set_priority(const replica_member_info& member, int32_t priority, uint64_t trace_id = 0);
-    nuraft::cmd_result_code retry_when_config_change(const std::function< nuraft::cmd_result_code() >& func,
+    ReplServiceError set_priority(const replica_id_t& member, int32_t priority, uint64_t trace_id = 0);
+    nuraft::cmd_result_code retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
                                                      uint64_t trace_id = 0);
     bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
 
@@ -365,6 +370,11 @@ public:
      * Flush the durable commit LSN to the superblock
      */
     void flush_durable_commit_lsn();
+
+    /**
+     * Check the replace_member status, if the new member is fully synced up and ready to take over, remove the old member.
+     */
+    void check_replace_member_status();
 
     /**
      * \brief This method is called during restart to notify the upper layer

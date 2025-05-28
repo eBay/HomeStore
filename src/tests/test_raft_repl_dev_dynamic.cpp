@@ -13,6 +13,8 @@
  *
  *********************************************************************************/
 #include "test_common/raft_repl_test_base.hpp"
+#include <boost/uuid/random_generator.hpp>
+#include "common/homestore_config.hpp"
 
 // Dynamic tests spawn spare replica's also which can be used to add and remove from a repl dev.
 class ReplDevDynamicTest : public RaftReplDevTestBase {
@@ -38,11 +40,11 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
 
     g_helper->sync_for_test_start(num_members);
     if (g_helper->replica_num() < num_replicas) {
-        // With existing raft repl dev group, write IO's, validate and call start_replace_member on leader.
+        // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
 
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -56,13 +58,10 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
         LOGINFO("Validate all data written so far by reading them replica={}", g_helper->replica_num());
         this->validate_data();
     }
-
-    g_helper->sync_for_test_start(num_members);
-    LOGINFO("sync for completing replace member, replica={}", g_helper->replica_num());
-    complete_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
-
     g_helper->sync_for_verify_start(num_members);
-    LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
+    LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
+
+    //wait for background reaper thread to trigger complete_replace_member
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -114,7 +113,7 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         // Replace down replica 2 with spare replica 3 with commit quorum 1
         // so that leader can go ahead with replacing member.
         LOGINFO("Replace member started");
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 1 /* commit quorum*/);
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 1 /* commit quorum*/);
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
         LOGINFO("Leader completed num_io={}", num_io_entries);
     }
@@ -145,11 +144,11 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
     LOGINFO("TwoMemberDown test done replica={}", g_helper->replica_num());
 }
 
-TEST_F(ReplDevDynamicTest, OneMemberDown) {
+TEST_F(ReplDevDynamicTest, OutMemberDown) {
     // replica0(leader) and replica1 up, replica2 is down. Replace replica2 with replica3.
     // replica0 should be able to baseline resync to replica4(new member).
     // Write some IO's, replace a member, validate all members data except which is out.
-    LOGINFO("OneMemberDown test started replica={}", g_helper->replica_num());
+    LOGINFO("OutMemberDown test started replica={}", g_helper->replica_num());
     auto db = dbs_.back();
     auto num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
     auto num_members = SISL_OPTIONS["replicas"].as< uint32_t >() + SISL_OPTIONS["spare_replicas"].as< uint32_t >();
@@ -164,7 +163,7 @@ TEST_F(ReplDevDynamicTest, OneMemberDown) {
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
     if (g_helper->replica_num() == 0) {
-        // With existing raft repl dev group, write IO's, validate and call start_replace_member on leader.
+        // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
     }
@@ -173,7 +172,7 @@ TEST_F(ReplDevDynamicTest, OneMemberDown) {
     LOGINFO("Shutdown replica 2");
 
     if (g_helper->replica_num() == 0) {
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -188,30 +187,16 @@ TEST_F(ReplDevDynamicTest, OneMemberDown) {
         this->validate_data();
     }
 
-    //shutdown after becoming learner
+    // shutdown after becoming learner, in this case, the member_out won't remove replDev after restart.
     // this->shutdown_replica(2);
     // LOGINFO("Shutdown replica 2");
     // std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    g_helper->sync_for_test_start(num_members);
-    LOGINFO("sync for completing replace member, replica={}", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, member_out, member_in]() {
-        replica_member_info out{g_helper->replica_id(member_out), ""};
-        replica_member_info in{g_helper->replica_id(member_in), ""};
-        auto result = hs()->repl_service().complete_replace_member(db->repl_dev()->group_id(), out, in).get();
-        if (result.hasError()) {
-            ASSERT_EQ(result.error(), ReplServiceError::CANCELLED)
-                << "Unexpected error in replacing member, err=" << result.error();
-            LOGWARN("Error in completing replace member, err={}, will retry after 2s", result.error());
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            complete_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
-        }
-    });
-
-    LOGINFO("Replace member old leader done");
-
+    // data synced, waiting for removing learner
+    LOGINFO("data synced, sync for completing replace member, replica={}", g_helper->replica_num());
     g_helper->sync_for_verify_start(num_members);
-    LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
+    // Since the out_member stopped, it cannot response to remove_srv req, as a result the first time will get CANCELLED
+    // error, so waiting time is longer than other tests.
     if (g_helper->replica_num() == 2) {
         LOGINFO("Start replica 2");
         this->start_replica(2);
@@ -249,20 +234,21 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
 
     g_helper->sync_for_test_start(num_members);
 
-    if (g_helper->replica_num() != member_in) {
+    if (g_helper->replica_num() == member_out) {
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
-        // With existing raft repl dev group, write IO's, validate and call start_replace_member on leader.
+        // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
 
         // Leader will return error NOT_LEADER and yield leadership, sleep and connect again
         // to the new leader.
         LOGINFO("Replace old leader");
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
                        ReplServiceError::NOT_LEADER);
         LOGINFO("Replace member leader yield done");
-
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    if (g_helper->replica_num() != member_in) {
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         LOGINFO("Replace member old leader done");
     }
 
@@ -278,12 +264,8 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
         this->validate_data();
     }
 
-    g_helper->sync_for_test_start(num_members);
-    LOGINFO("sync for completing replace member, replica={}", g_helper->replica_num());
-    complete_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
-
     g_helper->sync_for_verify_start(num_members);
-    LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
+    LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -318,16 +300,16 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
 
     g_helper->sync_for_test_start(num_members);
     if (g_helper->replica_num() == 1) {
-        LOGINFO("Restart replica 1");
+        LOGINFO("Restart replica 1, ");
         this->restart_replica(15);
     }
 
     if (g_helper->replica_num() == 0) {
-        // With existing raft repl dev group, write IO's, validate and call start_replace_member on leader.
+        // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
 
-        start_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -342,12 +324,8 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
         this->validate_data();
     }
 
-    g_helper->sync_for_test_start(num_members);
-    LOGINFO("sync for completing replace member, replica={}", g_helper->replica_num());
-    complete_replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
-
     g_helper->sync_for_verify_start(num_members);
-    LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
+    LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -362,6 +340,60 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
 
     g_helper->sync_for_cleanup_start(num_members);
     LOGINFO("OneMemberRestart test done replica={}", g_helper->replica_num());
+}
+
+TEST_F(ReplDevDynamicTest, ValidateRequest) {
+    LOGINFO("ValidateRequest test started replica={}", g_helper->replica_num());
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.consensus.laggy_threshold = 0;
+        LOGINFO("setup consensus.laggy_threshold to {}", 0);
+        HS_SETTINGS_FACTORY().save();
+    });
+
+    auto db = dbs_.back();
+    auto num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
+    auto num_members = SISL_OPTIONS["replicas"].as< uint32_t >() + SISL_OPTIONS["spare_replicas"].as< uint32_t >();
+    uint64_t num_io_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
+
+    // Replace the last member in the group with index(num_replicas - 1) with a spare
+    // replica with index (num_replica). Member id's are 0,...,num_replicas-1, num_replicas,...,N
+    uint32_t member_out = num_replicas - 1;
+    uint32_t member_in = num_replicas;
+
+    g_helper->sync_for_test_start(num_members);
+
+    //shut down before replace member
+    this->shutdown_replica(1);
+    LOGINFO("Shutdown replica 1");
+
+    //wait for shutdown
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    g_helper->sync_for_verify_start(num_members);
+    if (g_helper->replica_num() == 0) {
+        // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
+        LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
+        this->write_on_leader(num_io_entries, true /* wait_for_commit */);
+    }
+    g_helper->sync_for_verify_start(num_members);
+    if (g_helper->replica_num() == 0) {
+        // generate uuid
+        replica_id_t fake_member_out = boost::uuids::random_generator()();
+        replica_id_t fake_member_in = boost::uuids::random_generator()();
+        LOGINFO("test SERVER_NOT_FOUND");
+        replace_member(db, fake_member_out, fake_member_in, 0, ReplServiceError::SERVER_NOT_FOUND);
+        LOGINFO("test replace_member already complete");
+        replace_member(db, fake_member_out, g_helper->replica_id(0));
+        LOGINFO("test QUORUM_NOT_MET", num_io_entries, g_helper->replica_num());
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
+                       ReplServiceError::QUORUM_NOT_MET);
+    }
+
+    if (g_helper->replica_num() == 1) {
+        LOGINFO("Start replica 1");
+        this->start_replica(1);
+    }
+    g_helper->sync_for_cleanup_start(num_members);
+    LOGINFO("ValidateRequest test done replica={}", g_helper->replica_num());
 }
 
 int main(int argc, char* argv[]) {

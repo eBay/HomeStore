@@ -476,9 +476,15 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     add_repl_dev(group_id, rdev);
 }
 
-AsyncReplResult<> RaftReplService::start_replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                                        const replica_member_info& member_in, uint32_t commit_quorum,
-                                                        uint64_t trace_id) const {
+// replace_member actually has two phases:
+// 1. start_replace_member: flip member_out to learner and add member_in.
+// 2. complete_replace_member: remove member_out.
+// In this function, it only invokes replDev start_replace_member. There is
+// a background reaper thread helps periodically check the member_in replication status, after in_member has caught up,
+// will trigger replDev complete_replace_member.
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                  const replica_member_info& member_in, uint32_t commit_quorum,
+                                                  uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
     incr_pending_request_num();
     auto rdev_result = get_repl_dev(group_id);
@@ -489,29 +495,6 @@ AsyncReplResult<> RaftReplService::start_replace_member(group_id_t group_id, con
 
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
         ->start_replace_member(member_out, member_in, commit_quorum, trace_id)
-        .via(&folly::InlineExecutor::instance())
-        .thenValue([this](auto&& e) mutable {
-            if (e.hasError()) {
-                decr_pending_request_num();
-                return make_async_error<>(e.error());
-            }
-            decr_pending_request_num();
-            return make_async_success<>();
-        });
-}
-
-AsyncReplResult<> RaftReplService::complete_replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                                           const replica_member_info& member_in, uint32_t commit_quorum,
-                                                           uint64_t trace_id) const {
-    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
-    incr_pending_request_num();
-    auto rdev_result = get_repl_dev(group_id);
-    if (!rdev_result) {
-        decr_pending_request_num();
-        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
-    }
-    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
-        ->complete_replace_member(member_out, member_in, commit_quorum, trace_id)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
             if (e.hasError()) {
@@ -576,12 +559,19 @@ void RaftReplService::start_reaper_thread() {
                 HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) { flush_durable_commit_lsn(); });
 
+            // Check replace_member sync status to see a new member is fully synced up and ready to remove the old member
+            m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
+                HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
+                nullptr, [this](void*) { check_replace_member_status(); });
+
+
             p.setValue();
         } else {
             // Cancel all recurring timers started
             iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
             iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
             iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true /* wait */);
+            iomanager.cancel_timer(m_replace_member_sync_check_timer_hdl, true /* wait */);
         }
     });
     std::move(f).get();
@@ -667,6 +657,14 @@ void RaftReplService::flush_durable_commit_lsn() {
         // FIXUP: is it safe to access rdev_parent here?
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
         rdev->flush_durable_commit_lsn();
+    }
+}
+
+void RaftReplService::check_replace_member_status() {
+    std::unique_lock lg(m_rd_map_mtx);
+    for (auto& rdev_parent : m_rd_map) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
+        rdev->check_replace_member_status();
     }
 }
 

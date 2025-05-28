@@ -52,6 +52,7 @@ private:
     iomgr::timer_handle_t m_rdev_fetch_timer_hdl;
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
+    iomgr::timer_handle_t m_replace_member_sync_check_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
     std::mutex raft_restart_mutex;
 
@@ -78,12 +79,9 @@ protected:
                                                          std::set< replica_id_t > const& members) override;
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
-    AsyncReplResult<> start_replace_member(group_id_t group_id, const replica_member_info& member_out,
+    AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
                                            const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                            uint64_t trace_id = 0) const override;
-    AsyncReplResult<> complete_replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                              const replica_member_info& member_in, uint32_t commit_quorum,
-                                              uint64_t trace_id = 0) const override;
 
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
@@ -97,6 +95,7 @@ private:
     void gc_repl_devs();
     void gc_repl_reqs();
     void flush_durable_commit_lsn();
+    void check_replace_member_status();
     void monitor_cert_changes();
     void restart_raft_svc(const std::string filepath, const bool deleted);
     bool wait_for_cert(const std::string& filepath);

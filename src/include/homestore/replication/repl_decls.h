@@ -36,14 +36,9 @@ VENUM(ReplServiceError, int32_t,
       NO_SPACE_LEFT = -20000,
       DRIVE_WRITE_ERROR = -20001,
       DATA_DUPLICATED = -20002,
-      QUIENCE_STATE = -20003, 
+      QUIENCE_STATE = -20003,
+      QUORUM_NOT_MET = -20004,
       FAILED = -32768);
-
-VENUM(PeerRole, uint8_t,
-      UNKNOWN = 0,
-      LEADER = 1,
-      FOLLOWER = 2,
-      LEARNER = 3);
 // clang-format on
 
 template < typename V, typename E >
@@ -87,10 +82,8 @@ struct peer_info {
     uint64_t last_succ_resp_us_ = 0;
     // The priority for leader election
     uint32_t priority_ = 0;
-    // The peer role in replication group
-    PeerRole role_ = PeerRole::UNKNOWN;
-    // If this peer is myself
-    bool is_self_ = false;
+    // Whether the peer can vote. If a peer is learner, this will be false. Hide the raft details.
+    bool can_vote = true;
 };
 
 struct replica_member_info {
