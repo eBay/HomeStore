@@ -79,7 +79,7 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService(){};
+SoloReplService::~SoloReplService() {};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -119,7 +119,7 @@ void SoloReplService::stop() {
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
                                                                       std::set< replica_id_t > const& members) {
-    superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
+    superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
     auto rdev = std::make_shared< SoloReplDev >(std::move(rd_sb), false /* load_existing */);
@@ -174,7 +174,7 @@ folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_
 }
 
 void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) {
-    superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
+    superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.load(buf, meta_cookie);
     HS_DBG_ASSERT_EQ(rd_sb->get_magic(), repl_dev_superblk::REPL_DEV_SB_MAGIC, "Invalid rdev metablk, magic mismatch");
     HS_DBG_ASSERT_EQ(rd_sb->get_version(), repl_dev_superblk::REPL_DEV_SB_VERSION, "Invalid version of rdev metablk");

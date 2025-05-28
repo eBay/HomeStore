@@ -78,6 +78,14 @@ struct repl_dev_superblk {
         rdev_name[max_name_len - 1] = '\0';
     }
 };
+
+struct solo_repl_dev_superblk : public repl_dev_superblk {
+    // Store the last 2 checkpoint lsn's where
+    // last_checkpoint_lsn_2 < last_checkpoint_lsn_1 < checkpoint_lsn
+    repl_lsn_t last_checkpoint_lsn_1{-1}; // LSN at last_checkpoint - 1
+    repl_lsn_t last_checkpoint_lsn_2{-1}; // LSN at last_checkpoint - 2
+};
+
 #pragma pack()
 
 template < class V = folly::Unit >
