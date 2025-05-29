@@ -1420,8 +1420,8 @@ void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
     m_listener->on_start_replace_member(members->replica_out, members->replica_in, rreq->traceID());
     // record the replace_member intent
     std::unique_lock lg{m_sb_mtx};
-    m_rd_sb->replace_member_ctx.replica_in = members->replica_out.id;
-    m_rd_sb->replace_member_ctx.replica_out = members->replica_in.id;
+    m_rd_sb->replace_member_ctx.replica_in = members->replica_in.id;
+    m_rd_sb->replace_member_ctx.replica_out = members->replica_out.id;
     m_rd_sb.write();
 }
 
@@ -1529,7 +1529,7 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
         if (p.id_ == m_my_repl_id) { continue; }
         if (p.replication_idx_ >= least_active_repl_idx) {
             res.insert(p.id_);
-            RD_LOGW(NO_TRACE_ID,
+            RD_LOGT(NO_TRACE_ID,
                     "Found active peer {}, lag {}, my lsn {}, peer lsn {}, least_active_repl_idx {}, laggy={}", p.id_,
                     my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_, least_active_repl_idx,
                     laggy);
@@ -1836,15 +1836,17 @@ void RaftReplDev::check_replace_member_status() {
     }
 
     auto peers = get_replication_status();
+    auto replica_in = m_rd_sb->replace_member_ctx.replica_in;
+    auto replica_out = m_rd_sb->replace_member_ctx.replica_out;
     repl_lsn_t in_lsn = 0;
     repl_lsn_t out_lsn = 0;
     repl_lsn_t laggy = HS_DYNAMIC_CONFIG(consensus.laggy_threshold);
 
     for (auto& peer : peers) {
-        if (peer.id_ == m_rd_sb->replace_member_ctx.replica_out) {
+        if (peer.id_ == replica_out) {
             out_lsn = peer.replication_idx_;
             RD_LOGD(NO_TRACE_ID, "Replica out {} with lsn {}", boost::uuids::to_string(peer.id_), out_lsn);
-        } else if (peer.id_ == m_rd_sb->replace_member_ctx.replica_in) {
+        } else if (peer.id_ == replica_in) {
             in_lsn = peer.replication_idx_;
             RD_LOGD(NO_TRACE_ID, "Replica in {} with lsn {}", boost::uuids::to_string(peer.id_), in_lsn);
         }
@@ -1854,33 +1856,29 @@ void RaftReplDev::check_replace_member_status() {
 
     if (!catch_up) {
         RD_LOGD(NO_TRACE_ID, "Checking replace member status, replica_in={} with lsn={}, replica_out={} with lsn={}",
-                boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_in), in_lsn,
-                boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_out), out_lsn);
+                boost::uuids::to_string(replica_in), in_lsn, boost::uuids::to_string(replica_out), out_lsn);
         return;
     }
 
-    RD_LOGD(
-        NO_TRACE_ID,
-        "Checking replace member status, new member has caught up, replica_in={} with lsn={}, replica_out={} with lsn={}",
-        boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_in), in_lsn,
-        boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_out), out_lsn);
+    RD_LOGD(NO_TRACE_ID,
+            "Checking replace member status, new member has caught up, replica_in={} with lsn={}, replica_out={} with "
+            "lsn={}",
+            boost::uuids::to_string(replica_in), in_lsn, boost::uuids::to_string(replica_out), out_lsn);
 
     trace_id_t trace_id = generateRandomTraceId();
 
     RD_LOGD(trace_id, "Trigger complete_replace_member, replica_in={}, replica_out={}",
-            boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_in),
-            boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_out));
+            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out));
 
-    replica_member_info out{m_rd_sb->replace_member_ctx.replica_in, ""};
-    replica_member_info in{m_rd_sb->replace_member_ctx.replica_out, ""};
+    replica_member_info out{replica_out, ""};
+    replica_member_info in{replica_in, ""};
     auto ret = complete_replace_member(out, in, 0, trace_id).get();
     if (ret.hasError()) {
         RD_LOGE(trace_id, "Failed to complete replace member, next time will retry it, error={}", ret.error());
         return;
     }
-    RD_LOGI(trace_id, "Complete replace member, next time will retry it, replica_in={}, replica_out={}",
-            boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_in),
-            boost::uuids::to_string(m_rd_sb->replace_member_ctx.replica_out))
+    RD_LOGI(trace_id, "Complete replace member, replica_in={}, replica_out={}",
+            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out))
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
