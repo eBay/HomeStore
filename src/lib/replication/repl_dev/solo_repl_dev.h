@@ -16,6 +16,7 @@
 
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <boost/intrusive_ptr.hpp>
+#include <boost/uuid/nil_generator.hpp>
 
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
@@ -61,12 +62,8 @@ public:
     bool is_leader() const override { return true; }
     replica_id_t get_leader_id() const override { return m_group_id; }
     std::vector< peer_info > get_replication_status() const override {
-        return std::vector< peer_info >{peer_info{.id_ = m_group_id,
-                                                  .replication_idx_ = 0,
-                                                  .last_succ_resp_us_ = 0,
-                                                  .priority_ = 1,
-                                                  .is_learner_ = false,
-                                                  .is_new_joiner_ = false}};
+        return std::vector< peer_info >{
+            peer_info{.id_ = m_group_id, .replication_idx_ = 0, .last_succ_resp_us_ = 0, .priority_ = 1}};
     }
     bool is_ready_for_traffic() const override { return true; }
     void purge() override {}

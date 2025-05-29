@@ -15,7 +15,7 @@
 #pragma once
 
 #include <boost/intrusive_ptr.hpp>
-
+#include <random>
 #include <homestore/replication/repl_decls.h>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
@@ -93,6 +93,13 @@ auto make_async_success(V v) {
 template < class V = folly::Unit >
 auto make_async_success() {
     return folly::makeSemiFuture< ReplResult< folly::Unit > >(folly::Unit{});
+}
+
+inline uint64_t generateRandomTraceId() {
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution< uint64_t > dis;
+    return dis(gen);
 }
 
 } // namespace homestore

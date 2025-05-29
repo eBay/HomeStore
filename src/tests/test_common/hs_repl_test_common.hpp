@@ -301,7 +301,8 @@ public:
 
             auto v = hs()->repl_service().create_repl_dev(repl_group_id, members).get();
             ASSERT_EQ(v.hasValue(), true)
-                << "Error in creating repl dev for group_id=" << boost::uuids::to_string(repl_group_id).c_str();
+                << "Error in creating repl dev for group_id=" << boost::uuids::to_string(repl_group_id).c_str()
+                << ", err=" << v.error();
             auto& raftService = dynamic_cast< RaftReplService& >(hs()->repl_service());
             auto follower_priority = raftService.compute_raft_follower_priority();
             auto repl_dev = v.value();

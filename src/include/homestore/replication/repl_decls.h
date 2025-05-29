@@ -36,7 +36,8 @@ VENUM(ReplServiceError, int32_t,
       NO_SPACE_LEFT = -20000,
       DRIVE_WRITE_ERROR = -20001,
       DATA_DUPLICATED = -20002,
-      QUIENCE_STATE = -20003, 
+      QUIENCE_STATE = -20003,
+      QUORUM_NOT_MET = -20004,
       FAILED = -32768);
 // clang-format on
 
@@ -76,15 +77,13 @@ struct peer_info {
     // Peer ID.
     replica_id_t id_;
     // The last replication index that the peer has, from this server's point of view.
-    uint64_t replication_idx_;
+    uint64_t replication_idx_ = 0;
     // The elapsed time since the last successful response from this peer, set to 0 on leader
-    uint64_t last_succ_resp_us_;
+    uint64_t last_succ_resp_us_ = 0;
     // The priority for leader election
-    uint32_t priority_;
-    // The peer is learner or not
-    bool is_learner_;
-    // The peer is new joiner or not
-    bool is_new_joiner_;
+    uint32_t priority_ = 0;
+    // Whether the peer can vote. If a peer is learner, this will be false. Hide the raft details.
+    bool can_vote = true;
 };
 
 struct replica_member_info {
