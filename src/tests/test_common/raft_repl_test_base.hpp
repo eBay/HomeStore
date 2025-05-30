@@ -48,7 +48,7 @@
 using namespace homestore;
 
 SISL_LOGGING_DEF(test_raft_repl_dev)
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS, nuraft_mesg)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS, nuraft_mesg, nuraft)
 
 SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",
@@ -344,8 +344,13 @@ public:
         }
         return blk_alloc_hints{};
     }
-    void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {
-        LOGINFO("[Replica={}] replace member out {} in {}", g_helper->replica_num(),
+    void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
+        LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
+                boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+    }
+
+    void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
+        LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
@@ -740,17 +745,17 @@ public:
     void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in,
                         uint32_t commit_quorum = 0, ReplServiceError error = ReplServiceError::OK) {
         this->run_on_leader(db, [this, error, db, member_out, member_in, commit_quorum]() {
-            LOGINFO("Replace member out={} in={}", boost::uuids::to_string(member_out),
+            LOGINFO("Start replace member out={} in={}", boost::uuids::to_string(member_out),
                     boost::uuids::to_string(member_in));
 
             replica_member_info out{member_out, ""};
             replica_member_info in{member_in, ""};
             auto result = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
             if (error == ReplServiceError::OK) {
-                ASSERT_EQ(result.hasError(), false) << "Error in replacing member";
+                ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
             } else {
-                ASSERT_EQ(result.hasError(), true) << "Error in replacing member";
-                ASSERT_EQ(result.error(), error);
+                ASSERT_EQ(result.hasError(), true);
+                ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
             }
         });
     }

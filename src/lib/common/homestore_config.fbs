@@ -250,7 +250,8 @@ table Consensus {
     stale_log_gap_lo_threshold: int32 = 30;
 
     // Minimum log gap a replica has to be from leader before joining the replica set.
-    min_log_gap_to_join: int32 = 2147483647;
+    // 0 indicates the new member will join in cluster immediately.
+    min_log_gap_to_join: int32 = 0;
     
     // amount of time in millis to wait on data write before fetch data from remote;
     wait_data_write_timer_ms: uint64 = 1500 (hotswap);
@@ -290,6 +291,15 @@ table Consensus {
     // then decay the target_priority and wait again until its priority >= target_priority. This setting helps us to set proper priority for peers.
     // 0 means all members have the same priority.
     max_wait_rounds_of_priority_election: uint32 = 2;
+
+    // Maximum number of retries when raft is undergoing config changing
+    config_changing_error_retries: int32 = 3;
+
+    // The time to wait for config change to be applied in ms
+    wait_for_config_change_ms: uint32 = 500;
+
+    // The interval in ms to check if the new member in replace_member is fully synced and ready to take over
+    replace_member_sync_check_interval_ms: uint64 = 60000;
 }
 
 table HomeStoreSettings {

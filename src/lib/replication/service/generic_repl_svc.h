@@ -90,8 +90,11 @@ public:
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
     AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                     uint64_t trace_id = 0) const override;
+                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                           uint64_t trace_id = 0) const override;
+    AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
+                                        uint32_t commit_quorum, bool wait_and_verify = true,
+                                        uint64_t trace_id = 0) const override;
 };
 
 class SoloReplServiceCPHandler : public CPCallbacks {

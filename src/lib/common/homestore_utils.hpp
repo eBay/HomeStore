@@ -53,4 +53,8 @@ public:
     static bool topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
                                  std::vector< std::string >& ordered_entries);
 };
+
+static bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms,
+                           uint32_t interval_ms = 100);
+
 } // namespace homestore
