@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.14.0"
+    version = "6.14.1"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -59,6 +59,9 @@ class HomestoreConan(ConanFile):
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
             self.requires("isa-l/2.30.0", transitive_headers=True)
+
+        # Tests require OpenSSL 3.x
+        self.requires("openssl/[^3.1]", override=True)
 
     def imports(self):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
