@@ -133,7 +133,8 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     test_common::HSTestHelper m_helper;
 };
 
-using BtreeTypes = testing::Types< FixedLenBtree, PrefixIntervalBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
+using BtreeTypes =
+    testing::Types< FixedLenBtree, PrefixIntervalBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -200,7 +201,7 @@ TYPED_TEST(BtreeTest, TriggerCacheEviction) {
         s.resource_limits.cache_size_percent = 1u;
         HS_SETTINGS_FACTORY().save();
     });
-    
+
     this->restart_homestore();
 
     LOGINFO("TriggerCacheEviction test start");
@@ -532,6 +533,8 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
                 this->m_bt->count_keys(this->m_bt->root_node_id()));
         BtreeTestHelper< TestType >::TearDown();
         m_helper.shutdown_homestore(false);
+        this->m_bt.reset();
+        log_obj_life_counter();
     }
 
 private:
@@ -561,6 +564,10 @@ int main(int argc, char* argv[]) {
     if (SISL_OPTIONS.count("seed")) {
         auto seed = SISL_OPTIONS["seed"].as< uint64_t >();
         LOGINFO("Using seed {} to sow the random generation", seed);
+        g_re.seed(seed);
+    } else {
+        auto seed = std::chrono::system_clock::now().time_since_epoch().count();
+        LOGINFO("No seed provided. Using randomly generated seed: {}", seed);
         g_re.seed(seed);
     }
     auto ret = RUN_ALL_TESTS();

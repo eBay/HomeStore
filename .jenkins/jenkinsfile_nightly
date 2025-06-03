@@ -55,10 +55,10 @@ pipeline {
                             find /home/jenkins -type f -wholename '*/test_data_service' -exec cp {} .jenkins/test_data_service \\;
                             find /home/jenkins -type f -wholename '*/test_raft_repl_dev' -exec cp {} .jenkins/test_raft_repl_dev \\;
                             find /home/jenkins -type f -wholename '*/test_solo_repl_dev' -exec cp {} .jenkins/test_solo_repl_dev \\;
-                            find /home/jenkins -type f -wholename '*/scripts/index_test.py' -exec install -Dm755 {} .jenkins/index_test.py \\;
-                            find /home/jenkins -type f -wholename '*/scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\;
-                            find /home/jenkins -type f -wholename '*/scripts/data_test.py' -exec install -Dm755 {} .jenkins/data_test.py \\;
-                            find /home/jenkins -type f -wholename '*/scripts/long_running.py' -exec install -Dm755 {} .jenkins/long_running.py \\;
+                            find /home/jenkins -type f -wholename '*/test_scripts/index_test.py' -exec install -Dm755 {} .jenkins/index_test.py \\;
+                            find /home/jenkins -type f -wholename '*/test_scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\;
+                            find /home/jenkins -type f -wholename '*/test_scripts/data_test.py' -exec install -Dm755 {} .jenkins/data_test.py \\;
+                            find /home/jenkins -type f -wholename '*/test_scripts/long_running.py' -exec install -Dm755 {} .jenkins/long_running.py \\;
                         '''
                     }
                     post {
