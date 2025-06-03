@@ -89,6 +89,21 @@ private:
             }
         }
 
+        int compare(BtreeKey const& key, BtreeValue const& val) const {
+            if constexpr (std::is_base_of_v< BtreeIntervalKey, K > && std::is_base_of_v< BtreeIntervalValue, V >) {
+                sisl::blob const kblob = s_cast< K const& >(key).serialize_prefix();
+                sisl::blob const vblob = s_cast< V const& >(val).serialize_prefix();
+                DEBUG_ASSERT_EQ(kblob.size(), key_size(), "Prefix key size mismatch with serialized prefix size");
+                DEBUG_ASSERT_EQ(vblob.size(), value_size(), "Prefix value size mismatch with serialized prefix size");
+                uint8_t const* cur_ptr = r_cast< uint8_t const* >(this) + sizeof(prefix_entry);
+                int cmp = std::memcmp(cur_ptr, kblob.cbytes(), kblob.size());
+                if (cmp) { return cmp; }
+                cmp = std::memcmp(cur_ptr + kblob.size(), vblob.cbytes(), vblob.size());
+                return cmp;
+            }
+            return 0;
+        }
+
         sisl::blob key_buf() const {
             return sisl::blob{r_cast< uint8_t const* >(this) + sizeof(prefix_entry), key_size()};
         }
@@ -239,6 +254,10 @@ public:
                     }
                     V new_val{s_cast< V const& >(val)};
                     new_val.shift(s_cast< K const& >(cur_key).distance(first_input_key), app_ctx);
+                    if(get_prefix_entry_c(prefix_slot)->compare(cur_key, new_val)) {
+                        LOGTRACEMOD(btree, "Adding new prefix entry for key={} val={}", cur_key.to_string(), new_val.to_string());
+                        prefix_slot = add_prefix(cur_key, new_val);
+                    }
                     write_suffix(idx, prefix_slot, cur_key, new_val);
                 }
 
@@ -317,6 +336,7 @@ public:
 
     ///////////////////////////// All overrides of BtreeNode ///////////////////////////////////
     void get_nth_key_internal(uint32_t idx, BtreeKey& out_key, bool) const override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
         suffix_entry const* sentry = get_suffix_entry_c(idx);
         prefix_entry const* pentry = get_prefix_entry_c(sentry->prefix_slot);
         DEBUG_ASSERT(prefix_bitset_.is_bit_set(sentry->prefix_slot),
@@ -360,7 +380,13 @@ public:
                 this->available_size());
     }
 
-    bool has_room_for_put(btree_put_type, uint32_t, uint32_t) const override { return has_room(1u); }
+    bool has_room_for_put(btree_put_type, uint32_t, uint32_t) const override {
+#ifdef _PRERELEASE
+        auto max_keys = this->max_keys_in_node();
+        if (max_keys && this->total_entries() > max_keys) { return false; }
+#endif
+        return has_room(1u);
+    }
 
     uint32_t get_nth_key_size(uint32_t) const override { return dummy_key< K >.serialized_size(); }
 
@@ -575,6 +601,14 @@ public:
     uint32_t copy_internal(BtreeConfig const& cfg, BtreeNode const& o, uint32_t start_idx, bool by_size,
                            uint32_t limit) {
         FixedPrefixNode const& src_node = s_cast< FixedPrefixNode const& >(o);
+#ifdef _PRERELEASE
+        if (by_size) {
+            const uint32_t max_keys = this->max_keys_in_node();
+            if (max_keys) {
+                if (this->total_entries() + limit > max_keys) { limit = max_keys - this->total_entries(); }
+            }
+        }
+#endif
 
         // Adjust the size_to_move to cover the new node's reqd header space.
         uint32_t copied_size{0};
@@ -815,8 +849,8 @@ private:
 
     //////////////////////// All Helper methods section ////////////////////////
     static uint32_t reqd_bitset_size(BtreeConfig const& cfg) {
-        return sisl::round_up((cfg.node_data_size() - sizeof(prefix_node_header)) /
-                                  (prefix_entry::key_size() + prefix_entry::value_size()) / 8,
+        return sisl::round_up((cfg.node_data_size() - sizeof(prefix_node_header) - suffix_entry::size()) /
+                                  prefix_entry::size() / 8,
                               sisl::CompactBitSet::size_multiples());
     }
 
