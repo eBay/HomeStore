@@ -353,7 +353,7 @@ public:
         auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
         auto on_complete = [&](auto success) {
             HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
-            LOGINFO("CP Flush completed");
+            LOGDEBUG("CP Flush completed");
         };
 
         if (wait) {
