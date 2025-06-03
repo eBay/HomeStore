@@ -107,7 +107,7 @@ struct NodeTest : public testing::Test {
         }
     }
 
-    void put_range(uint32_t k, uint32_t count) {
+    void put_range(uint64_t k, uint32_t count) {
         btree_put_type put_type;
         if constexpr (!std::is_same_v< V, TestIntervalValue >) {
             // For non-interval values we support only update, so we need to first put the value
@@ -375,6 +375,12 @@ TYPED_TEST(NodeTest, SimpleInsert) {
     }
     this->m_node1->move_out_to_right_by_entries(this->m_cfg, *this->m_node2, 20);
     this->m_node1->copy_by_entries(this->m_cfg, *this->m_node2, 0, std::numeric_limits< uint32_t >::max());
+}
+
+TYPED_TEST(NodeTest, RangeChangeInsert) {
+    if (this->m_node1->get_node_type() != btree_node_type::PREFIX) {return;}
+    this->put_range(0xFFFFFFFF - 10,20);
+    this->print();
 }
 
 TYPED_TEST(NodeTest, ReverseInsert) {

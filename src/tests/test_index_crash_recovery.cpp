@@ -112,15 +112,16 @@ public:
     OperationList generateOperations(size_t numOperations, bool reset = false) {
         std::vector< Operation > operations;
         if (reset) { this->reset(); }
-        if(putFreq_ == 100 &&  end_range_ - start_range_ + 1 - in_use_key_cnt_.load() < numOperations) {
-            LOGDEBUG("All keys are in use, skipping operation generation. end_range_ {} start_range_ {} in_use_key_cnt_ {}, numOperations {}",
+        if (putFreq_ == 100 && end_range_ - start_range_ + 1 - in_use_key_cnt_.load() < numOperations) {
+            LOGDEBUG("All keys are in use, skipping operation generation. end_range_ {} start_range_ {} "
+                     "in_use_key_cnt_ {}, numOperations {}",
                      end_range_, start_range_, in_use_key_cnt_.load(), numOperations);
-            return operations;    
+            return operations;
         }
-        if(removeFreq_ == 100 && in_use_key_cnt_.load() < numOperations) {
+        if (removeFreq_ == 100 && in_use_key_cnt_.load() < numOperations) {
             LOGDEBUG("Not enough keys are in use, skipping operation generation. in_use_key_cnt_ {} numOperations {}",
                      in_use_key_cnt_.load(), numOperations);
-            return operations;    
+            return operations;
         }
 
         while (operations.size() < numOperations) {
@@ -536,7 +537,8 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
     void long_running_crash(long_running_crash_options const& crash_test_options) {
         // set putFreq 100 for the initial load
-        SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, crash_test_options.num_entries - 1 /*end_range*/);
+        SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/,
+                                    crash_test_options.num_entries - 1 /*end_range*/);
 
         std::vector< std::string > flips;
         OperationList operations;
@@ -561,9 +563,11 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_0.txt"));
         } else {
             operations = generator.generateOperations(crash_test_options.preload_size, true /* reset */);
-            if (crash_test_options.save_mode) { SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations); }
+            if (crash_test_options.save_mode) {
+                SequenceGenerator::save_to_file(fmt::format("/tmp/operations_0.txt"), operations);
+            }
         }
-        
+
         LOGDEBUG("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
         uint32_t num_keys{0};
 
@@ -583,8 +587,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         // this->print_keys("reapply: after preload");
         this->visualize_keys("tree_after_preload.dot");
 
-        for (uint32_t round = 1;
-            round <= crash_test_options.rounds && !time_to_stop(); round++) {
+        for (uint32_t round = 1; round <= crash_test_options.rounds && !time_to_stop(); round++) {
             LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, crash_test_options.rounds);
             bool print_time = false;
             elapsed_time = get_elapsed_time_sec(m_start_time);
@@ -592,12 +595,13 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             if (crash_test_options.load_mode) {
                 operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
             } else {
-                operations = generator.generateOperations(crash_test_options.num_entries_per_rounds, renew_btree_after_crash /* reset */);
+                operations = generator.generateOperations(crash_test_options.num_entries_per_rounds,
+                                                          renew_btree_after_crash /* reset */);
                 if (crash_test_options.save_mode) {
                     SequenceGenerator::save_to_file(fmt::format("/tmp/operations_{}.txt", round), operations);
                 }
             }
-            if(operations.empty()) {
+            if (operations.empty()) {
                 LOGDEBUG("No operations generated, skipping round {}", round);
                 continue;
             }
@@ -624,7 +628,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                             flips.emplace_back(flip);
                         }
                         auto log_str = fmt::format("Step 1-{}: Set flag", round);
-                        for(auto const& f : flips) {
+                        for (auto const& f : flips) {
                             log_str += fmt::format(" {}", f);
                             this->set_basic_flip(f, 1, 100);
                         }
@@ -634,14 +638,16 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                 file.close();
             } else {
                 if (dis(g_re) <= flip_percentage) {
-                    if(!crash_test_options.put_flips.empty()) {
-                        flips.emplace_back(crash_test_options.put_flips[cur_put_flip_idx++ % crash_test_options.put_flips.size()]);
+                    if (!crash_test_options.put_flips.empty()) {
+                        flips.emplace_back(
+                            crash_test_options.put_flips[cur_put_flip_idx++ % crash_test_options.put_flips.size()]);
                     }
-                    if(!crash_test_options.remove_flips.empty()) {
-                        flips.emplace_back(crash_test_options.remove_flips[cur_remove_flip_idx++ % crash_test_options.remove_flips.size()]);
+                    if (!crash_test_options.remove_flips.empty()) {
+                        flips.emplace_back(crash_test_options.remove_flips[cur_remove_flip_idx++ %
+                                                                           crash_test_options.remove_flips.size()]);
                     }
                     auto log_str = fmt::format("Step 1-{}: Set flag", round);
-                    for(auto const& f : flips) {
+                    for (auto const& f : flips) {
                         log_str += fmt::format(" {}", f);
                         this->set_basic_flip(f, 1, 100);
                     }
@@ -667,12 +673,12 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     file.close();
                 }
             }
-            
+
             LOGDEBUG("Lets before crash print operations\n{}", SequenceGenerator::printOperations(operations));
-            
+
             for (auto [k, op] : operations) {
                 if (op == OperationType::Remove) {
-                    if(num_keys < 1) {
+                    if (num_keys < 1) {
                         // remove flips and continue
                         for (auto const& flip : flips) {
                             this->remove_flip(flip);
@@ -719,11 +725,12 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                 print_time = true;
             }
             if (print_time) {
-                LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
-                        "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
-                        round, crash_test_options.rounds, round * 100.0 / crash_test_options.rounds, elapsed_time, this->m_run_time,
-                        elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), crash_test_options.num_entries,
-                        this->tree_key_count() * 100.0 / crash_test_options.num_entries);
+                LOGINFO(
+                    "\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
+                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
+                    round, crash_test_options.rounds, round * 100.0 / crash_test_options.rounds, elapsed_time,
+                    this->m_run_time, elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(),
+                    crash_test_options.num_entries, this->tree_key_count() * 100.0 / crash_test_options.num_entries);
             }
             // this->print_keys(fmt::format("reapply: after round {}", round));
             if (renew_btree_after_crash) { this->reset_btree(); };
@@ -737,7 +744,7 @@ protected:
 };
 
 // Crash recovery can test one simple btree, since focus is not on btree test itself, but index recovery
-using BtreeTypes = testing::Types< FixedLenBtree >;
+using BtreeTypes = testing::Types< FixedLenBtree, PrefixIntervalBtree >;
 TYPED_TEST_SUITE(IndexCrashTest, BtreeTypes);
 
 TYPED_TEST(IndexCrashTest, CrashBeforeFirstCp) {
@@ -856,7 +863,7 @@ TYPED_TEST(IndexCrashTest, long_running_put_remove_crash) {
     long_running_crash_options crash_test_options{
         .put_freq = 50,
         .put_flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
-            "crash_flush_on_split_at_right_child"},
+                      "crash_flush_on_split_at_right_child"},
         .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
                          /*, "crash_flush_on_freed_child"*/},
     };
