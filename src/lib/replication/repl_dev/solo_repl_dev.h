@@ -18,6 +18,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/uuid/nil_generator.hpp>
 
+#include <iomgr/iomgr.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
 #include <homestore/logstore/log_store.hpp>
@@ -28,17 +29,28 @@
 namespace homestore {
 class CP;
 
+#pragma pack(1)
+
+struct solo_repl_dev_superblk : public repl_dev_superblk {
+    // Store the last 2 checkpoint lsn's where
+    // last_checkpoint_lsn_2 < last_checkpoint_lsn_1 < checkpoint_lsn
+    repl_lsn_t last_checkpoint_lsn_1{-1}; // LSN at last_checkpoint - 1
+    repl_lsn_t last_checkpoint_lsn_2{-1}; // LSN at last_checkpoint - 2
+};
+
+#pragma pack()
+
 class SoloReplDev : public ReplDev {
 private:
     logdev_id_t m_logdev_id;
     std::shared_ptr< HomeLogStore > m_data_journal{nullptr};
-    superblk< repl_dev_superblk > m_rd_sb;
+    superblk< solo_repl_dev_superblk > m_rd_sb;
     uuid_t m_group_id;
     std::atomic< logstore_seq_num_t > m_commit_upto{-1};
     std::atomic< bool > m_is_recovered{false};
 
 public:
-    SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing);
+    SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~SoloReplDev() = default;
 
     virtual std::error_code alloc_blks(uint32_t data_size, const blk_alloc_hints& hints,
@@ -94,6 +106,7 @@ public:
     void cp_cleanup(CP* cp);
 
     void destroy();
+    void truncate();
 
 private:
     void write_journal(repl_req_ptr_t rreq);

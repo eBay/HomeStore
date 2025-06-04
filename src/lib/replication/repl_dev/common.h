@@ -78,6 +78,7 @@ struct repl_dev_superblk {
         rdev_name[max_name_len - 1] = '\0';
     }
 };
+
 #pragma pack()
 
 template < class V = folly::Unit >

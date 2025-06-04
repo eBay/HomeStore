@@ -1,3 +1,4 @@
+#include <latch>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "replication/repl_dev/common.h"
@@ -6,9 +7,13 @@
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_assert.hpp"
+#include "common/homestore_config.hpp"
+#include <iomgr/iomgr_flip.hpp>
+
+SISL_LOGGING_DECL(solorepl)
 
 namespace homestore {
-SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing) :
+SoloReplDev::SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_existing) :
         m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->group_id} {
     if (load_existing) {
         m_logdev_id = m_rd_sb->logdev_id;
@@ -21,11 +26,13 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
                 m_data_journal->register_log_found_cb(bind_this(SoloReplDev::on_log_found, 3));
                 m_is_recovered = true;
             });
+        m_commit_upto = m_rd_sb->durable_commit_lsn;
     } else {
         m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::TIMER);
         m_data_journal = logstore_service().create_new_log_store(m_logdev_id, true /* append_mode */);
         m_rd_sb->logstore_id = m_data_journal->get_store_id();
         m_rd_sb->logdev_id = m_logdev_id;
+        m_rd_sb->checkpoint_lsn = -1;
         m_rd_sb.write();
         m_is_recovered = true;
     }
@@ -134,13 +141,13 @@ folly::Future< std::error_code > SoloReplDev::async_write(const std::vector< Mul
     }
 
     return folly::collectAllUnsafe(futs).thenValue([this](auto&& v_res) {
+        decr_pending_request_num();
         for (const auto& err_c : v_res) {
             if (sisl_unlikely(err_c.value())) {
                 return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::io_error));
             }
         }
 
-        decr_pending_request_num();
         return folly::makeFuture< std::error_code >(std::error_code{});
     });
 }
@@ -195,6 +202,10 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     auto cur_lsn = m_commit_upto.load();
     if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
+    for (const auto& blkid : blkids) {
+        data_service().commit_blk(blkid);
+    }
+
     m_listener->on_commit(lsn, header, key, blkids, nullptr);
 }
 
@@ -224,11 +235,34 @@ uint32_t SoloReplDev::get_blk_size() const { return data_service().get_blk_size(
 void SoloReplDev::cp_flush(CP*) {
     auto lsn = m_commit_upto.load();
     m_rd_sb->durable_commit_lsn = lsn;
+    // Store the LSN's for last 3 checkpoints
+    m_rd_sb->last_checkpoint_lsn_2 = m_rd_sb->last_checkpoint_lsn_1;
+    m_rd_sb->last_checkpoint_lsn_1 = m_rd_sb->checkpoint_lsn;
     m_rd_sb->checkpoint_lsn = lsn;
+    HS_LOG(TRACE, solorepl, "dev={} cp flush cp_lsn={} cp_lsn_1={} cp_lsn_2={}", boost::uuids::to_string(group_id()),
+           lsn, m_rd_sb->last_checkpoint_lsn_1, m_rd_sb->last_checkpoint_lsn_2);
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
+void SoloReplDev::truncate() {
+    // Ignore truncate when HS is initializing. And we need atleast 3 checkpoints to start truncating.
+
+    if (homestore::hs()->is_initializing() || m_rd_sb->last_checkpoint_lsn_2 <= 0) { return; }
+
+    // Truncate is safe anything below last_checkpoint_lsn - 2 as all the free blks
+    // before that will be flushed in the last_checkpoint.
+    HS_LOG(TRACE, solorepl, "dev={} truncating at lsn={}", boost::uuids::to_string(group_id()),
+           m_rd_sb->last_checkpoint_lsn_2);
+    m_data_journal->truncate(m_rd_sb->last_checkpoint_lsn_2);
+}
+
+void SoloReplDev::cp_cleanup(CP*) {
+#ifdef _PRERELEASE
+    if (iomgr_flip::instance()->test_flip("solo_repl_dev_manual_truncate")) { return; }
+#endif
+    // cp_cleanup is called after all components' CP flush is done.
+    // We call truncate during cp clean up.
+    truncate();
 }
 
 } // namespace homestore
