@@ -291,6 +291,131 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
     this->query_all();
 }
 
+TYPED_TEST(BtreeTest, SimpleTombstone) {
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < 20; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    this->move_to_tombstone(10, btree_status_t::success);
+    this->move_to_tombstone(10, btree_status_t::filtered_out);
+    this->move_to_tombstone(40, btree_status_t::not_found);
+}
+
+TYPED_TEST(BtreeTest, SimpleMultiTombstone) {
+    if constexpr (std::is_same_v< TypeParam, PrefixIntervalBtreeTest >) { return; }
+    uint32_t start_key = 500;
+    uint32_t end_key = 1000;
+    LOGDEBUG("Step 1: Do forward sequential insert for [{},{}] entries", start_key, end_key);
+    for (uint32_t i{start_key}; i <= end_key; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    std::vector< std::pair< typename TypeParam::KeyType, typename TypeParam::ValueType > > out;
+    auto format_tombstoned = [](const auto& out) {
+        std::stringstream ss;
+        for (const auto& [k, v] : out) {
+            ss << "[" << k.to_string() << "] =" << v.to_string() << std::endl;
+        }
+        return ss.str();
+    };
+    auto run_and_validate_tombstone = [&](auto s, auto e, auto expect_status, auto expected_size) {
+        this->move_to_tombstone(s, e, out, expect_status);
+        LOGDEBUG("Tombstoned {} keys:\n{}", out.size(), format_tombstoned(out));
+        ASSERT_EQ(out.size(), expected_size) << "Tombstoned keys should be " << expected_size << ", but got "
+                                             << out.size() << " keys in range [" << s << ", " << e << "]";
+    };
+    auto sum_tombstoned = 0;
+    {
+        run_and_validate_tombstone(0, start_key - 100, btree_status_t::not_found, 0);
+        run_and_validate_tombstone(end_key + 100, end_key + 2000, btree_status_t::not_found, 0);
+    }
+    {
+        run_and_validate_tombstone(start_key - 100, start_key, btree_status_t::success, 1);
+        run_and_validate_tombstone(start_key - 100, start_key, btree_status_t::success, 0);
+        sum_tombstoned += 1;
+    }
+    {
+        run_and_validate_tombstone(start_key + 20, start_key + 40, btree_status_t::success, 21);
+        run_and_validate_tombstone(start_key + 20, start_key + 40, btree_status_t::success, 0);
+        run_and_validate_tombstone(start_key + 20, start_key + 41, btree_status_t::success, 1);
+        run_and_validate_tombstone(start_key + 45, start_key + 50, btree_status_t::success, 6);
+        run_and_validate_tombstone(start_key + 20, start_key + 60, btree_status_t::success, 41 - 28);
+        sum_tombstoned += 21 + 1 + 6 + (41 - 28);
+    }
+
+    {
+        run_and_validate_tombstone(end_key, end_key + 1000, btree_status_t::success, 1);
+        run_and_validate_tombstone(end_key, end_key + 1000, btree_status_t::success, 0);
+        sum_tombstoned += 1;
+    }
+    {
+        run_and_validate_tombstone(0, end_key + 1000, btree_status_t::success,
+                                   end_key - start_key - sum_tombstoned + 1);
+        run_and_validate_tombstone(0, end_key + 1000, btree_status_t::success, 0);
+    }
+    this->range_remove_existing(start_key, end_key - start_key + 1);
+    ASSERT_EQ(this->m_bt->count_keys(), 0);
+    // creating two intervals
+    uint32_t start_key1 = 1000;
+    uint32_t end_key1 = 1999;
+    uint32_t start_key2 = 3000;
+    uint32_t end_key2 = 3999;
+    sum_tombstoned = 0;
+    for (uint32_t i{start_key1}; i <= end_key1; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    for (uint32_t i{start_key2}; i <= end_key2; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    {
+        run_and_validate_tombstone(start_key1 + 100, end_key2 + 100, btree_status_t::success, 1900);
+        run_and_validate_tombstone(start_key1 + 100, end_key2 + 100, btree_status_t::success, 0);
+    }
+}
+
+TYPED_TEST(BtreeTest, SimpleGC) {
+    if constexpr (std::is_same_v< TypeParam, PrefixIntervalBtreeTest >) { return; }
+    uint32_t start_key1 = 1000;
+    uint32_t end_key1 = 1999;
+    uint32_t start_key2 = 3000;
+    uint32_t end_key2 = 3999;
+    std::vector< std::pair< typename TypeParam::KeyType, typename TypeParam::ValueType > > out;
+    for (uint32_t i{start_key1}; i <= end_key1; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    for (uint32_t i{start_key2}; i <= end_key2; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+    this->print_keys(" Before tombstone ");
+    auto start_tombstone = start_key1 + 100;
+    auto end_tombstone = end_key1 - 100;
+    auto expected_size = end_key1 - 200 - start_key1 + 1;
+    this->move_to_tombstone(start_tombstone, end_tombstone, out, btree_status_t::success);
+    ASSERT_EQ(out.size(), expected_size) << "Tombstoned keys should be " << expected_size << ", but got " << out.size()
+                                         << " keys in range [" << start_tombstone << ", " << end_tombstone << "]";
+
+    this->print_keys(fmt::format(" After tombstone [{},{}] ", start_tombstone, end_tombstone));
+    LOGINFO("Step 2: Do GC on the tree for keys in range [{}, {}]", start_key1, end_key2);
+    this->remove_tombstone(start_key1, end_key2, out, btree_status_t::success);
+    expected_size = end_key2 - start_key1 + 1 - 1000 - expected_size;
+    ASSERT_EQ(out.size(), expected_size) << "# of keys after GCs hould be " << expected_size << ", but got "
+                                         << out.size() << " keys in range [" << start_key1 << ", " << end_key2 << "]";
+    auto format_tombstoned = [](const auto& out) {
+        std::stringstream ss;
+        for (const auto& [k, v] : out) {
+            ss << "[" << k.to_string() << "] =" << v.to_string() << std::endl;
+        }
+        return ss.str();
+    };
+
+    this->print_keys(fmt::format(" After GC {} entries are still in range [{},{}] ", out.size(), start_key1, end_key2));
+    LOGDEBUG("GC {} keys:\n{}", out.size(), format_tombstoned(out));
+    this->remove_tombstone(start_key1, end_key2, out, btree_status_t::not_found);
+    ASSERT_EQ(out.size(), expected_size) << "After GC, no keys should be left in range [" << start_key1 << ", "
+                                         << end_key2 << "] but got " << out.size();
+    LOGDEBUG("GC {} keys:\n{}", out.size(), format_tombstoned(out));
+}
+
 template < typename TestType >
 struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
