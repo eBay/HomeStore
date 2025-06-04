@@ -126,12 +126,10 @@ public:
         if (is_stopping()) return btree_status_t::stopping;
         incr_pending_request_num();
         auto ret = btree_status_t::success;
-        do {
-            auto cpg = cp_mgr().cp_guard();
-            put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-            ret = Btree< K, V >::put(put_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying put"); }
-        } while (ret == btree_status_t::cp_mismatch);
+        auto cpg = cp_mgr().cp_guard();
+        put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
+        ret = Btree< K, V >::put(put_req);
+        if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying put"); }
         decr_pending_request_num();
         return ret;
     }
@@ -141,12 +139,10 @@ public:
         if (is_stopping()) return btree_status_t::stopping;
         incr_pending_request_num();
         auto ret = btree_status_t::success;
-        do {
-            auto cpg = cp_mgr().cp_guard();
-            remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-            ret = Btree< K, V >::remove(remove_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove"); }
-        } while (ret == btree_status_t::cp_mismatch);
+        auto cpg = cp_mgr().cp_guard();
+        remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
+        ret = Btree< K, V >::remove(remove_req);
+        if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove"); }
         decr_pending_request_num();
         return ret;
     }
