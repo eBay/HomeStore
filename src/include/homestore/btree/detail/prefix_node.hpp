@@ -315,7 +315,6 @@ public:
                 auto x = cur_key.compare(keys.end_key());
                 if ((x > 0) || ((x == 0) && !keys.is_end_inclusive())) { break; }
 
-                bool remove{true};
                 if (!filter_cb || filter_cb(cur_key, get_nth_value(idx, false))) {
                     suffix_entry* sentry = get_suffix_entry(idx);
                     deref_remove_prefix(sentry->prefix_slot);
