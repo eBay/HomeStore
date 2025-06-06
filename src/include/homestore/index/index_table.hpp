@@ -589,7 +589,7 @@ protected:
                 }
             }
         }
-
+        
         // Keep a copy of the node buffer, in case we need to revert back
         uint8_t* tmp_buffer = new uint8_t[this->m_node_size];
         std::memcpy(tmp_buffer, parent_node->m_phys_node_buf, this->m_node_size);
@@ -871,12 +871,7 @@ protected:
 
     bnodeid_t find_true_sibling(BtreeNodePtr const& node) {
         if (node == nullptr) return empty_bnodeid;
-        bnodeid_t sibling_id = empty_bnodeid;
-        if (node->has_valid_edge()) {
-            sibling_id = node->get_edge_value().bnode_id();
-        } else {
-            sibling_id = node->next_bnode();
-        }
+        bnodeid_t sibling_id = node->next_bnode();
         if (sibling_id == empty_bnodeid) {
             return empty_bnodeid;
         } else {
