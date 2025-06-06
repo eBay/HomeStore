@@ -135,13 +135,17 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
     // If we are able to locate that req in the map for this entry, it could be one of
     //  a) This is an inline data and don't need any localization
     //  b) This is a proposer and thus don't need any localization
-    //  c) This is an indirect data and we received raft entry append from leader and localized the journal entry.
-    //  d) This is an indirect data and we received only on data channel, but no raft entry append from leader. This
+    //  c) This is a proposer but term has changed. This can happen if the leader re-election happen between
+    //     saving req and proposing it to raft.
+    //  d) This is an indirect data and we received raft entry append from leader and localized the journal entry.
+    //  e) This is an indirect data and we received only on data channel, but no raft entry append from leader. This
     //     would mean _prepare is never called but directly finish is called. This can happen if that the leader is not
     //     the original proposer (perhaps unsupported scenario at this time)
     //
-    // On case a), b), we return the rreq as is. For case c), we just need to localize the actual server_id as well (as
-    // finishing step). For case d), we prepare the localization of journal entry and then finish them
+    // On case a), b), we return the rreq as is.
+    // For case c), we localize the actual term and then finish them as proposer.
+    // For case d), we just need to localize the actual server_id as well (as finishing step).
+    // For case e), we prepare the localization of journal entry and then finish them
     //
     //
     // If we are not able to locate that req in the map for this entry, it means that no entry from raft leader is
