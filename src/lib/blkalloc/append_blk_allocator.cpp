@@ -143,9 +143,9 @@ void AppendBlkAllocator::free(const BlkId& bid) {
         m_is_dirty.store(true);
         return;
     }
-    // we have no lock in append_blk_allocator, so there is a corner case that
-    //  is_blk_alloced(bid) is true, so we lost the update of m_freeable_nblks.
-    //  should we involve a lock here?
+    // we have no lock in append_blk_allocator, so there is a corner case that is_blk_alloced(bid) is true when reaching
+    // this line if a new blk_alloc happens, so we lost the update of m_freeable_nblks.
+    // should we involve a lock here?
     LOGWARN("Trying to free an unallocated block: {} , m_last_append_offset is {}", bid,
             m_last_append_offset.load(std::memory_order_relaxed));
 }
