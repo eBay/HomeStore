@@ -138,8 +138,16 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
 
 // free operation books keeping "total freeable" space
 void AppendBlkAllocator::free(const BlkId& bid) {
-    m_freeable_nblks.fetch_add(bid.blk_count());
-    m_is_dirty.store(true);
+    if (is_blk_alloced(bid)) {
+        m_freeable_nblks.fetch_add(bid.blk_count());
+        m_is_dirty.store(true);
+        return;
+    }
+    // we have no lock in append_blk_allocator, so there is a corner case that
+    //  is_blk_alloced(bid) is true, so we lost the update of m_freeable_nblks.
+    //  should we involve a lock here?
+    LOGWARN("Trying to free an unallocated block: {} , m_last_append_offset is {}", bid,
+            m_last_append_offset.load(std::memory_order_relaxed));
 }
 
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
