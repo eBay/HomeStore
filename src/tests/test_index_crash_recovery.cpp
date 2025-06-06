@@ -491,6 +491,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             this->visualize_keys(b_filename);
         }
 
+        this->print_keys(fmt::format("Before crash"));
         trigger_cp(false);
         LOGINFO("waiting for crash to recover");
         this->wait_for_crash_recovery(true);
@@ -591,6 +592,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, crash_test_options.rounds);
             bool print_time = false;
             elapsed_time = get_elapsed_time_sec(m_start_time);
+            this->print_keys(fmt::format("Round {}: before crash", round));
 
             if (crash_test_options.load_mode) {
                 operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));

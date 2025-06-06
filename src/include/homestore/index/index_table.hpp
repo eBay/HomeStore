@@ -590,6 +590,22 @@ protected:
             }
         }
 
+        // we need the first child of the right sibling of the parent node to detemine when to stop the repair loop
+        bnodeid_t sibling_first_child_id = empty_bnodeid;
+        if (!parent_node->is_leaf()) {
+            auto parent_right_sibling_id = find_true_sibling(parent_node);
+            BtreeNodePtr parent_right_sibling;
+            if (parent_right_sibling_id != empty_bnodeid) {
+                if (auto ret = read_node_impl(parent_right_sibling_id, parent_right_sibling); ret == btree_status_t::success) {
+                    if (parent_right_sibling->total_entries() > 0 && !parent_right_sibling->has_valid_edge()) {
+                        BtreeLinkInfo sibling_first_child_info;
+                        parent_right_sibling->get_nth_value(0, &sibling_first_child_info, false);
+                        sibling_first_child_id = sibling_first_child_info.bnode_id();
+                    }
+                }
+            }
+        }
+        
         // Keep a copy of the node buffer, in case we need to revert back
         uint8_t* tmp_buffer = new uint8_t[this->m_node_size];
         std::memcpy(tmp_buffer, parent_node->m_phys_node_buf, this->m_node_size);
@@ -665,12 +681,23 @@ protected:
             // last_parent_key. That's why here we have to check if the child node is one of the original child
             // nodes first.
             if (!is_parent_edge_node && !orig_child_infos.contains(child_node->node_id())) {
+                // We cannot simply compare the child_last_key with last_parent_key
+                // New commited nodes could be added which may have a greater last key
+                // We check if the current node is the leftmost child node of the sibling parent node
+                if (sibling_first_child_id != empty_bnodeid && sibling_first_child_id == child_node->node_id()) {
+                    // We have reached a child beyond this parent, we can stop now
+                    // TODO this case if child last key is less than last parent key to update the parent node.
+                    // this case can potentially break the btree for put and remove op.
+                    break;
+                }
+                /*
                 if (child_last_key.compare(last_parent_key) > 0) {
                     // We have reached a child beyond this parent, we can stop now
                     // TODO this case if child last key is less than last parent key to update the parent node.
                     // this case can potentially break the btree for put and remove op.
                     break;
                 }
+                    */
                 if (child_node->total_entries() == 0) {
                     // this child has no entries, but maybe in the middle of the parent node, we need to update the key
                     // of parent as previous one and go on
