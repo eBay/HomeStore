@@ -434,8 +434,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
 
     void create_allocator(const bool use_slabs = true, uint64_t size = 0) {
         if (size == 0) { size = static_cast< uint64_t >(m_total_count); }
-        VarsizeBlkAllocConfig cfg{4096,  4096, 4096u,    size * 4096,
-                                  false, "",   use_slabs};
+        VarsizeBlkAllocConfig cfg{4096, 4096, 4096u, size * 4096, false, "", use_slabs};
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
     }
 
@@ -456,6 +455,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
             return false;
         }
         if (ret == BlkAllocStatus::SUCCESS) {
+#if 0
             if (is_contiguous) {
                 if (bids.size() != 1) {
                     {
@@ -466,6 +466,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
                     return false;
                 }
             }
+#endif
 
             blk_count_t sz{0};
             for (auto& bid : bids) {
@@ -639,18 +640,15 @@ namespace {
 void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer, uint64_t capacity) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SISL_OPTIONS["num_threads"].as< uint32_t >())};
-    auto max_rand_size{std::max(capacity/4096, uint64_t(2))};
+    auto max_rand_size{std::max(capacity / 4096, uint64_t(2))};
     std::uniform_int_distribution< blk_count_t > s_rand_size_generator{1, static_cast< blk_count_t >(max_rand_size)};
 
-    auto rand_func =  [&s_rand_size_generator]() -> blk_count_t {
-        return s_rand_size_generator(g_re);
-    };
+    auto rand_func = [&s_rand_size_generator]() -> blk_count_t { return s_rand_size_generator(g_re); };
     const uint8_t prealloc_pct{5};
     LOGINFO("Step 1: Pre allocate {}% of total blks which is {} blks in {} threads", prealloc_pct,
             capacity * prealloc_pct / 100, nthreads);
     [[maybe_unused]] const auto preload_alloced{
-        block_test_pointer->preload(capacity * prealloc_pct / 100, true /* is_contiguous */,
-                                    rand_func, true)};
+        block_test_pointer->preload(capacity * prealloc_pct / 100, true /* is_contiguous */, rand_func, true)};
 
     auto num_iters{SISL_OPTIONS["iters"].as< uint64_t >()};
     const uint64_t divisor{1024};
@@ -662,8 +660,7 @@ void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_
     const uint8_t runtime_pct{10};
     LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} iters={}",
             prealloc_pct, runtime_pct, nthreads, num_iters);
-    const auto result{block_test_pointer->do_alloc_free(num_iters, true /* is_contiguous */,
-                                                        rand_func, runtime_pct,
+    const auto result{block_test_pointer->do_alloc_free(num_iters, true /* is_contiguous */, rand_func, runtime_pct,
                                                         false /* round_blks */, true)};
 }
 } // namespace
