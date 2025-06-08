@@ -54,10 +54,21 @@ void CPManager::start(bool first_time_boot) {
     }
 }
 
+uint64_t CPManager::cp_timer_us() {
+    if (SISL_OPTIONS.count("cp_timer_ms")) {
+        auto const n = SISL_OPTIONS["cp_timer_ms"].as< uint64_t >() * 1000;
+        LOGINFO("Using cp_timer_ms option value: {}", n);
+        return n;
+    } else {
+        return HS_DYNAMIC_CONFIG(generic.cp_timer_us);
+    }
+}
+
 void CPManager::start_timer() {
-    LOGINFO("cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.cp_timer_us));
+    auto usecs = cp_timer_us();
+    LOGINFO("cp timer is set to {} usec", usecs);
     m_cp_timer_hdl = iomanager.schedule_global_timer(
-        HS_DYNAMIC_CONFIG(generic.cp_timer_us) * 1000, true, nullptr /*cookie*/, iomgr::reactor_regex::all_worker,
+        usecs * 1000, true, nullptr /*cookie*/, iomgr::reactor_regex::all_worker,
         [this](void*) { trigger_cp_flush(false /* false */); }, true /* wait_to_schedule */);
 }
 

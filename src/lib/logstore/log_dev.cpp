@@ -269,9 +269,11 @@ int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num,
                              void* cb_context) {
     if (is_stopping()) return -1;
     incr_pending_request_num();
+    m_stream_tracker_mtx.lock_shared();
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     m_pending_flush_size.fetch_add(data.size(), std::memory_order_relaxed);
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
+    m_stream_tracker_mtx.unlock_shared();
     if (allow_inline_flush()) flush_if_necessary();
     decr_pending_request_num();
     return idx;
@@ -512,12 +514,32 @@ void LogDev::on_flush_completion(LogGroup* lg) {
     auto upto_indx = lg->m_flush_log_idx_upto;
     auto dev_offset = lg->m_log_dev_offset;
     for (auto idx = from_indx; idx <= upto_indx; ++idx) {
-        auto& record = m_log_records->at(idx);
-        logstore_req* req = s_cast< logstore_req* >(record.context);
+        logstore_req* req;
+        logstore_id_t store_id;
+#ifdef _PRERELEASE
+        uint64_t lock_latency;
+        auto lock_start_time = Clock::now();
+#endif
+        {
+            // both flush completion and async_append can happen in parallel and
+            // during async_append stream tracker create log entry can cause
+            // resize and realloc of memory. So take a lock so that log records
+            // point to valid memory.
+            folly::SharedMutexWritePriority::WriteHolder holder(m_stream_tracker_mtx);
+#ifdef _PRERELEASE
+            lock_latency = get_elapsed_time_us(lock_start_time);
+#endif
+            auto& record = m_log_records->at(idx);
+            req = s_cast< logstore_req* >(record.context);
+            store_id = record.store_id;
+        }
         HomeLogStore* log_store = req->log_store;
-        HS_LOG_ASSERT_EQ(log_store->get_store_id(), record.store_id,
+        HS_LOG_ASSERT_EQ(log_store->get_store_id(), store_id,
                          "Expecting store id in log store and flush completion to match");
         HISTOGRAM_OBSERVE(logstore_service().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
+#ifdef _PRERELEASE
+        HISTOGRAM_OBSERVE(logstore_service().m_metrics, logstore_stream_tracker_lock_latency, lock_latency);
+#endif
         log_store->on_write_completion(req, logdev_key{idx, dev_offset}, logdev_key{from_indx, dev_offset});
         req_map[idx] = req;
     }
