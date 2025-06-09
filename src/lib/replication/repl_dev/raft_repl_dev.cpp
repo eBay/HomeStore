@@ -192,21 +192,22 @@ AsyncReplResult<> RaftReplDev::start_replace_member(const replica_member_info& m
     // quorum safety check. TODO currently only consider lsn, need to check last response time.
     auto active_peers = get_active_peers();
     // active_peers doesn't include leader itself.
-    auto quorum = active_peers.size() + 1;
+    auto active_num = active_peers.size() + 1;
     for (const auto& p : active_peers) {
-        quorum = p == member_out.id ? quorum - 1 : quorum;
-        quorum = p == member_in.id ? quorum - 1 : quorum;
+        active_num = p == member_out.id ? active_num - 1 : active_num;
+        active_num = p == member_in.id ? active_num - 1 : active_num;
     }
     RD_LOGD(trace_id,
             "Step1. Replace member, quorum safety check, active_peers={}, active_peers_exclude_out/in_member={}, "
             "commit_quorum={}",
-            active_peers.size(), quorum, commit_quorum);
+            active_peers.size(), active_num, commit_quorum);
     // commit_quorum=0 means actual commit quorum is the majority. In this case, active normal member count should be
-    // greater than 1. To be more specific, if we have S1(leader), S2, S3(out), S4(in), we don't allow
+    // >= majority. To be more specific, if we have S1(leader), S2, S3(out), S4(in), we don't allow
     // replace_member(S3, S4) if S2 is down or laggy. Needs to recover S2 first or retry with commit_quorum=1.
-    if (quorum <= 1 && commit_quorum == 0) {
-        RD_LOGE(trace_id, "Step1. Replace member, quorum safety check failed, active_peers={}, active_peers_exclude_out/in_member={}, commit_quorum={}",
-                active_peers.size(), quorum, commit_quorum);
+    auto quorum = get_quorum_for_commit();
+    if (active_num < quorum && commit_quorum == 0) {
+        RD_LOGE(trace_id, "Step1. Replace member, quorum safety check failed, active_peers={}, active_peers_exclude_out/in_member={}, required_quorum={}, commit_quorum={}",
+                active_peers.size(), active_num, quorum, commit_quorum);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error<>(ReplServiceError::QUORUM_NOT_MET);
@@ -1539,6 +1540,15 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
         }
     }
     return res;
+}
+
+uint32_t RaftReplDev::get_quorum_for_commit() const {
+    auto peers = get_replication_status();
+    auto quorum = 0;
+    for (auto& p : peers) {
+        if (p.can_vote) { quorum++; }
+    }
+    return quorum / 2 + 1;
 }
 
 uint32_t RaftReplDev::get_blk_size() const { return data_service().get_blk_size(); }
