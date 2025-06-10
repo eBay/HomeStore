@@ -130,6 +130,7 @@ public:
 
     uint64_t root_link_version() const;
     void set_root_node_info(const BtreeLinkInfo& info);
+    uint64_t get_btree_node_cnt() const;
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -198,13 +199,13 @@ protected:
     btree_status_t post_order_traversal(const BtreeNodePtr& node, locktype_t acq_lock, const auto& cb);
     void get_all_kvs(std::vector< std::pair< K, V > >& kvs) const;
     btree_status_t do_destroy(uint64_t& n_freed_nodes, void* context);
-    uint64_t get_btree_node_cnt() const;
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
     void to_string(bnodeid_t bnodeid, std::string& buf) const;
-    void to_custom_string_internal(bnodeid_t bnodeid, std::string& buf, to_string_cb_t< K, V > const& cb, int nindent=-1) const;
+    void to_custom_string_internal(bnodeid_t bnodeid, std::string& buf, to_string_cb_t< K, V > const& cb,
+                                   int nindent = -1) const;
     void to_dot_keys(bnodeid_t bnodeid, std::string& buf, std::map< uint32_t, std::vector< uint64_t > >& l_map,
                      std::map< uint64_t, BtreeVisualizeVariables >& info_map) const;
-    void sanity_sub_tree(bnodeid_t bnodeid=0) const;
+    void sanity_sub_tree(bnodeid_t bnodeid = 0) const;
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void print_node(const bnodeid_t& bnodeid) const;
