@@ -25,7 +25,8 @@
 SISL_LOGGING_DECL(btree)
 
 namespace homestore {
-
+template < typename K, typename V >
+class Btree;
 // Internal format of variable node:
 // [Persistent Header][prefix_node_header][prefix_area_bitset][KV Suffix][KV Suffix].. ...  ... [KV Prefix][KV Prefix]
 //
@@ -38,6 +39,7 @@ class FixedPrefixNode : public VariantNode< K, V > {
     using BtreeNode::get_nth_value_size;
     using BtreeNode::to_string;
     using VariantNode< K, V >::get_nth_value;
+    friend class Btree< K, V >;
 
 private:
 #pragma pack(1)
@@ -596,6 +598,8 @@ public:
 
     uint32_t copy_by_entries(BtreeConfig const& cfg, BtreeNode const& o, uint32_t start_idx,
                              uint32_t nentries) override {
+        if (nentries == 0) { return 0; }
+        if (!has_room(nentries) && has_room_after_compaction(nentries)) { compact(); }
         return copy_internal(cfg, o, start_idx, false /* by_size*/, nentries);
     }
 
@@ -691,7 +695,6 @@ public:
         fmt::format_to(std::back_inserter(str), "{}Prefix_Hdr=[{}], Prefix_Bitmap = [{}] # of holes = {}\n",
                        (print_friendly ? "\n\t" : " "), cprefix_header()->to_string(), this->compact_bitset(),
                        this->num_prefix_holes());
-
         for (uint32_t i{0}; i < this->total_entries(); ++i) {
             fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={} slot#={} ref_count={}]",
                            (print_friendly ? "\n\t" : " "), i + 1, BtreeNode::get_nth_key< K >(i, false).to_string(),

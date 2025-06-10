@@ -232,6 +232,10 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     uint32_t balanced_size{0};
     int32_t available_size{0};
     uint32_t num_nodes{0};
+    uint32_t expected_holes{0};
+    uint32_t expected_tail{0};
+    uint32_t init_holes{0};
+    uint32_t init_tail{0};
 
     struct _leftmost_src_info {
         std::vector< uint32_t > ith_nodes;
@@ -307,6 +311,13 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
     available_size = static_cast< int32_t >(balanced_size) - leftmost_node->occupied_size();
+    if (leftmost_node->get_node_type() == btree_node_type::PREFIX) {
+        auto cur_node = static_cast< FixedPrefixNode< K, V >* >(leftmost_node.get());
+        expected_holes = cur_node->num_prefix_holes();
+        init_holes = expected_holes;
+        expected_tail = cur_node->cprefix_header()->tail_slot;
+        init_tail = expected_tail;
+    }
     src_cursor.ith_node = old_nodes.size();
     for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0); ++i) {
         leftmost_src.ith_nodes.push_back(i);
@@ -326,12 +337,22 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 #endif
 
         if ((old_nodes[i]->total_entries() - nentries) == 0) { // Entire node goes in
-            available_size -= old_nodes[i]->occupied_size();
-            // For prefix nodes, compaction will make the size smaller, so we can compact saving to available size;
-            // hence it cannot get negative.
             if (old_nodes[i]->get_node_type() == btree_node_type::PREFIX) {
                 auto cur_node = static_cast< FixedPrefixNode< K, V >* >(old_nodes[i].get());
-                available_size += cur_node->compact_saving();
+                auto c_used_slot = cur_node->cprefix_header()->used_slots;
+                expected_holes = c_used_slot > init_holes ? 0 : (expected_holes - c_used_slot);
+                expected_tail = init_tail + (expected_holes > 0 ? 0 : (c_used_slot - init_holes));
+                BT_NODE_DBG_ASSERT_EQ(expected_tail >= init_tail, true, leftmost_node,
+                                      "Expected tail {} is not greater than initial tail {}", expected_tail, init_tail);
+                auto prefix_increased_size =
+                    (expected_tail - init_tail) * FixedPrefixNode< K, V >::prefix_entry::size();
+                auto suffix_increased_size = cur_node->total_entries() * FixedPrefixNode< K, V >::suffix_entry::size();
+
+                available_size -= (prefix_increased_size + suffix_increased_size);
+                init_holes = expected_holes;
+                init_tail = expected_tail;
+            } else {
+                available_size -= old_nodes[i]->occupied_size();
             }
             BT_NODE_DBG_ASSERT_EQ(available_size >= 0, true, leftmost_node, "negative available size");
             if (i >= old_nodes.size() - 1) {

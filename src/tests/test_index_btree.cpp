@@ -112,6 +112,9 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void TearDown() override {
         BtreeTestHelper< TestType >::TearDown();
+        auto [interior, leaf] = this->m_bt->compute_node_count();
+        LOGINFO("Teardown with Root bnode_id {} tree size: {} btree node count (interior = {} leaf= {})",
+                this->m_bt->root_node_id(), this->m_bt->count_keys(this->m_bt->root_node_id()), interior, leaf);
         m_helper.shutdown_homestore(false);
         this->m_bt.reset();
         log_obj_life_counter();
@@ -529,8 +532,9 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
                 LOGINFO("Error: failed to remove {}", m_shadow_filename);
             }
         }
-        LOGINFO("Teardown with Root bnode_id {} tree size: {}", this->m_bt->root_node_id(),
-                this->m_bt->count_keys(this->m_bt->root_node_id()));
+        auto [interior, leaf] = this->m_bt->compute_node_count();
+        LOGINFO("Teardown with Root bnode_id {} tree size: {} btree node count (interior = {} leaf= {})",
+                this->m_bt->root_node_id(), this->m_bt->count_keys(this->m_bt->root_node_id()), interior, leaf);
         BtreeTestHelper< TestType >::TearDown();
         m_helper.shutdown_homestore(false);
         this->m_bt.reset();
