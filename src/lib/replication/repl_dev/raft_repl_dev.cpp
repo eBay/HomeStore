@@ -1309,11 +1309,6 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     if (!rreq->has_state(repl_req_state_t::DATA_COMMITTED)) { commit_blk(rreq); }
 
-    // Remove the request from repl_key map.
-    m_repl_key_req_map.erase(rreq->rkey());
-    // Remove the request from lsn map.
-    m_state_machine->unlink_lsn_to_req(rreq->lsn(), rreq);
-
     auto cur_dsn = m_next_dsn.load(std::memory_order_relaxed);
     while (cur_dsn <= rreq->dsn()) {
         m_next_dsn.compare_exchange_strong(cur_dsn, rreq->dsn() + 1);
@@ -1337,6 +1332,16 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
                          rreq->lsn(), prev_lsn);
     }
 
+    // Remove the request from repl_key map only after the listener operation is completed.
+    // This prevents unnecessary block allocation in the following scenario:
+    // 1. The follower processes a commit for LSN 100 and remove rreq from rep_key map before listener commit
+    // 2. The follower receives a duplicate append request from leader and attempts to localize it in 'raft_event' step
+    // 3. since the old rreq has been removed, the follower alloc new blks for LSN 100, resulting in unnecessary garbage
+    // By deferring the removal of the request until after the listener's commit, the listener can recognize that
+    // data already exist for duplicated requests, preventing the unnecessary allocation described in step 3.
+    m_repl_key_req_map.erase(rreq->rkey());
+    // Remove the request from lsn map.
+    m_state_machine->unlink_lsn_to_req(rreq->lsn(), rreq);
     if (!rreq->is_proposer()) rreq->clear();
 }
 
@@ -1993,9 +1998,17 @@ void RaftReplDev::gc_repl_reqs() {
         if (removing_rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
             auto blkid = removing_rreq->local_blkid();
             data_service().async_free_blk(blkid).thenValue([this, blkid, removing_rreq](auto&& err) {
-                HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
-                              blkid.to_string());
-                RD_LOGD(removing_rreq->traceID(), "GC rreq: Releasing blkid={} freed successfully", blkid.to_string());
+                if (!err) {
+                    RD_LOGD(removing_rreq->traceID(), "GC rreq: Releasing blkid={} freed successfully", blkid.to_string());
+                } else if (err == std::make_error_code(std::errc::operation_canceled)) {
+                    // The gc reaper thread stops after the data service has been stopped,
+                    // leading to a scenario where it attempts to free the blkid while the data service is inactive.
+                    // In this case, we ignore the error and simply log a warning.
+                    RD_LOGW(removing_rreq->traceID(), "GC rreq: Releasing blkid={} canceled", blkid.to_string());
+                } else {
+                    HS_LOG_ASSERT(false, "[traceID={}] freeing blkid={} upon error failed, potential to cause blk leak",
+                                  removing_rreq->traceID(), blkid.to_string());
+                }
             });
         }
         // 2. remove from the m_repl_key_req_map
