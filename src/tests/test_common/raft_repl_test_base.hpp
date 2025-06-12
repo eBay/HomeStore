@@ -344,12 +344,14 @@ public:
         }
         return blk_alloc_hints{};
     }
-    void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
+    void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                 trace_id_t tid) override {
         LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
-    void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
+    void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                    trace_id_t tid) override {
         LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
@@ -742,15 +744,17 @@ public:
     void create_snapshot() { dbs_[0]->create_snapshot(); }
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
 
-    void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in,
-                        uint32_t commit_quorum = 0, ReplServiceError error = ReplServiceError::OK) {
-        this->run_on_leader(db, [this, error, db, member_out, member_in, commit_quorum]() {
-            LOGINFO("Start replace member out={} in={}", boost::uuids::to_string(member_out),
-                    boost::uuids::to_string(member_in));
+    void replace_member(std::shared_ptr< TestReplicatedDB > db, uuid_t task_id, replica_id_t member_out,
+                        replica_id_t member_in, uint32_t commit_quorum = 0,
+                        ReplServiceError error = ReplServiceError::OK) {
+        this->run_on_leader(db, [this, error, db, task_id, member_out, member_in, commit_quorum]() {
+            LOGINFO("Start replace member task_id={}, out={}, in={}", boost::uuids::to_string(task_id),
+                    boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
 
             replica_member_info out{member_out, ""};
             replica_member_info in{member_in, ""};
-            auto result = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
+            auto result =
+                hs()->repl_service().replace_member(db->repl_dev()->group_id(), task_id, out, in, commit_quorum).get();
             if (error == ReplServiceError::OK) {
                 ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
             } else {
@@ -758,6 +762,22 @@ public:
                 ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
             }
         });
+    }
+
+    ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, uuid_t task_id,
+                                                    replica_id_t member_out, replica_id_t member_in) {
+        LOGINFO("check replace member status, task_id={}, out={} in={}", boost::uuids::to_string(task_id),
+                boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
+
+        replica_member_info out{member_out, ""};
+        replica_member_info in{member_in, ""};
+        std::vector< replica_member_info > others;
+        for (auto m : g_helper->members_) {
+            if (m.first != member_out && m.first != member_in) {
+                others.emplace_back(replica_member_info{.id = m.first, .name = ""});
+            }
+        }
+        return hs()->repl_service().get_replace_member_status(db->repl_dev()->group_id(), task_id, out, in, others);
     }
 
 protected:

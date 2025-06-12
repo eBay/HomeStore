@@ -482,7 +482,7 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 // In this function, it only invokes replDev start_replace_member. There is
 // a background reaper thread helps periodically check the member_in replication status, after in_member has caught up,
 // will trigger replDev complete_replace_member.
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, uuid_t task_id, const replica_member_info& member_out,
                                                   const replica_member_info& member_in, uint32_t commit_quorum,
                                                   uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
@@ -494,7 +494,7 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const rep
     }
 
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
-        ->start_replace_member(member_out, member_in, commit_quorum, trace_id)
+        ->start_replace_member(task_id, member_out, member_in, commit_quorum, trace_id)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
             if (e.hasError()) {
@@ -526,6 +526,18 @@ AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const 
             decr_pending_request_num();
             return make_async_success<>();
         });
+}
+
+// This query should always be called on leader to avoid misleading results due to lagging status on some followers.
+ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_id, uuid_t task_id,
+                                                               const replica_member_info& member_out,
+                                                               const replica_member_info& member_in,
+                                                               const std::vector< replica_member_info >& others,
+                                                               uint64_t trace_id) const {
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) { return ReplaceMemberStatus::UNKNOWN; }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->get_replace_member_status(task_id, member_out, member_in, others, trace_id);
 }
 
 ////////////////////// Reaper Thread related //////////////////////////////////
@@ -562,7 +574,7 @@ void RaftReplService::start_reaper_thread() {
             // Check replace_member sync status to see a new member is fully synced up and ready to remove the old member
             m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void*) { check_replace_member_status(); });
+                nullptr, [this](void*) { monitor_replace_member_replication_status(); });
 
 
             p.setValue();
@@ -660,11 +672,11 @@ void RaftReplService::flush_durable_commit_lsn() {
     }
 }
 
-void RaftReplService::check_replace_member_status() {
+void RaftReplService::monitor_replace_member_replication_status() {
     std::unique_lock lg(m_rd_map_mtx);
     for (auto& rdev_parent : m_rd_map) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
-        rdev->check_replace_member_status();
+        rdev->monitor_replace_member_replication_status();
     }
 }
 
