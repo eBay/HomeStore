@@ -43,10 +43,10 @@ VENUM(repl_req_state_t, uint32_t,
 )
 
 VENUM(journal_type_t, uint16_t,
-      HS_DATA_LINKED = 0,  // Linked data where each entry will store physical blkid where data reside
-      HS_DATA_INLINED = 1, // Data is inlined in the header of journal entry
-      HS_CTRL_DESTROY = 2, // Control message to destroy the repl_dev
-      HS_CTRL_START_REPLACE = 3, // Control message to start replace a member
+      HS_DATA_LINKED = 0,           // Linked data where each entry will store physical blkid where data reside
+      HS_DATA_INLINED = 1,          // Data is inlined in the header of journal entry
+      HS_CTRL_DESTROY = 2,          // Control message to destroy the repl_dev
+      HS_CTRL_START_REPLACE = 3,    // Control message to start replace a member
       HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member
 )
 
@@ -219,9 +219,16 @@ public:
     void release_fb_builder() { m_fb_builder.Release(); }
 
 public:
-    // IMPORTANT: Avoid declaring variables public, since this structure carries various entries and try to work in
-    // lockless way. As a result, we keep only those which are considered thread safe and others are accessed with
-    // methods.
+    // if leader try to propose a new log to raft and before this log is appended to log store, this leader changes to
+    // follower, then raft_server#drop_all_pending_commit_elems will be called, in which this new log(request) will be
+    // dropped. this means this req will be rejected, and will not be committed , nor rolled back. in this case, we
+    // need notify upperlayer through this virtual function.
+    virtual void on_reject() {};
+
+public:
+    // IMPORTANT: Avoid declaring variables public, since this structure carries various entries and try to work
+    // in lockless way. As a result, we keep only those which are considered thread safe and others are accessed
+    // with methods.
     folly::Promise< folly::Unit > m_data_received_promise; // Promise to be fulfilled when data is received
     folly::Promise< folly::Unit > m_data_written_promise;  // Promise to be fulfilled when data is written
     sisl::io_blob_list_t m_pkts;                           // Pkts used for sending data

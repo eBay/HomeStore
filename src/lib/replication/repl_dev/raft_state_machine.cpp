@@ -45,6 +45,7 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     if (append_status && !append_status->get_accepted()) {
         RD_LOGE(rreq->traceID(), "Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
                 append_status->get_result_code());
+        rreq->on_reject();
         return RaftReplService::to_repl_error(append_status->get_result_code());
     }
     return ReplServiceError::OK;
