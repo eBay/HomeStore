@@ -15,7 +15,8 @@
 #include "replication/log_store/repl_log_store.h"
 
 namespace homestore {
-struct replace_member_ctx_superblk {
+struct replace_member_task_superblk {
+    uuid_t task_id;
     replica_id_t replica_out;
     replica_id_t replica_in;
 };
@@ -30,7 +31,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint64_t last_applied_dsn;      // Last applied data sequence number
     uint8_t destroy_pending;        // Flag to indicate whether the group is in destroy pending state
     repl_lsn_t last_snapshot_lsn;   // Last snapshot LSN follower received from leader
-    replace_member_ctx_superblk replace_member_ctx; // Replace members context, used to track the replace member status
+    replace_member_task_superblk replace_member_task; // Replace members task, used to track the replace member status
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
@@ -42,6 +43,7 @@ using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
 struct replace_member_ctx {
+    uuid_t task_id;
     replica_member_info replica_out;
     replica_member_info replica_in;
 };
@@ -229,11 +231,15 @@ public:
 
     bool bind_data_service();
     bool join_group();
-    AsyncReplResult<> start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+    AsyncReplResult<> start_replace_member(uuid_t task_id, const replica_member_info& member_out, const replica_member_info& member_in,
                                            uint32_t commit_quorum = 0, uint64_t trace_id = 0);
-    AsyncReplResult<> complete_replace_member(const replica_member_info& member_out,
+    AsyncReplResult<> complete_replace_member(uuid_t task_id, const replica_member_info& member_out,
                                               const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                               uint64_t trace_id = 0);
+    ReplaceMemberStatus get_replace_member_status(uuid_t task_id, const replica_member_info& member_out,
+                                                  const replica_member_info& member_in,
+                                                  const std::vector< replica_member_info >& others,
+                                                  uint64_t trace_id = 0);
     AsyncReplResult<> flip_learner_flag(const replica_member_info& member, bool target, uint32_t commit_quorum,
                                         bool wait_and_verify = true, uint64_t trace_id = 0);
     ReplServiceError do_add_member(const replica_member_info& member, uint64_t trace_id = 0);
@@ -373,9 +379,9 @@ public:
     void flush_durable_commit_lsn();
 
     /**
-     * Check the replace_member status, if the new member is fully synced up and ready to take over, remove the old member.
+     * Monitor the replace_member replication status, if the new member is fully synced up and ready to take over, remove the old member.
      */
-    void check_replace_member_status();
+    void monitor_replace_member_replication_status();
 
     /**
      * \brief This method is called during restart to notify the upper layer

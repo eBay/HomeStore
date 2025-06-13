@@ -38,7 +38,16 @@ VENUM(ReplServiceError, int32_t,
       DATA_DUPLICATED = -20002,
       QUIENCE_STATE = -20003,
       QUORUM_NOT_MET = -20004,
+      REPLACE_MEMBER_TASK_MISMATCH = -20005,
       FAILED = -32768);
+
+VENUM(ReplaceMemberStatus, int32_t,
+      COMPLETED = 0,
+      IN_PROGRESS = 1,
+      NOT_LEADER = 2,
+      TASK_ID_MISMATCH = 3,
+      TASK_NOT_FOUND = 4,
+      UNKNOWN = 5);
 // clang-format on
 
 template < typename V, typename E >

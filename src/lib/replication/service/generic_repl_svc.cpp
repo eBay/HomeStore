@@ -193,7 +193,7 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     }
 }
 
-AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, uuid_t task_id, const replica_member_info& member_out,
                                                         const replica_member_info& member_in, uint32_t commit_quorum,
                                                         uint64_t trace_id) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
@@ -202,6 +202,14 @@ AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, const rep
 AsyncReplResult<> SoloReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                     uint32_t commit_quorum, bool wait_and_verify, uint64_t trace_id) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_id, uuid_t task_id,
+                                                               const replica_member_info& member_out,
+                                                               const replica_member_info& member_in,
+                                                               const std::vector< replica_member_info >& others,
+                                                               uint64_t trace_id) const {
+    return ReplaceMemberStatus::UNKNOWN;
 }
 
 std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {
