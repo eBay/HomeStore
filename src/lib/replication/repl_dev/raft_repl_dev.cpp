@@ -277,7 +277,11 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
 #endif
     RD_LOGI(trace_id, "Step4. Replace member, propose to raft to add new member, group_id={}, task_id={}",
             group_id_str(), boost::uuids::to_string(task_id));
-    auto ret = do_add_member(member_in, trace_id);
+    replica_member_info member_to_add = member_in;
+    // TODO If the member_out is already set to learner, then its priority is set to 0, needs to upgrade nuraft
+    // version(with new version, set priority=0 is not needed).
+    member_to_add.priority = out_srv_cfg.get()->get_priority();
+    auto ret = do_add_member(member_to_add, trace_id);
     if (ret != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Step4. Replace member, add member failed, err={}, task_id={}", ret,
                 boost::uuids::to_string(task_id));
@@ -474,12 +478,14 @@ ReplServiceError RaftReplDev::do_add_member(const replica_member_info& member, u
     }
     auto ret = retry_when_config_changing(
         [&] {
-            auto rem_ret = m_msg_mgr.add_member(m_group_id, member.id)
+            auto srv_config = nuraft::srv_config(nuraft_mesg::to_server_id(member.id), 0,
+                                                 boost::uuids::to_string(member.id), "", false, member.priority);
+            auto add_ret = m_msg_mgr.add_member(m_group_id, srv_config)
                                .via(&folly::InlineExecutor::instance())
                                .thenValue([this, member, trace_id](auto&& e) -> nuraft::cmd_result_code {
                                    return e.hasError() ? e.error() : nuraft::cmd_result_code::OK;
                                });
-            return rem_ret.value();
+            return add_ret.value();
         },
         trace_id);
     if (ret == nuraft::cmd_result_code::SERVER_ALREADY_EXISTS) {
