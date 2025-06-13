@@ -136,7 +136,8 @@ public:
     /// @param hints : Hints about block allocation, (specific device to allocate, stream etc)
     /// @param out_blkid : Reference to where allocated BlkId to be placed
     /// @return BlkAllocStatus : Status about the allocation
-    virtual BlkAllocStatus alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
+    virtual BlkAllocStatus alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints,
+                                                 MultiBlkId& out_blkid);
 
     /// @brief This method allocates blocks in the vdev and it could be non-contiguous, hence multiple BlkIds are
     /// returned

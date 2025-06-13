@@ -1040,8 +1040,10 @@ void MetaBlkService::alloc_meta_blk(BlkId& bid) {
     hints.is_contiguous = true;
 
     try {
-        const auto ret = m_sb_vdev->alloc_contiguous_blks(1, hints, bid);
+        MultiBlkId multi_bid;
+        const auto ret = m_sb_vdev->alloc_contiguous_blks(1, hints, multi_bid);
         HS_REL_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
+        bid = multi_bid.to_single_blkid();
     } catch (const std::exception& e) { HS_REL_ASSERT(0, "{}", e.what()); }
 }
 
