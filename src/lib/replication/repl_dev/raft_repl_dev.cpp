@@ -1530,10 +1530,11 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
 void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
     auto ctx = r_cast< const replace_member_ctx* >(rreq->header().cbytes());
 
-    RD_LOGI(rreq->traceID(), "Raft repl start_replace_member commit member_out={} member_in={}",
-            boost::uuids::to_string(ctx->replica_out.id), boost::uuids::to_string(ctx->replica_in.id));
+    RD_LOGI(rreq->traceID(), "Raft repl start_replace_member commit, task_id={} member_out={} member_in={}",
+            boost::uuids::to_string(ctx->task_id), boost::uuids::to_string(ctx->replica_out.id),
+            boost::uuids::to_string(ctx->replica_in.id));
 
-    m_listener->on_start_replace_member(ctx->replica_out, ctx->replica_in, rreq->traceID());
+    m_listener->on_start_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
     // record the replace_member intent
     std::unique_lock lg{m_sb_mtx};
     m_rd_sb->replace_member_task.task_id = ctx->task_id;
@@ -1545,10 +1546,11 @@ void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
 void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
     auto ctx = r_cast< const replace_member_ctx* >(rreq->header().cbytes());
 
-    RD_LOGI(rreq->traceID(), "Raft repl complete_replace_member commit member_out={} member_in={}",
-            boost::uuids::to_string(ctx->replica_out.id), boost::uuids::to_string(ctx->replica_in.id));
+    RD_LOGI(rreq->traceID(), "Raft repl complete_replace_member commit, task_id={} member_out={} member_in={}",
+            boost::uuids::to_string(ctx->task_id), boost::uuids::to_string(ctx->replica_out.id),
+            boost::uuids::to_string(ctx->replica_in.id));
 
-    m_listener->on_complete_replace_member(ctx->replica_out, ctx->replica_in, rreq->traceID());
+    m_listener->on_complete_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
 
     // clear the replace_member intent
     std::unique_lock lg{m_sb_mtx};
