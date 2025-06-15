@@ -206,7 +206,9 @@ AsyncReplResult<> RaftReplDev::start_replace_member(const replica_member_info& m
     // replace_member(S3, S4) if S2 is down or laggy. Needs to recover S2 first or retry with commit_quorum=1.
     auto quorum = get_quorum_for_commit();
     if (active_num < quorum && commit_quorum == 0) {
-        RD_LOGE(trace_id, "Step1. Replace member, quorum safety check failed, active_peers={}, active_peers_exclude_out/in_member={}, required_quorum={}, commit_quorum={}",
+        RD_LOGE(trace_id,
+                "Step1. Replace member, quorum safety check failed, active_peers={}, "
+                "active_peers_exclude_out/in_member={}, required_quorum={}, commit_quorum={}",
                 active_peers.size(), active_num, quorum, commit_quorum);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
@@ -268,7 +270,8 @@ AsyncReplResult<> RaftReplDev::start_replace_member(const replica_member_info& m
         decr_pending_request_num();
         return make_async_error<>(std::move(ret));
     }
-    RD_LOGI(trace_id, "Step4. Replace member, proposed to raft to add member, member={}", boost::uuids::to_string(member_in.id));
+    RD_LOGI(trace_id, "Step4. Replace member, proposed to raft to add member, member={}",
+            boost::uuids::to_string(member_in.id));
     reset_quorum_size(0, trace_id);
     decr_pending_request_num();
     return make_async_success<>();
@@ -519,7 +522,7 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
 }
 
 nuraft::cmd_result_code RaftReplDev::retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
-                                                              uint64_t trace_id) {
+                                                                uint64_t trace_id) {
     auto ret = nuraft::cmd_result_code::OK;
     int32_t retries = HS_DYNAMIC_CONFIG(consensus.config_changing_error_retries);
     for (auto i = 0; i < retries; i++) {
@@ -882,7 +885,8 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
     }
 
     // rreq->init will allocate the block if it has linked data.
-    auto status = init_req_ctx(rreq, rkey, code, m_raft_server_id == rkey.server_id, user_header, key, data_size, m_listener);
+    auto status =
+        init_req_ctx(rreq, rkey, code, m_raft_server_id == rkey.server_id, user_header, key, data_size, m_listener);
 
     if (status != ReplServiceError::OK) {
         RD_LOGD(rkey.traceID, "For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(),
@@ -1521,7 +1525,7 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     auto repl_status = get_replication_status();
     std::set< replica_id_t > res;
     auto my_committed_idx = m_commit_upto_lsn.load();
-    auto laggy=HS_DYNAMIC_CONFIG(consensus.laggy_threshold);
+    auto laggy = HS_DYNAMIC_CONFIG(consensus.laggy_threshold);
     uint64_t least_active_repl_idx = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
@@ -1890,8 +1894,8 @@ void RaftReplDev::check_replace_member_status() {
         RD_LOGE(trace_id, "Failed to complete replace member, next time will retry it, error={}", ret.error());
         return;
     }
-    RD_LOGI(trace_id, "Complete replace member, replica_in={}, replica_out={}",
-            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out))
+    RD_LOGI(trace_id, "Complete replace member, replica_in={}, replica_out={}", boost::uuids::to_string(replica_in),
+            boost::uuids::to_string(replica_out))
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
@@ -1999,7 +2003,8 @@ void RaftReplDev::gc_repl_reqs() {
             auto blkid = removing_rreq->local_blkid();
             data_service().async_free_blk(blkid).thenValue([this, blkid, removing_rreq](auto&& err) {
                 if (!err) {
-                    RD_LOGD(removing_rreq->traceID(), "GC rreq: Releasing blkid={} freed successfully", blkid.to_string());
+                    RD_LOGD(removing_rreq->traceID(), "GC rreq: Releasing blkid={} freed successfully",
+                            blkid.to_string());
                 } else if (err == std::make_error_code(std::errc::operation_canceled)) {
                     // The gc reaper thread stops after the data service has been stopped,
                     // leading to a scenario where it attempts to free the blkid while the data service is inactive.

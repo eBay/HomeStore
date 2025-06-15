@@ -178,8 +178,8 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
 
 BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) {
     BlkAllocStatus ret;
+    MultiBlkId mbid;
     try {
-        MultiBlkId mbid;
         if (!hints.is_contiguous) {
             HS_DBG_ASSERT(false, "Expected alloc_contiguous_blk call to be with hints.is_contiguous=true");
             blk_alloc_hints adjusted_hints = hints;
@@ -191,14 +191,13 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hi
 
         if (ret == BlkAllocStatus::SUCCESS || (ret == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
             HS_REL_ASSERT_EQ(mbid.num_pieces(), 1, "out blkid more than 1 entries will lead to blk leak!");
-            out_blkid = mbid.to_single_blkid();
         }
-
-        // for failure case, fall through and return the status to caller;
     } catch (const std::exception& e) {
         ret = BlkAllocStatus::FAILED;
         HS_DBG_ASSERT(0, "{}", e.what());
     }
+
+    out_blkid = mbid.to_single_blkid();
     return ret;
 }
 
@@ -262,9 +261,8 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
 
         if (status != BlkAllocStatus::SUCCESS && status != BlkAllocStatus::PARTIAL) {
-            out_blkids.pop_back();
-            // all chunks has been tried, but still failed to allocate;
-            // break out and return status to caller;
+            //  all chunks has been tried, but still failed to allocate;
+            //  break out and return status to caller;
             break;
         }
     } while (nblks_remain);
