@@ -278,8 +278,6 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     RD_LOGI(trace_id, "Step4. Replace member, propose to raft to add new member, group_id={}, task_id={}",
             group_id_str(), boost::uuids::to_string(task_id));
     replica_member_info member_to_add = member_in;
-    // TODO If the member_out is already set to learner, then its priority is set to 0, needs to upgrade nuraft
-    // version(with new version, set priority=0 is not needed).
     member_to_add.priority = out_srv_cfg.get()->get_priority();
     auto ret = do_add_member(member_to_add, trace_id);
     if (ret != ReplServiceError::OK) {
@@ -570,13 +568,6 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
         RD_LOGI(trace_id, "flip learner flag failed, not leader");
         return ReplServiceError::NOT_LEADER;
     }
-    if (!target && member.priority == 0) {
-        // If the intent is to take the learner back to normal member, then priority should not be 0(never has chance to
-        // become leader). Client need to trace the peers' priority, and give a meaningful value, currently default
-        // priorities of the quorum: leader=100, follower=66.
-        RD_LOGI(trace_id, "clear learner flag failed, priority is 0, member={}", boost::uuids::to_string(member.id));
-        return ReplServiceError::BAD_REQUEST;
-    }
 
     // 2. Flip learner
     RD_LOGI(trace_id, "flip learner flag to {}, member={}", target, boost::uuids::to_string(member.id));
@@ -601,30 +592,16 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
                 boost::uuids::to_string(member.id));
     }
 
-    // 3. Set priority
-    // Based on the current nuraft implementation, learner could be elected as leader, so we set priority to 0 to avoid
-    // it. And in turn, we need to revert prioiry change if the member is going to become a normal member.
-    // FIXME after nuraft fixes the bug, we can remove this logic.
-    auto priority = target ? 0 : member.priority;
-    RD_LOGI(trace_id, "Set the priority of the member to {}, member={}", priority, boost::uuids::to_string(member.id));
-    if (srv_cfg->get_priority() != priority) {
-        auto priority_ret = set_priority(member.id, priority);
-        if (priority_ret != ReplServiceError::OK) { return ReplServiceError::NOT_LEADER; }
-    } else {
-        RD_LOGD(trace_id, "Priority has already been set to {}, skip, member={}", priority,
-                boost::uuids::to_string(member.id));
-    }
-
-    // 4. Verification
+    // 3. Verification
     if (wait_and_verify) {
         auto timeout = HS_DYNAMIC_CONFIG(consensus.wait_for_config_change_ms);
         if (!wait_and_check(
                 [&]() {
                     auto srv_conf = raft_server()->get_srv_config(nuraft_mesg::to_server_id(member.id));
-                    return srv_conf->is_learner() && srv_conf->get_priority() == 0;
+                    return srv_conf->is_learner();
                 },
                 timeout)) {
-            RD_LOGD(trace_id, "Wait for learner and priority config change timed out, please retry, timeout: {}",
+            RD_LOGD(trace_id, "Wait for flipping learner timed out, please retry, timeout: {}",
                     timeout);
             return ReplServiceError::RETRY_REQUEST;
         }
