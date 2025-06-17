@@ -155,7 +155,6 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     if (status != BlkAllocStatus::SUCCESS) {
         LOGWARNMOD(replication, "[traceID={}] block allocation failure, repl_key=[{}], status=[{}]", rkey().traceID,
                    rkey(), status);
-        DEBUG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
         return ReplServiceError::NO_SPACE_LEFT;
     }
 
@@ -266,7 +265,8 @@ std::string repl_req_ctx::to_string() const {
 }
 
 std::string repl_req_ctx::to_compact_string() const {
-    if (m_op_code == journal_type_t::HS_CTRL_DESTROY || m_op_code == journal_type_t::HS_CTRL_START_REPLACE || m_op_code == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
+    if (m_op_code == journal_type_t::HS_CTRL_DESTROY || m_op_code == journal_type_t::HS_CTRL_START_REPLACE ||
+        m_op_code == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
         return fmt::format("term={} lsn={} op={}", m_rkey.term, m_lsn, enum_name(m_op_code));
     }
 

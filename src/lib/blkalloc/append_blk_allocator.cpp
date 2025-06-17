@@ -76,14 +76,11 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}, actual available_blks(exclude reserved "
                  "blks): {}",
                  nblks, available_blks(), avail_blks);
-        // the caller can know in which chunk no_space_left happened;
-        out_bid = BlkId{0, 0, m_chunk_id};
         return BlkAllocStatus::SPACE_FULL;
     } else if (nblks > max_blks_per_blkid()) {
         // consumer(vdev) already handles this case.
         // COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("Can't serve request nblks: {} larger than max_blks_in_op: {}", nblks, max_blks_per_blkid());
-        out_bid = BlkId{0, 0, m_chunk_id};
         return BlkAllocStatus::FAILED;
     }
 
