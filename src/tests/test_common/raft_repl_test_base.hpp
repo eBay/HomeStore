@@ -183,9 +183,8 @@ public:
     void on_config_rollback(int64_t lsn) override {
         LOGINFOMOD(replication, "[Replica={}] Received config rollback at lsn={}", g_helper->replica_num(), lsn);
     }
-    void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {
-        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}, chunk_id={}", g_helper->replica_num(),
-                   lsn, chunk_id);
+    void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {
+        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}", g_helper->replica_num(), lsn);
     }
 
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
@@ -336,22 +335,22 @@ public:
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = jheader->key_id};
         auto iter = inmem_db_.find(k);
+        auto hints = blk_alloc_hints{};
         if (iter != inmem_db_.end()) {
             LOGDEBUG("data already exists in mem db, key={}", k.id_);
-            auto hints = blk_alloc_hints{};
             hints.committed_blk_id = iter->second.blkid_;
-            return hints;
         }
-        return blk_alloc_hints{};
+        return hints;
     }
-    void on_start_replace_member(const uuid_t& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
-                                 trace_id_t tid) override {
+
+    void on_start_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+                                 const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
-    void on_complete_replace_member(const uuid_t& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
-                                    trace_id_t tid) override {
+    void on_complete_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+                                    const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }

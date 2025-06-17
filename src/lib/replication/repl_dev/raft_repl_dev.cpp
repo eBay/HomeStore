@@ -601,8 +601,7 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
                     return srv_conf->is_learner();
                 },
                 timeout)) {
-            RD_LOGD(trace_id, "Wait for flipping learner timed out, please retry, timeout: {}",
-                    timeout);
+            RD_LOGD(trace_id, "Wait for flipping learner timed out, please retry, timeout: {}", timeout);
             return ReplServiceError::RETRY_REQUEST;
         }
     }
@@ -981,11 +980,8 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         RD_LOGD(rkey.traceID, "For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(),
                 status);
         if (status == ReplServiceError::NO_SPACE_LEFT && !is_data_channel && !rreq->is_proposer()) {
-            const auto& chunk_id = rreq->local_blkid().chunk_num();
-            RD_LOGD(rkey.traceID,
-                    "For Repl_key=[{}] alloc hints returned error={} when trying to allocate blk on chunk={}",
-                    rkey.to_string(), status, chunk_id);
-            m_listener->on_no_space_left(lsn, chunk_id);
+            RD_LOGD(rkey.traceID, "Repl_key=[{}] got no_space_left error on follower as lsn={}", rkey.to_string(), lsn);
+            m_listener->on_no_space_left(lsn, user_header);
         } else {
             RD_LOGD(
                 rkey.traceID,

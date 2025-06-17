@@ -133,14 +133,14 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void on_start_replace_member(const uuid_t& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
-                                     trace_id_t tid) override {}
-        void on_complete_replace_member(const uuid_t& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
-                                        trace_id_t tid) override {}
+        void on_start_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+                                     const replica_member_info& member_in, trace_id_t tid) override {}
+        void on_complete_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+                                        const replica_member_info& member_in, trace_id_t tid) override {}
         void on_destroy(const group_id_t& group_id) override {}
         void notify_committed_lsn(int64_t lsn) override {}
         void on_config_rollback(int64_t lsn) override {}
-        void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {}
+        void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {}
     };
 
     class Application : public ReplApplication {
