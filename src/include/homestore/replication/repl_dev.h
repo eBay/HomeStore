@@ -50,6 +50,8 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member
 )
 
+ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, UNREADY, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
+
 // magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
 static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
 static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
@@ -540,6 +542,14 @@ public:
     /// @brief if this replica is ready for accepting client IO.
     /// @return true if ready, false otherwise
     virtual bool is_ready_for_traffic() const = 0;
+
+    /// @brief Set the stage of this repl dev, this helps user to set unready state when the condition is not met(e.g.
+    /// disk is unhealthy) and vice versa which supports to run in degrade mode.
+    virtual void set_stage(repl_dev_stage_t stage) = 0;
+
+    /// @brief Get the stage of this repl dev.
+    /// @return current stage of this repl dev.
+    virtual repl_dev_stage_t get_stage() const = 0;
 
     /// @brief Clean up resources on this repl dev.
     virtual void purge() = 0;

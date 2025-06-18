@@ -1779,6 +1779,12 @@ int32_t RaftReplDev::server_id() { return m_raft_server_id; }
 bool RaftReplDev::is_destroy_pending() const { return (*m_stage.access().get() == repl_dev_stage_t::DESTROYED); }
 bool RaftReplDev::is_destroyed() const { return (*m_stage.access().get() == repl_dev_stage_t::PERMANENT_DESTROYED); }
 
+repl_dev_stage_t RaftReplDev::get_stage() const { return *m_stage.access().get(); }
+
+void RaftReplDev::set_stage(repl_dev_stage_t stage) {
+    m_stage.update([stage](auto* s) { *s =  stage; });
+}
+
 ///////////////////////////////////  nuraft_mesg::mesg_state_mgr overrides ////////////////////////////////////
 void RaftReplDev::become_ready() {
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::ACTIVE; });
