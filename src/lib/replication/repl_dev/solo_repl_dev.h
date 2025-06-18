@@ -78,6 +78,10 @@ public:
             peer_info{.id_ = m_group_id, .replication_idx_ = 0, .last_succ_resp_us_ = 0, .priority_ = 1}};
     }
     bool is_ready_for_traffic() const override { return true; }
+    void set_stage(repl_dev_stage_t stage) override {}
+    repl_dev_stage_t get_stage() const override {
+        return repl_dev_stage_t::ACTIVE;
+    }
     void purge() override {}
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {

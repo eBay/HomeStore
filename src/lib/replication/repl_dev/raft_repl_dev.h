@@ -40,8 +40,6 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
-ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
-
 struct replace_member_ctx {
     uuid_t task_id;
     replica_member_info replica_out;
@@ -299,6 +297,8 @@ public:
     repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx(); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
+    void set_stage(repl_dev_stage_t stage);
+    repl_dev_stage_t get_stage() const;
     uint32_t get_quorum_for_commit() const;
 
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
