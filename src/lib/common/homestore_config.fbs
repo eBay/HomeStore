@@ -123,6 +123,9 @@ table Generic {
     // cp timer in us
     cp_timer_us: uint64 = 60000000 (hotswap);
 
+    // number of fibers for cp_io thread;
+    cp_io_fibers: uint32 = 2;
+
     // writeback cache flush threads
     cache_flush_threads : int32 = 1;
 
