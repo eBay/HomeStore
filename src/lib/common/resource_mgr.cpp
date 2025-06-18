@@ -47,13 +47,12 @@ void ResourceMgr::stop() {
 //    writes on this descriptor;
 //
 void ResourceMgr::trigger_truncate() {
-    auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
-    if (repl_svc.get_impl_type() == repl_impl_type::solo) {
-        // skip truncation from RM for solo repl dev;
-        return;
-    }
-
     if (hs()->has_repl_data_service()) {
+        auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
+        if (repl_svc.get_impl_type() == repl_impl_type::solo) {
+            // skip truncation from RM for solo repl dev;
+            return;
+        }
         /*
          * DO NOT NEED : raft will truncate logs.
          * // first make sure all repl dev's underlying raft log store make corresponding reservation during
