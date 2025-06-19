@@ -32,6 +32,7 @@ void ResourceMgr::start(uint64_t total_cap) {
 
 void ResourceMgr::stop() {
     LOGINFO("Cancel resource manager timer.");
+    m_is_stopped_ = true;
     if (m_res_audit_timer_hdl != iomgr::null_timer_handle) { iomanager.cancel_timer(m_res_audit_timer_hdl); }
     m_res_audit_timer_hdl = iomgr::null_timer_handle;
 }
@@ -47,6 +48,15 @@ void ResourceMgr::stop() {
 //    writes on this descriptor;
 //
 void ResourceMgr::trigger_truncate() {
+    if (m_is_stopped_.load()) {
+        // when we are here, it means HomeStore is shutting down and since this API is called in timer thread, the timer
+        // thread might already been triggered while RM is tring to cancel it;
+        // and since shutdown and timer thread happen parallel, by the time we are here, shutdown might already cleaned
+        // up all replication service instances. and it will throw heap-use-after-free;
+        LOGINFO("Resource manager is stopped, so not triggering truncate");
+        return;
+    }
+
     if (hs()->has_repl_data_service()) {
         auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
         if (repl_svc.get_impl_type() == repl_impl_type::solo) {

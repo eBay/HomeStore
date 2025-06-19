@@ -143,6 +143,7 @@ private:
     std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     std::atomic< int64_t > m_memory_used_in_recovery;
     std::atomic< uint32_t > m_flush_dirty_buf_q_depth{64};
+    std::atomic< bool > m_is_stopped_{false};
     uint64_t m_total_cap;
 
     // TODO: make it event_cb
