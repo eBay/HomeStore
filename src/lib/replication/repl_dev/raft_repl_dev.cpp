@@ -145,6 +145,10 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
         RD_LOGI(trace_id, "repl dev is being shutdown!");
         return make_async_error<>(ReplServiceError::STOPPING);
     }
+    if (get_stage() != repl_dev_stage_t::ACTIVE) {
+        RD_LOGE(trace_id, "repl dev is not ready, stage={}", static_cast< int >(get_stage()));
+        return make_async_error<>(ReplServiceError::UNREADY_STATE);
+    }
     incr_pending_request_num();
 
     RD_LOGI(trace_id, "Start replace member, task_id={}, member_out={} member_in={}", boost::uuids::to_string(task_id),
@@ -300,6 +304,10 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
         return make_async_error<>(ReplServiceError::STOPPING);
+    }
+    if (get_stage() != repl_dev_stage_t::ACTIVE) {
+        RD_LOGE(trace_id, "repl dev is not ready, stage={}", static_cast< int >(get_stage()));
+        return make_async_error<>(ReplServiceError::UNREADY_STATE);
     }
     incr_pending_request_num();
 
@@ -726,8 +734,9 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         if (auto const stage = *guard.get(); stage != repl_dev_stage_t::ACTIVE) {
             RD_LOGW(tid, "Raft channel: Not ready to accept writes, stage={}", enum_name(stage));
             handle_error(rreq,
-                         (stage == repl_dev_stage_t::INIT) ? ReplServiceError::SERVER_IS_JOINING
-                                                           : ReplServiceError::SERVER_IS_LEAVING);
+                         (stage == repl_dev_stage_t::INIT)          ? ReplServiceError::SERVER_IS_JOINING
+                             : (stage == repl_dev_stage_t::UNREADY) ? ReplServiceError::UNREADY_STATE
+                                                                    : ReplServiceError::SERVER_IS_LEAVING);
             return;
         }
     }
@@ -1562,6 +1571,10 @@ folly::Future< std::error_code > RaftReplDev::async_read(MultiBlkId const& bid, 
         LOGINFO("repl dev is being shutdown!");
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
     }
+    if (get_stage() != repl_dev_stage_t::ACTIVE) {
+        LOGINFO("repl dev is not active!");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    }
     return data_service().async_read(bid, sgs, size, part_of_batch);
 }
 
@@ -1570,6 +1583,10 @@ folly::Future< std::error_code > RaftReplDev::async_free_blks(int64_t, MultiBlkI
     // journal.
     if (is_stopping()) {
         LOGINFO("repl dev is being shutdown!");
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
+    }
+    if (get_stage() != repl_dev_stage_t::ACTIVE) {
+        LOGINFO("repl dev is not active!");
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::operation_canceled));
     }
     return data_service().async_free_blk(bid);
@@ -1940,8 +1957,8 @@ void RaftReplDev::flush_durable_commit_lsn() {
 }
 
 void RaftReplDev::monitor_replace_member_replication_status() {
-    if (is_destroyed()) {
-        RD_LOGI(NO_TRACE_ID, "Raft repl dev is destroyed, ignore check replace member status");
+    if (is_destroyed() || get_stage() == repl_dev_stage_t::UNREADY) {
+        RD_LOGI(NO_TRACE_ID, "Raft repl dev is destroyed or unready, ignore check replace member status");
         return;
     }
     if (!m_repl_svc_ctx || !is_leader()) { return; }
@@ -2132,6 +2149,10 @@ void RaftReplDev::gc_repl_reqs() {
 void RaftReplDev::set_log_store_last_durable_lsn(store_lsn_t lsn) { m_data_journal->set_last_durable_lsn(lsn); }
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+    if (get_stage() == repl_dev_stage_t::UNREADY) {
+        RD_LOGI(NO_TRACE_ID, "Raft Channel: repl dev is in UNREADY stage, skip log replay.");
+        return;
+    }
     auto repl_lsn = to_repl_lsn(lsn);
     if (need_skip_processing(repl_lsn)) {
         RD_LOGI(NO_TRACE_ID,
