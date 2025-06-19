@@ -302,7 +302,9 @@ void CPManager::start_cp_thread() {
     // Multiple sync_io fibers may acquire a thread-level mutex and perform synchronous I/O using io_uring.
     // This can block the fiber and allow other fibers to be scheduled.
     // If another fiber tries to acquire the same mutex, a deadlock can occur.
-    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 2u, [this, ctx](bool is_started) {
+    auto const num_fibers = HS_DYNAMIC_CONFIG(generic.cp_io_fibers); // default: 2
+    LOGINFO("Starting CP IO fibers with count: {}", num_fibers);
+    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, num_fibers, [this, ctx](bool is_started) {
         if (is_started) {
             {
                 std::unique_lock< std::mutex > lk{ctx->mtx};
