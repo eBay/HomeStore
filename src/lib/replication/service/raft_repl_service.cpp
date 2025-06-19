@@ -148,6 +148,8 @@ void RaftReplService::start() {
     }
     m_config_sb_bufs.clear();
     LOGINFO("Repl devs load completed, calling upper layer on_repl_devs_init_completed");
+    // The upper layer(m_repl_app) can leverage this cb to initiate and recover its data.
+    // If some errors occurs, m_repl_app can set back the stage of repl_dev to repl_dev_stage_t::UNREADY.
     m_repl_app->on_repl_devs_init_completed();
 
     // Step 5: Start the data and logstore service now. This step is essential before we can ask Raft to join groups etc
@@ -172,6 +174,10 @@ void RaftReplService::start() {
     // Step 6: Iterate all the repl devs and ask each one of them to join the raft group concurrently.
     std::vector< std::future< bool > > join_group_futures;
     for (const auto& [_, repl_dev] : m_rd_map) {
+        if (repl_dev->get_stage() == repl_dev_stage_t::UNREADY) {
+            LOGINFO("Repl dev is unready, skip join group, group_id={}", boost::uuids::to_string(repl_dev->group_id()));
+            continue;
+        }
         join_group_futures.emplace_back(std::async(std::launch::async, [&repl_dev]() {
             auto rdev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev);
             rdev->wait_for_logstore_ready();
@@ -668,6 +674,11 @@ void RaftReplService::flush_durable_commit_lsn() {
     for (auto& rdev_parent : m_rd_map) {
         // FIXUP: is it safe to access rdev_parent here?
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
+        if (rdev->get_stage() == repl_dev_stage_t::UNREADY) {
+            LOGINFOMOD(replication, "ReplDev group_id={} is UNREADY, skip flushing durable commit lsn",
+                       boost::uuids::to_string(rdev->group_id()));
+            continue;
+        }
         rdev->flush_durable_commit_lsn();
     }
 }
