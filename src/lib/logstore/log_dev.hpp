@@ -805,6 +805,7 @@ private:
     // same thread.
     iomgr::FiberManagerLib::mutex m_flush_mtx;
     std::atomic_uint64_t m_pending_callback{0};
+    folly::SharedMutexWritePriority m_stream_tracker_mtx;
 
 private:
     // graceful shutdown related fields

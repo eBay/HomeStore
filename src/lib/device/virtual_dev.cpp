@@ -202,6 +202,28 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hi
     return ret;
 }
 
+BlkAllocStatus VirtualDev::alloc_n_contiguous_blks(blk_count_t nblks, blk_alloc_hints hints, MultiBlkId& out_blkid) {
+    BlkAllocStatus ret;
+    try {
+        MultiBlkId mbid;
+        if (!hints.is_contiguous) {
+            HS_DBG_ASSERT(false, "Expected alloc_contiguous_blk call to be with hints.is_contiguous=true");
+            hints.is_contiguous = true;
+        }
+        ret = alloc_blks(nblks, hints, mbid);
+
+        if (ret == BlkAllocStatus::SUCCESS || (ret == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
+            out_blkid = mbid;
+        }
+
+        // for failure case, fall through and return the status to caller;
+    } catch (const std::exception& e) {
+        ret = BlkAllocStatus::FAILED;
+        HS_DBG_ASSERT(0, "{}", e.what());
+    }
+    return ret;
+}
+
 BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid) {
     try {
         // First select a chunk to allocate it from
@@ -254,19 +276,24 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
     BlkAllocStatus status;
 
     do {
-        out_blkids.emplace_back(); // Put an empty MultiBlkId and use that for allocating them
-        BlkId& out_bid = out_blkids.back();
-        status = alloc_contiguous_blks(nblks_remain, h, out_bid);
-
-        auto nblks_this_iter = out_bid.blk_count();
-        nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
-
+        MultiBlkId mbid;
+        status = alloc_n_contiguous_blks(nblks_remain, h, mbid);
         if (status != BlkAllocStatus::SUCCESS && status != BlkAllocStatus::PARTIAL) {
             out_blkids.pop_back();
             // all chunks has been tried, but still failed to allocate;
             // break out and return status to caller;
             break;
         }
+
+        blk_count_t nblks_this_iter = 0;
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            nblks_this_iter += (*b).blk_count();
+            out_blkids.emplace_back(*b);
+        }
+
+        nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
+
     } while (nblks_remain);
 
     return status;
@@ -285,6 +312,14 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
         chunk->blk_allocator_mutable()->free(out_blkid);
         out_blkid = MultiBlkId{};
         status = BlkAllocStatus::FAILED;
+    } else if (status == BlkAllocStatus::SUCCESS || status == BlkAllocStatus::PARTIAL) {
+        blk_count_t nblks_alloc = 0;
+        auto it = out_blkid.iterate();
+        while (auto const b = it.next()) {
+            nblks_alloc += (*b).blk_count();
+        }
+        // Inform chunk selector on the number of blks alloced
+        m_chunk_selector->on_alloc_blk(chunk->chunk_id(), nblks_alloc);
     }
 
     return status;
@@ -301,6 +336,8 @@ void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
             if (!chunk) HS_DBG_ASSERT(false, "chunk is missing for blkid {}", b.to_string());
             BlkAllocator* allocator = chunk->blk_allocator_mutable();
             allocator->free(b);
+            // Inform chunk selector on the number of blks freed
+            m_chunk_selector->on_free_blk(chunk->chunk_id(), b.blk_count());
         }
     };
 
