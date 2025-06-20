@@ -228,12 +228,14 @@ public:
             repair_links(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
 
+        /*
         if (idx_buf->m_up_buffer && idx_buf->m_up_buffer->is_meta_buf()) {
             // Our up buffer is a meta buffer, which means that we are the new root node, we need to update the
             // meta_buf with new root as well
             LOGTRACEMOD(wbcache, "root change for after repairing {}\n\n", idx_buf->to_string());
             on_root_changed(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
+        */
     }
 
 protected:
@@ -456,6 +458,38 @@ protected:
             }
         }
         return sibling_first_child_id;
+    }
+
+    void update_root(BtreeNodePtr const& left_child,  BtreeNodeList& new_nodes, void* cp_ctx) {
+        auto new_root = this->alloc_interior_node();
+        if (new_root == nullptr) {
+            return;
+        }
+        new_root->set_level(left_child->level() + 1);
+        auto cur_child = left_child;
+        uint32_t i = 0;
+        LOGTRACEMOD(wbcache, "Updating new root node={}", new_root->to_string());
+        do {
+            LOGTRACEMOD(wbcache, "Processiog child {}", cur_child->to_string());
+            if (cur_child->has_valid_edge()) {
+                new_root->set_edge_value(BtreeLinkInfo{cur_child->node_id(), cur_child->link_version()});
+            } else {
+                auto child_last_key = cur_child->get_last_key< K >();
+                new_root->insert(new_root->total_entries(), child_last_key,
+                                   BtreeLinkInfo{cur_child->node_id(), cur_child->link_version()});
+            }
+            if (i == new_nodes.size()) { break; }
+            auto next_child_id = cur_child->next_bnode();
+            cur_child = new_nodes[i++];
+            DEBUG_ASSERT_EQ(next_child_id, cur_child->node_id(),
+                            "Next node id {} does not match current child node id {}", 
+                            next_child_id, cur_child->node_id());
+        } while (true);
+       
+        new_nodes.push_back(new_root);
+        LOGTRACEMOD(wbcache, "New root node created {}", new_root->to_string());
+        on_root_changed(new_root, cp_ctx);
+        this->set_root_node_info(BtreeLinkInfo{new_root->node_id(), new_root->link_version()});
     }
 
     //
@@ -726,7 +760,6 @@ protected:
                 cur_parent->set_next_bnode(new_parent->node_id());
                 new_parent->set_level(cur_parent->level());
                 cur_parent->inc_link_version();
-
                 new_parent_nodes.push_back(new_parent);
                 cur_parent = std::move(new_parent);
             }
@@ -823,7 +856,13 @@ protected:
         // if last parent has the key less than the last child key, then we need to update the parent node with
         // the last child key if it doesn't have edge.
         auto last_parent = parent_node;
-        if (new_parent_nodes.size() > 0) { last_parent = new_parent_nodes[new_parent_nodes.size() - 1]; }
+        if (new_parent_nodes.size() > 0) { 
+            last_parent = new_parent_nodes.back();
+            // handle the case where we are splitting the root node
+            if (m_sb->root_node == parent_node->node_id()) {
+                update_root(parent_node, new_parent_nodes, cp_ctx);
+            }
+        }
         if (last_parent->total_entries() && !last_parent->has_valid_edge()) {
             if (last_parent->compare_nth_key(last_parent_key, last_parent->total_entries() - 1) < 0) {
                 BtreeLinkInfo child_info;
