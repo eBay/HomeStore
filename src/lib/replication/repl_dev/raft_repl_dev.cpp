@@ -1610,16 +1610,21 @@ AsyncReplResult<> RaftReplDev::become_leader() {
     });
 }
 
-bool RaftReplDev::is_leader() const { return m_repl_svc_ctx->is_raft_leader(); }
+bool RaftReplDev::is_leader() const { return m_repl_svc_ctx && m_repl_svc_ctx->is_raft_leader(); }
 
 replica_id_t RaftReplDev::get_leader_id() const {
     static replica_id_t empty_uuid = boost::uuids::nil_uuid();
+    if (!m_repl_svc_ctx) { return empty_uuid; }
     auto leader = m_repl_svc_ctx->raft_leader_id();
     return leader.empty() ? empty_uuid : boost::lexical_cast< replica_id_t >(leader);
 }
 
 std::vector< peer_info > RaftReplDev::get_replication_status() const {
     std::vector< peer_info > pi;
+    if (!m_repl_svc_ctx) {
+        RD_LOGD(NO_TRACE_ID, "m_repl_svc_ctx doesn't exist, returning empty peer info");
+        return pi;
+    }
     auto rep_status = m_repl_svc_ctx->get_raft_status();
     for (auto const& pinfo : rep_status) {
         pi.emplace_back(peer_info{.id_ = boost::lexical_cast< replica_id_t >(pinfo.id_),
