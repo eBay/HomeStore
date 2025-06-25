@@ -228,14 +228,12 @@ public:
             repair_links(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
 
-        /*
         if (idx_buf->m_up_buffer && idx_buf->m_up_buffer->is_meta_buf()) {
             // Our up buffer is a meta buffer, which means that we are the new root node, we need to update the
             // meta_buf with new root as well
             LOGTRACEMOD(wbcache, "root change for after repairing {}\n\n", idx_buf->to_string());
             on_root_changed(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
-        */
     }
 
 protected:
@@ -631,7 +629,7 @@ protected:
         BtreeNodeList new_parent_nodes;
         do {
             if (child_node->has_valid_edge() || (child_node->is_leaf() && child_node->next_bnode() == empty_bnodeid)) {
-                LOGTRACEMOD(wbcache, "Child node [{}] is an edge node or a leaf with no next, so we can stop here",
+                LOGTRACEMOD(wbcache, "Child node [{}] is an edge node or a leaf with no next",
                             child_node->to_string());
                 if (child_node->is_node_deleted()) {
                     // Edge node is merged, we need to set the current last entry as edge
@@ -678,8 +676,8 @@ protected:
                         }
                     }
 
-                    //
-                    //                        }
+                    LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
+                                cur_parent->to_string(), child_node->to_string());
                     break;
                 }
                 break;
@@ -731,13 +729,13 @@ protected:
                     }
                     if (valid_sibling != empty_bnodeid) {
                         cur_parent->set_next_bnode(valid_sibling);
-                        LOGTRACEMOD(wbcache, "Repairing node={}, child_node=[{}] is an edge node, end loop",
-                                    cur_parent->node_id(), child_node->to_string());
+                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
+                                    cur_parent->to_string(), child_node->to_string());
 
                     } else {
                         cur_parent->set_next_bnode(empty_bnodeid);
-                        LOGTRACEMOD(wbcache, "Repairing node={}, child_node=[{}] is an edge node, end loop",
-                                    cur_parent->node_id(), child_node->to_string());
+                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
+                                    cur_parent->to_string(), child_node->to_string());
                     }
 
                     break;

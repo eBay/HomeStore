@@ -628,10 +628,14 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             // New node
             if (was_node_committed(buf) && was_node_committed(buf->m_up_buffer)) {
                 // Both current and up buffer is commited, we can safely commit the current block
+                LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
+                            buf->m_up_buffer->to_string());
                 m_vdev->commit_blk(buf->m_blkid);
                 pending_bufs.push_back(buf->m_up_buffer);
             } else {
                 // Up buffer is not committed, we need to repair it first
+                LOGTRACEMOD(wbcache, "The up buffer {} is not committed for the new buffer {}",
+                            buf->m_up_buffer->to_string(), buf->to_string());
                 buf->m_up_buffer->remove_down_buffer(buf);
                 if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
                     // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
