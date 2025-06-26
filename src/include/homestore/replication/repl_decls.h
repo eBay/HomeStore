@@ -39,6 +39,7 @@ VENUM(ReplServiceError, int32_t,
       QUIENCE_STATE = -20003,
       QUORUM_NOT_MET = -20004,
       REPLACE_MEMBER_TASK_MISMATCH = -20005,
+      UNREADY_STATE = -20006,
       FAILED = -32768);
 
 VENUM(ReplaceMemberStatus, int32_t,
