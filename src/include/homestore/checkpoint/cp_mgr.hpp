@@ -230,6 +230,7 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_cp_thread();
     folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown);
+    uint64_t cp_timer_us();
 };
 
 extern CPManager& cp_mgr();

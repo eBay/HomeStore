@@ -215,8 +215,12 @@ BlkDataService::async_write(sisl::sg_list const& sgs, std::vector< MultiBlkId > 
     incr_pending_request_num();
     static thread_local std::vector< folly::Future< std::error_code > > s_futs;
     s_futs.clear();
+    sisl::sg_iterator sg_it{sgs.iovs};
     for (const auto& blkid : blkids) {
-        s_futs.emplace_back(async_write(sgs, blkid, part_of_batch));
+        auto sgs_size = blkid.blk_count() * data_service().get_blk_size();
+        const auto iovs = sg_it.next_iovs(sgs_size);
+        sisl::sg_list single_sgs{sgs_size, iovs};
+        s_futs.emplace_back(async_write(single_sgs, blkid, part_of_batch));
     }
     decr_pending_request_num();
     return collect_all_futures(s_futs);
