@@ -20,6 +20,7 @@
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
 #include "replication/repl_dev/raft_repl_dev.h"
+#include "replication/service/generic_repl_svc.h"
 
 namespace homestore {
 ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
@@ -31,6 +32,7 @@ void ResourceMgr::start(uint64_t total_cap) {
 
 void ResourceMgr::stop() {
     LOGINFO("Cancel resource manager timer.");
+    m_is_stopped_ = true;
     if (m_res_audit_timer_hdl != iomgr::null_timer_handle) { iomanager.cancel_timer(m_res_audit_timer_hdl); }
     m_res_audit_timer_hdl = iomgr::null_timer_handle;
 }
@@ -46,7 +48,21 @@ void ResourceMgr::stop() {
 //    writes on this descriptor;
 //
 void ResourceMgr::trigger_truncate() {
+    if (m_is_stopped_.load()) {
+        // when we are here, it means HomeStore is shutting down and since this API is called in timer thread, the timer
+        // thread might already been triggered while RM is tring to cancel it;
+        // and since shutdown and timer thread happen parallel, by the time we are here, shutdown might already cleaned
+        // up all replication service instances. and it will throw heap-use-after-free;
+        LOGINFO("Resource manager is stopped, so not triggering truncate");
+        return;
+    }
+
     if (hs()->has_repl_data_service()) {
+        auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
+        if (repl_svc.get_impl_type() == repl_impl_type::solo) {
+            // skip truncation from RM for solo repl dev;
+            return;
+        }
         /*
          * DO NOT NEED : raft will truncate logs.
          * // first make sure all repl dev's underlying raft log store make corresponding reservation during
@@ -96,10 +112,8 @@ void ResourceMgr::dec_dirty_buf_size(const uint32_t size) {
     HS_REL_ASSERT_GT(size, 0);
     const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
     COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
-    if (dirty_buf_cnt < size) {
-        LOGERROR("dirty_buf_cnt {} of now is less then size {}", dirty_buf_cnt, size);
-    }
-    //HS_REL_ASSERT_GE(dirty_buf_cnt, size);
+    if (dirty_buf_cnt < size) { LOGERROR("dirty_buf_cnt {} of now is less then size {}", dirty_buf_cnt, size); }
+    // HS_REL_ASSERT_GE(dirty_buf_cnt, size);
 }
 
 void ResourceMgr::register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
