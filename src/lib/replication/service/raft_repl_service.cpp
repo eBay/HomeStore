@@ -92,7 +92,8 @@ void RaftReplService::start() {
         .token_verifier_ = std::dynamic_pointer_cast< sisl::GrpcTokenVerifier >(ioenvironment.get_token_verifier()),
         .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client()),
         .max_receive_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size),
-        .max_send_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size)};
+        .max_send_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size),
+        .enable_console_log_ = HS_DYNAMIC_CONFIG(consensus.enable_console_log)};
     m_msg_mgr = nuraft_mesg::init_messaging(params, weak_from_this(), true /* with_data_channel */);
 
     LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),
