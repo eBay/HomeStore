@@ -303,6 +303,9 @@ table Consensus {
 
     // The interval in ms to check if the new member in replace_member is fully synced and ready to take over
     replace_member_sync_check_interval_ms: uint64 = 60000;
+
+    // Enable tee logs to console, this is helpful for sherlock to collect logs
+    enable_console_log: bool = true;
 }
 
 table HomeStoreSettings {
