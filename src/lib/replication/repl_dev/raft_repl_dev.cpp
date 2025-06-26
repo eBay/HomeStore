@@ -138,7 +138,7 @@ bool RaftReplDev::join_group() {
 }
 
 // All the steps in the implementation should be idempotent and retryable.
-AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replica_member_info& member_out,
+AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const replica_member_info& member_out,
                                                     const replica_member_info& member_in, uint32_t commit_quorum,
                                                     uint64_t trace_id) {
     if (is_stopping()) {
@@ -151,15 +151,16 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     }
     incr_pending_request_num();
 
-    RD_LOGI(trace_id, "Start replace member, task_id={}, member_out={} member_in={}", boost::uuids::to_string(task_id),
+    RD_LOGI(trace_id, "Start replace member, task_id={}, member_out={} member_in={}", task_id,
             boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
 
     // Step1, validate request
     // TODO support rollback, this could happen when the first task failed, and we want to launch a new task to
     // remediate it. Need to rollback the first task. And for the same task, it's reentrant and idempotent.
-    if (!m_rd_sb->replace_member_task.task_id.is_nil() && m_rd_sb->replace_member_task.task_id != task_id) {
+    auto existing_task_id = get_replace_member_task_id();
+    if (!existing_task_id.empty() && existing_task_id != task_id) {
         RD_LOGE(trace_id, "Step1. Replace member, task_id={} is not the same as existing task_id={}",
-                boost::uuids::to_string(task_id), boost::uuids::to_string(m_rd_sb->replace_member_task.task_id));
+                task_id, existing_task_id);
         decr_pending_request_num();
         return make_async_error<>(ReplServiceError::REPLACE_MEMBER_TASK_MISMATCH);
     }
@@ -171,13 +172,13 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
             RD_LOGI(trace_id,
                     "Step1. Replace member, the intent has already been fulfilled, ignore it, task_id={}, "
                     "member_out={} member_in={}",
-                    boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id),
+                    task_id, boost::uuids::to_string(member_out.id),
                     boost::uuids::to_string(member_in.id));
             decr_pending_request_num();
             return make_async_success<>();
         }
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}",
-                boost::uuids::to_string(task_id));
+                task_id);
         decr_pending_request_num();
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
@@ -192,7 +193,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
         // client retry.
         raft_server()->yield_leadership(false /* immediate */, -1 /* successor */);
         RD_LOGI(trace_id, "Step1. Replace member, leader is the member_out so yield leadership, task_id={}",
-                boost::uuids::to_string(task_id));
+                task_id);
         decr_pending_request_num();
         return make_async_error<>(ReplServiceError::NOT_LEADER);
     }
@@ -207,7 +208,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     RD_LOGD(trace_id,
             "Step1. Replace member, quorum safety check, active_peers={}, active_peers_exclude_out/in_member={}, "
             "commit_quorum={}, task_id={}",
-            active_peers.size(), active_num, commit_quorum, boost::uuids::to_string(task_id));
+            active_peers.size(), active_num, commit_quorum, task_id);
     // commit_quorum=0 means actual commit quorum is the majority. In this case, active normal member count should be
     // >= majority. To be more specific, if we have S1(leader), S2, S3(out), S4(in), we don't allow
     // replace_member(S3, S4) if S2 is down or laggy. Needs to recover S2 first or retry with commit_quorum=1.
@@ -216,7 +217,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
         RD_LOGE(trace_id,
                 "Step1. Replace member, quorum safety check failed, active_peers={}, "
                 "active_peers_exclude_out/in_member={}, required_quorum={}, commit_quorum={}, task_id={}",
-                active_peers.size(), active_num, quorum, commit_quorum, boost::uuids::to_string(task_id));
+                active_peers.size(), active_num, quorum, commit_quorum, task_id);
         decr_pending_request_num();
         return make_async_error<>(ReplServiceError::QUORUM_NOT_MET);
     }
@@ -234,26 +235,23 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     }
 #endif
     RD_LOGI(trace_id, "Step2. Replace member, flip out member to learner, task_id={}",
-            boost::uuids::to_string(task_id));
+            task_id);
     auto learner_ret = do_flip_learner(member_out, true, true, trace_id);
     if (learner_ret != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Step2. Replace member, failed to flip out member to learner {}, task_id={}", learner_ret,
-                boost::uuids::to_string(task_id));
+                task_id);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error(std::move(learner_ret));
     }
     RD_LOGI(trace_id, "Step2. Replace member, flip out member to learner and set priority to 0, task_id={}",
-            boost::uuids::to_string(task_id));
+            task_id);
 
     // Step 3. Append log entry to mark the old member is out and new member is added.
     RD_LOGI(trace_id, "Step3. Replace member, propose to raft for HS_CTRL_START_REPLACE req, group_id={}, task_id={}",
-            boost::uuids::to_string(task_id), group_id_str());
+            task_id, group_id_str());
     auto rreq = repl_req_ptr_t(new repl_req_ctx{});
-    replace_member_ctx ctx;
-    ctx.task_id = task_id;
-    ctx.replica_out = member_out;
-    ctx.replica_in = member_in;
+    auto ctx = replace_member_ctx(task_id, member_out, member_in);
 
     sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(replace_member_ctx));
     rreq->init(repl_key{.server_id = server_id(),
@@ -266,7 +264,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     if (err != ReplServiceError::OK) {
         RD_LOGE(trace_id,
                 "Step3. Replace member, propose to raft for HS_CTRL_START_REPLACE req failed, task_id={}, err={}",
-                boost::uuids::to_string(task_id), err);
+                task_id, err);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error<>(std::move(err));
@@ -280,25 +278,25 @@ AsyncReplResult<> RaftReplDev::start_replace_member(uuid_t task_id, const replic
     }
 #endif
     RD_LOGI(trace_id, "Step4. Replace member, propose to raft to add new member, group_id={}, task_id={}",
-            group_id_str(), boost::uuids::to_string(task_id));
+            group_id_str(), task_id);
     replica_member_info member_to_add = member_in;
     member_to_add.priority = out_srv_cfg.get()->get_priority();
     auto ret = do_add_member(member_to_add, trace_id);
     if (ret != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Step4. Replace member, add member failed, err={}, task_id={}", ret,
-                boost::uuids::to_string(task_id));
+                task_id);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error<>(std::move(ret));
     }
     RD_LOGI(trace_id, "Step4. Replace member, proposed to raft to add member, task_id={}, member={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_in.id));
+            task_id, boost::uuids::to_string(member_in.id));
     reset_quorum_size(0, trace_id);
     decr_pending_request_num();
     return make_async_success<>();
 }
 
-AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const replica_member_info& member_out,
+AsyncReplResult<> RaftReplDev::complete_replace_member(std::string& task_id, const replica_member_info& member_out,
                                                        const replica_member_info& member_in, uint32_t commit_quorum,
                                                        uint64_t trace_id) {
     if (is_stopping()) {
@@ -312,7 +310,7 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
     incr_pending_request_num();
 
     RD_LOGI(trace_id, "Complete replace member, task_id={}, member_out={}, member_in={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id),
+            task_id, boost::uuids::to_string(member_out.id),
             boost::uuids::to_string(member_in.id));
 
     if (commit_quorum >= 1) {
@@ -322,7 +320,7 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
 
     // Step 5: Remove member
     RD_LOGI(trace_id, "Step5. Replace member, remove old member, task_id={}, member={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id));
+            task_id, boost::uuids::to_string(member_out.id));
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("replace_member_remove_member_failure")) {
         RD_LOGE(trace_id, "Simulating remove member failure");
@@ -332,13 +330,13 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
     auto ret = do_remove_member(member_out, trace_id);
     if (ret != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Step5. Replace member, failed to remove member, task_id={}, member={}, err={}",
-                boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id), ret);
+                task_id, boost::uuids::to_string(member_out.id), ret);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error<>(std::move(ret));
     }
     RD_LOGI(trace_id, "Step5. Replace member, proposed to raft to remove member, task_id={}, member={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id));
+            task_id, boost::uuids::to_string(member_out.id));
     auto timeout = HS_DYNAMIC_CONFIG(consensus.wait_for_config_change_ms);
     // TODO Move wait logic to nuraft_mesg
     if (!wait_and_check(
@@ -360,17 +358,14 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
         return make_async_error<>(ReplServiceError::RETRY_REQUEST);
     }
     RD_LOGD(trace_id, "Step5.  Replace member, old member is removed, task_id={}, member={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id));
+            task_id, boost::uuids::to_string(member_out.id));
 
     // Step 2. Append log entry to complete replace member
     RD_LOGI(trace_id,
             "Step6. Replace member, propose to raft for HS_CTRL_COMPLETE_REPLACE req, group_id={}, task_id={}",
-            boost::uuids::to_string(task_id), group_id_str());
+            task_id, group_id_str());
     auto rreq = repl_req_ptr_t(new repl_req_ctx{});
-    replace_member_ctx ctx;
-    ctx.task_id = task_id;
-    ctx.replica_out = member_out;
-    ctx.replica_in = member_in;
+    auto ctx = replace_member_ctx(task_id, member_out, member_in);
 
     sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(replace_member_ctx));
     rreq->init(repl_key{.server_id = server_id(),
@@ -383,7 +378,7 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
     if (err != ReplServiceError::OK) {
         RD_LOGE(trace_id,
                 "Step6. Replace member, propose to raft for HS_CTRL_COMPLETE_REPLACE req failed , task_id={}, err={}",
-                boost::uuids::to_string(task_id), err);
+                task_id, err);
         reset_quorum_size(0, trace_id);
         decr_pending_request_num();
         return make_async_error<>(std::move(err));
@@ -392,12 +387,12 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(uuid_t task_id, const rep
     reset_quorum_size(0, trace_id);
     decr_pending_request_num();
     RD_LOGI(trace_id, "Complete replace member done, group_id={}, task_id={}, member_out={} member_in={}",
-            group_id_str(), boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id),
+            group_id_str(), task_id, boost::uuids::to_string(member_out.id),
             boost::uuids::to_string(member_in.id));
     return make_async_success<>();
 }
 
-ReplaceMemberStatus RaftReplDev::get_replace_member_status(uuid_t task_id, const replica_member_info& member_out,
+ReplaceMemberStatus RaftReplDev::get_replace_member_status(std::string& task_id, const replica_member_info& member_out,
                                                            const replica_member_info& member_in,
                                                            const std::vector< replica_member_info >& others,
                                                            uint64_t trace_id) {
@@ -426,7 +421,8 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(uuid_t task_id, const
     }
 
     bool intent_completed = !found_out && found_in;
-    if (m_rd_sb->replace_member_task.task_id.is_nil()) {
+    auto persisted_task_id = get_replace_member_task_id();
+    if (persisted_task_id.empty()) {
         if (intent_completed) {
             // If caller doesn't give others, won't check it.
             bool others_match = others.size() == 0 || others.size() + 1 == peers.size();
@@ -443,7 +439,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(uuid_t task_id, const
                         "get_replace_member_status failed, other membership mismatch, task_id={}, detail={}, "
                         "others.size={}, "
                         "all_peers.size={}",
-                        boost::uuids::to_string(task_id), detail, others.size(), peers.size());
+                        task_id, detail, others.size(), peers.size());
                 decr_pending_request_num();
                 return ReplaceMemberStatus::UNKNOWN;
             }
@@ -455,7 +451,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(uuid_t task_id, const
     }
     if (m_rd_sb->replace_member_task.task_id != task_id) {
         RD_LOGE(trace_id, "get_replace_member_status failed, task_id mismatch, persisted={}, received={}",
-                boost::uuids::to_string(m_rd_sb->replace_member_task.task_id), boost::uuids::to_string(task_id));
+                persisted_task_id, task_id);
         decr_pending_request_num();
         return ReplaceMemberStatus::TASK_ID_MISMATCH;
     }
@@ -467,11 +463,11 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(uuid_t task_id, const
         RD_LOGI(trace_id,
                 "Member replacement fulfilled, but task still exists, wait for reaper thread to retry "
                 "complete_replace_member. task_id={}, out_member={}, in_member={}",
-                boost::uuids::to_string(m_rd_sb->replace_member_task.task_id), boost::uuids::to_string(member_out.id),
+                persisted_task_id, boost::uuids::to_string(member_out.id),
                 boost::uuids::to_string(member_in.id));
     }
     RD_LOGD(trace_id, "Member replacement is in progress. task_id={}, out_member={}, in_member={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(member_out.id),
+            task_id, boost::uuids::to_string(member_out.id),
             boost::uuids::to_string(member_in.id));
     decr_pending_request_num();
     return ReplaceMemberStatus::IN_PROGRESS;
@@ -1519,13 +1515,13 @@ void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
     auto ctx = r_cast< const replace_member_ctx* >(rreq->header().cbytes());
 
     RD_LOGI(rreq->traceID(), "Raft repl start_replace_member commit, task_id={} member_out={} member_in={}",
-            boost::uuids::to_string(ctx->task_id), boost::uuids::to_string(ctx->replica_out.id),
+            ctx->task_id, boost::uuids::to_string(ctx->replica_out.id),
             boost::uuids::to_string(ctx->replica_in.id));
 
     m_listener->on_start_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
     // record the replace_member intent
     std::unique_lock lg{m_sb_mtx};
-    m_rd_sb->replace_member_task.task_id = ctx->task_id;
+    std::strncpy(m_rd_sb->replace_member_task.task_id, ctx->task_id, max_replace_member_task_id_len);
     m_rd_sb->replace_member_task.replica_in = ctx->replica_in.id;
     m_rd_sb->replace_member_task.replica_out = ctx->replica_out.id;
     m_rd_sb.write();
@@ -1533,17 +1529,17 @@ void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
 
 void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
     auto ctx = r_cast< const replace_member_ctx* >(rreq->header().cbytes());
-
-    RD_LOGI(rreq->traceID(), "Raft repl complete_replace_member commit, task_id={} member_out={} member_in={}",
-            boost::uuids::to_string(ctx->task_id), boost::uuids::to_string(ctx->replica_out.id),
-            boost::uuids::to_string(ctx->replica_in.id));
+    auto task_id = std::string(ctx->task_id);
+    RD_LOGI(rreq->traceID(), "Raft repl complete_replace_member commit, task_id={} member_out={} member_in={}", task_id,
+            boost::uuids::to_string(ctx->replica_out.id), boost::uuids::to_string(ctx->replica_in.id));
 
     m_listener->on_complete_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
 
     // clear the replace_member intent
     std::unique_lock lg{m_sb_mtx};
-    if (!m_rd_sb->replace_member_task.task_id.is_nil()) {
-        RD_DBG_ASSERT(m_rd_sb->replace_member_task.task_id == ctx->task_id,
+    auto persisted_task_id = get_replace_member_task_id();
+    if (!persisted_task_id.empty()) {
+        RD_DBG_ASSERT(persisted_task_id == task_id,
                       "Invalid task_id in complete_replace_member message, received {}, expected {}", ctx->task_id,
                       m_rd_sb->replace_member_task.task_id);
         m_rd_sb->replace_member_task = replace_member_task_superblk{};
@@ -1974,7 +1970,7 @@ void RaftReplDev::monitor_replace_member_replication_status() {
     }
 
     auto peers = get_replication_status();
-    auto task_id = m_rd_sb->replace_member_task.task_id;
+    auto task_id = std::string(m_rd_sb->replace_member_task.task_id);
     auto replica_in = m_rd_sb->replace_member_task.replica_in;
     auto replica_out = m_rd_sb->replace_member_task.replica_out;
     repl_lsn_t in_lsn = 0;
@@ -2005,7 +2001,7 @@ void RaftReplDev::monitor_replace_member_replication_status() {
             "Checking replace member status, new member has caught up, task_id={}, replica_in={} with lsn={}, "
             "replica_out={} with "
             "lsn={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(replica_in), in_lsn,
+            task_id, boost::uuids::to_string(replica_in), in_lsn,
             boost::uuids::to_string(replica_out), out_lsn);
 
     trace_id_t trace_id = generateRandomTraceId();
@@ -2016,14 +2012,14 @@ void RaftReplDev::monitor_replace_member_replication_status() {
 
     replica_member_info out{replica_out, ""};
     replica_member_info in{replica_in, ""};
-    auto ret = complete_replace_member(m_rd_sb->replace_member_task.task_id, out, in, 0, trace_id).get();
+    auto ret = complete_replace_member(task_id, out, in, 0, trace_id).get();
     if (ret.hasError()) {
-        RD_LOGE(trace_id, "Failed to complete replace member, next time will retry it, task_id={}, error={}",
-                boost::uuids::to_string(task_id), ret.error());
+        RD_LOGE(trace_id, "Failed to complete replace member, next time will retry it, task_id={}, error={}", task_id,
+                ret.error());
         return;
     }
-    RD_LOGI(trace_id, "Complete replace member, task_id={}, replica_in={}, replica_out={}",
-            boost::uuids::to_string(task_id), boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out))
+    RD_LOGI(trace_id, "Complete replace member, task_id={}, replica_in={}, replica_out={}", task_id,
+            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out))
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////

@@ -489,7 +489,7 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 // In this function, it only invokes replDev start_replace_member. There is
 // a background reaper thread helps periodically check the member_in replication status, after in_member has caught up,
 // will trigger replDev complete_replace_member.
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, uuid_t task_id, const replica_member_info& member_out,
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
                                                   const replica_member_info& member_in, uint32_t commit_quorum,
                                                   uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
@@ -536,7 +536,7 @@ AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const 
 }
 
 // This query should always be called on leader to avoid misleading results due to lagging status on some followers.
-ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_id, uuid_t task_id,
+ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                                const replica_member_info& member_out,
                                                                const replica_member_info& member_in,
                                                                const std::vector< replica_member_info >& others,

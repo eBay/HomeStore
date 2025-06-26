@@ -48,7 +48,7 @@ public:
     /// @param member_in The member which is going to be added in place of member_out
     /// @param commit_quorum Commit quorum to be used for this operation. If 0, it will use the default commit quorum.
     /// @return A Future on replace the member accepted or Future ReplServiceError upon error
-    virtual AsyncReplResult<> replace_member(group_id_t group_id, uuid_t task_id, const replica_member_info& member_out,
+    virtual AsyncReplResult<> replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
                                                    const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                                    uint64_t trace_id = 0) const = 0;
 
@@ -62,7 +62,7 @@ public:
     /// @param member_in The member which is going to be added in place of member_out
     /// @param others Other members excluding member_out, member_in
     /// @return ReplaceMemberStatus
-    virtual ReplaceMemberStatus get_replace_member_status(group_id_t group_id, uuid_t task_id,
+    virtual ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                           const replica_member_info& member_out,
                                                           const replica_member_info& member_in,
                                                           const std::vector< replica_member_info >& others,

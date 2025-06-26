@@ -39,8 +39,8 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     uint32_t member_in = num_replicas;
 
     g_helper->sync_for_test_start(num_members);
-    auto task_id = boost::uuids::random_generator()();
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    std::string task_id = "task_id";
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::TASK_NOT_FOUND);
@@ -58,11 +58,11 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
 
     g_helper->sync_for_verify_start(num_members);
     LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
-        auto new_task_id = boost::uuids::random_generator()();
+        std::string new_task_id = "mismatched_task_id";
         replace_member(db, new_task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
                        ReplServiceError::REPLACE_MEMBER_TASK_MISMATCH);
     });
@@ -88,7 +88,7 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::COMPLETED);
@@ -127,11 +127,11 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         LOGINFO("Shutdown replica 2");
     }
 
-    auto task_id = boost::uuids::random_generator()();
+    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         // Replace down replica 2 with spare replica 3 with commit quorum 1
         // so that leader can go ahead with replacing member.
-        LOGINFO("Replace member started, task_id={}", boost::uuids::to_string(task_id));
+        LOGINFO("Replace member started, task_id={}", task_id);
         replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in),
                        1 /* commit quorum*/);
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
@@ -149,7 +149,7 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         this->validate_data();
     }
     g_helper->sync_for_verify_start(num_members);
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
@@ -197,7 +197,7 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
     this->shutdown_replica(2);
     LOGINFO("Shutdown replica 2");
 
-    auto task_id = boost::uuids::random_generator()();
+    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -222,7 +222,7 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
     // data synced, waiting for removing learner
     LOGINFO("data synced, sync for completing replace member, replica={}", g_helper->replica_num());
     g_helper->sync_for_verify_start(num_members);
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
@@ -245,7 +245,7 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
     }
     g_helper->sync_for_test_start(num_members);
     if (g_helper->replica_num() != 2) {
-        this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+        this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
             auto status = check_replace_member_status(db, task_id, g_helper->replica_id(member_out),
                                                       g_helper->replica_id(member_in));
             // out_member is down, so it can not response to remove req. Based on nuraft logic, leader will wait for
@@ -282,7 +282,7 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
     uint32_t member_in = num_replicas;
 
     g_helper->sync_for_test_start(num_members);
-    auto task_id = boost::uuids::random_generator()();
+    std::string task_id = "task_id";
     if (g_helper->replica_num() == member_out) {
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
@@ -314,7 +314,7 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
     }
 
     LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
@@ -333,7 +333,7 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::COMPLETED);
@@ -361,7 +361,7 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
         LOGINFO("Restart replica 1, ");
         this->restart_replica(15);
     }
-    auto task_id = boost::uuids::random_generator()();
+    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
@@ -383,7 +383,7 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
     }
 
     LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
@@ -401,7 +401,7 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, task_id, member_out, member_in] {
+    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::COMPLETED);
@@ -442,7 +442,7 @@ TEST_F(ReplDevDynamicTest, ValidateRequest) {
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
     }
 
-    auto task_id = boost::uuids::random_generator()();
+    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         // generate uuid
         replica_id_t fake_member_out = boost::uuids::random_generator()();
