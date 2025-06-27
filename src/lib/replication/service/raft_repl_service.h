@@ -53,12 +53,11 @@ private:
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::timer_handle_t m_replace_member_sync_check_timer_hdl;
-    iomgr::io_fiber_t m_reaper_fiber;
     std::mutex raft_restart_mutex;
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
-    ~RaftReplService() override;
+    ~RaftReplService() = default;
 
     static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
     int32_t compute_raft_follower_priority();
@@ -80,8 +79,8 @@ protected:
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
     AsyncReplResult<> replace_member(group_id_t group_id, uuid_t task_id, const replica_member_info& member_out,
-                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                           uint64_t trace_id = 0) const override;
+                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                     uint64_t trace_id = 0) const override;
 
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
@@ -95,8 +94,8 @@ protected:
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
-    void start_reaper_thread();
-    void stop_reaper_thread();
+    void start_repl_service_timers();
+    void stop_repl_service_timers();
     void fetch_pending_data();
     void gc_repl_devs();
     void gc_repl_reqs();
