@@ -53,12 +53,11 @@ private:
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::timer_handle_t m_replace_member_sync_check_timer_hdl;
-    iomgr::io_fiber_t m_reaper_fiber;
     std::mutex raft_restart_mutex;
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
-    ~RaftReplService() override;
+    ~RaftReplService() = default;
 
     static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
     int32_t compute_raft_follower_priority();
@@ -95,8 +94,8 @@ protected:
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
-    void start_reaper_thread();
-    void stop_reaper_thread();
+    void start_repl_service_timers();
+    void stop_repl_service_timers();
     void fetch_pending_data();
     void gc_repl_devs();
     void gc_repl_reqs();
