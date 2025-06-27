@@ -614,7 +614,14 @@ public:
                         data_size == nullptr ? std::abs(std::lround(num_blks_gen(g_re))) * block_size : *data_size;
                     this->generate_writes(size, block_size, db);
                 });
-                if (wait_for_commit) { g_helper->runner().execute().get(); }
+                if (wait_for_commit) {
+                    g_helper->runner().execute().get();
+                    // wait for related rreqs being removed from map. this way to avoid rreqs reused in this case:
+                    // 1. follower committing rreq
+                    // 2. follower received a duplicated append log entries from leader, then get the rreq from map
+                    // 3. follower finished commit, clear rreq, then the append thread hold an empty rreq.
+                    std::this_thread::sleep_for(std::chrono::seconds{1});
+                }
                 break;
             } else {
                 LOGINFO("{} entries were written on the leader_uuid={} my_uuid={}", num_entries,
