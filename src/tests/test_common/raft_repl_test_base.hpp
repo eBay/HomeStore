@@ -343,13 +343,13 @@ public:
         return hints;
     }
 
-    void on_start_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+    void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
                                  const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
-    void on_complete_replace_member(const uuid_t& task_id, const replica_member_info& member_out,
+    void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
                                     const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
@@ -743,11 +743,11 @@ public:
     void create_snapshot() { dbs_[0]->create_snapshot(); }
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
 
-    void replace_member(std::shared_ptr< TestReplicatedDB > db, uuid_t task_id, replica_id_t member_out,
+    void replace_member(std::shared_ptr< TestReplicatedDB > db, std::string& task_id, replica_id_t member_out,
                         replica_id_t member_in, uint32_t commit_quorum = 0,
                         ReplServiceError error = ReplServiceError::OK) {
-        this->run_on_leader(db, [this, error, db, task_id, member_out, member_in, commit_quorum]() {
-            LOGINFO("Start replace member task_id={}, out={}, in={}", boost::uuids::to_string(task_id),
+        this->run_on_leader(db, [this, error, db, &task_id, member_out, member_in, commit_quorum]() {
+            LOGINFO("Start replace member task_id={}, out={}, in={}", task_id,
                     boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
 
             replica_member_info out{member_out, ""};
@@ -763,9 +763,9 @@ public:
         });
     }
 
-    ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, uuid_t task_id,
+    ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
                                                     replica_id_t member_out, replica_id_t member_in) {
-        LOGINFO("check replace member status, task_id={}, out={} in={}", boost::uuids::to_string(task_id),
+        LOGINFO("check replace member status, task_id={}, out={} in={}", task_id,
                 boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
 
         replica_member_info out{member_out, ""};

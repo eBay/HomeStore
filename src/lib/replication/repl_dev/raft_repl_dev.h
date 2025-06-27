@@ -15,8 +15,11 @@
 #include "replication/log_store/repl_log_store.h"
 
 namespace homestore {
+
+static constexpr uint64_t max_replace_member_task_id_len = 64;
+
 struct replace_member_task_superblk {
-    uuid_t task_id;
+    char task_id[max_replace_member_task_id_len];
     replica_id_t replica_out;
     replica_id_t replica_in;
 };
@@ -41,9 +44,18 @@ using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
 struct replace_member_ctx {
-    uuid_t task_id;
+    char task_id[max_replace_member_task_id_len];
     replica_member_info replica_out;
     replica_member_info replica_in;
+
+    replace_member_ctx() = default;
+    replace_member_ctx(const std::string& id, const replica_member_info& out, const replica_member_info& in) {
+        auto len = std::min(id.length(), max_replace_member_task_id_len - 1);
+        std::strncpy(task_id, id.c_str(), len);
+        task_id[len] = '\0';
+        replica_out = out;
+        replica_in = in;
+    }
 };
 
 class RaftReplDevMetrics : public sisl::MetricsGroup {
@@ -229,12 +241,12 @@ public:
 
     bool bind_data_service();
     bool join_group();
-    AsyncReplResult<> start_replace_member(uuid_t task_id, const replica_member_info& member_out, const replica_member_info& member_in,
+    AsyncReplResult<> start_replace_member(std::string& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
                                            uint32_t commit_quorum = 0, uint64_t trace_id = 0);
-    AsyncReplResult<> complete_replace_member(uuid_t task_id, const replica_member_info& member_out,
+    AsyncReplResult<> complete_replace_member(std::string& task_id, const replica_member_info& member_out,
                                               const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                               uint64_t trace_id = 0);
-    ReplaceMemberStatus get_replace_member_status(uuid_t task_id, const replica_member_info& member_out,
+    ReplaceMemberStatus get_replace_member_status(std::string& task_id, const replica_member_info& member_out,
                                                   const replica_member_info& member_in,
                                                   const std::vector< replica_member_info >& others,
                                                   uint64_t trace_id = 0);
@@ -248,6 +260,8 @@ public:
     nuraft::cmd_result_code retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
                                                      uint64_t trace_id = 0);
     bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
+
+    std::string get_replace_member_task_id() const { return {m_rd_sb->replace_member_task.task_id}; }
 
     folly::SemiFuture< ReplServiceError > destroy_group();
 
