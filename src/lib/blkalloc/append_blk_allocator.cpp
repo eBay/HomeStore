@@ -73,9 +73,9 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     }
     if (avail_blks < nblks) {
         // COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
-        LOGERROR("No space left to serve request nblks: {}, available_blks: {}, actual available_blks(exclude reserved "
-                 "blks): {}",
-                 nblks, available_blks(), avail_blks);
+        LOGERROR("chunk {} has no space left to serve request nblks: {}, available_blks: {}, actual "
+                 "available_blks(exclude reserved blks): {}",
+                 m_chunk_id, nblks, available_blks(), avail_blks);
         return BlkAllocStatus::SPACE_FULL;
     } else if (nblks > max_blks_per_blkid()) {
         // consumer(vdev) already handles this case.
@@ -86,8 +86,9 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 
     // Push 1 blk to the vector which has all the requested nblks;
     out_bid = BlkId{m_last_append_offset.fetch_add(nblks), nblks, m_chunk_id};
-
-    // COUNTER_INCREMENT(m_metrics, num_alloc, 1);
+    LOGERROR("chunk {} has successfully allocated nblks: {}, totally used blks: {}, available_blks: {}, actual "
+             "available_blks(exclude reserved blks): {}",
+             m_chunk_id, nblks, get_used_blks(), available_blks(), avail_blks);
 
     return BlkAllocStatus::SUCCESS;
 }
