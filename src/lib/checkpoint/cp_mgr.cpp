@@ -14,6 +14,7 @@
  *
  *********************************************************************************/
 #include <urcu.h>
+#include <latch>
 
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
@@ -41,6 +42,7 @@ CPManager::CPManager() :
     resource_mgr().register_dirty_buf_exceed_cb(
         [this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) { this->trigger_cp_flush(false /* force */); });
 
+    start_timer_thread();
     start_cp_thread();
 }
 
@@ -64,12 +66,38 @@ uint64_t CPManager::cp_timer_us() {
     }
 }
 
+void CPManager::start_timer_thread() {
+    std::latch latch{1};
+    m_timer_fiber = nullptr;
+    iomanager.create_reactor("cp_timer_thread", iomgr::TIGHT_LOOP | iomgr::ADAPTIVE_LOOP, 1 /* num_fibers */,
+                             [this, &latch](bool is_started) {
+                                 if (is_started) {
+                                     m_timer_fiber = iomanager.iofiber_self();
+                                     latch.count_down();
+                                 }
+                             });
+    latch.wait();
+}
+
+void CPManager::stop_timer_thread() {
+    std::latch latch{1};
+    iomanager.run_on_forget(m_timer_fiber, [this, &latch]() mutable {
+        if (m_cp_timer_hdl != iomgr::null_timer_handle) {
+            iomanager.cancel_timer(m_cp_timer_hdl, true);
+            m_cp_timer_hdl = iomgr::null_timer_handle;
+        }
+        latch.count_down();
+    });
+    latch.wait();
+}
+
 void CPManager::start_timer() {
     auto usecs = cp_timer_us();
     LOGINFO("cp timer is set to {} usec", usecs);
-    m_cp_timer_hdl = iomanager.schedule_global_timer(
-        usecs * 1000, true, nullptr /*cookie*/, iomgr::reactor_regex::all_worker,
-        [this](void*) { trigger_cp_flush(false /* false */); }, true /* wait_to_schedule */);
+    iomanager.run_on_wait(m_timer_fiber, [this, usecs]() {
+        m_cp_timer_hdl = iomanager.schedule_thread_timer(usecs * 1000, true /* recurring */, nullptr /* cookie */,
+                                                         [this](void*) { trigger_cp_flush(false /* false */); });
+    });
 }
 
 void CPManager::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
@@ -87,8 +115,7 @@ void CPManager::create_first_cp() {
 
 void CPManager::shutdown() {
     LOGINFO("Stopping cp timer");
-    iomanager.cancel_timer(m_cp_timer_hdl, true);
-    m_cp_timer_hdl = iomgr::null_timer_handle;
+    stop_timer_thread();
 
     {
         std::unique_lock< std::mutex > lk(m_trigger_cp_mtx);
