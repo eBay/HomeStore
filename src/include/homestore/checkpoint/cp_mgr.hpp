@@ -163,6 +163,7 @@ private:
     bool m_in_flush_phase{false};
     bool m_pending_trigger_cp{false}; // Is there is a waiter for a cp flush to start
     folly::SharedPromise< bool > m_pending_trigger_cp_comp;
+    iomgr::io_fiber_t m_timer_fiber;
 
 public:
     CPManager();
@@ -231,6 +232,8 @@ private:
     void start_cp_thread();
     folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown);
     uint64_t cp_timer_us();
+    void start_timer_thread();
+    void stop_timer_thread();
 };
 
 extern CPManager& cp_mgr();
