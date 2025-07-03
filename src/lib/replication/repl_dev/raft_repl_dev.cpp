@@ -1263,42 +1263,47 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
     }
 
-    folly::collectAllUnsafe(futs).thenValue([this, rpc_data = std::move(rpc_data),
-                                             sgs_vec = std::move(sgs_vec)](auto&& vf) {
-        for (auto const& err_c : vf) {
-            RD_REL_ASSERT(err_c.hasValue(), "should have an error code in fetching data");
-            const auto& err = err_c.value();
-            if (sisl_unlikely(err)) {
-                COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
-                RD_LOGT(NO_TRACE_ID,
-                        "Data Channel: Critical Error happen in FetchData data. value={}, category={}, err_message={}",
-                        err.value(), err.category().name(), err.message());
-                RD_REL_ASSERT(false, "Error in reading data");
-                // TODO: Find a way to return error to the Listener
-                // TODO: actually will never arrive here as iomgr will assert
-                // (should not assert but to raise alert and leave the raft group);
-            }
-        }
+    folly::collectAllUnsafe(futs).thenValue(
+        [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec)](auto&& vf) {
+            for (auto const& err_c : vf) {
+                RD_REL_ASSERT(err_c.hasValue(), "should have an error code in fetching data");
+                const auto& err = err_c.value();
+                if (sisl_unlikely(err)) {
+                    COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
 
-        RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData data read completed for {} buffers", sgs_vec.size());
+                    // if read data failed, we should ignore the rpc_data and let the follower retry the fetch
+                    RD_LOGT(NO_TRACE_ID,
+                            "Data Channel: Critical Error happen in FetchData data. value={}, category={}, "
+                            "err_message={}, ignoring this call",
+                            err.value(), err.category().name(), err.message());
 
-        // now prepare the io_blob_list to response back to requester;
-        nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
-        for (auto const& sgs : sgs_vec) {
-            auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
-            pkts.insert(pkts.end(), ret.begin(), ret.end());
-        }
-
-        rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
-            for (auto const& sgs : sgs_vec) {
-                for (auto const& iov : sgs.iovs) {
-                    iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+                    rpc_data->send_response();
+                    return;
+                    // TODO: Find a way to return error to the Listener
+                    // TODO: actually will never arrive here as iomgr will assert
+                    // (should not assert but to raise alert and leave the raft group);
                 }
             }
-        });
 
-        rpc_data->send_response(pkts);
-    });
+            RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData data read completed for {} buffers", sgs_vec.size());
+
+            // now prepare the io_blob_list to response back to requester;
+            nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
+            for (auto const& sgs : sgs_vec) {
+                auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
+                pkts.insert(pkts.end(), ret.begin(), ret.end());
+            }
+
+            rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
+                for (auto const& sgs : sgs_vec) {
+                    for (auto const& iov : sgs.iovs) {
+                        iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+                    }
+                }
+            });
+
+            rpc_data->send_response(pkts);
+        });
 }
 
 void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse response,
