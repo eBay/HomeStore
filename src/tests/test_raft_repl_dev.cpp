@@ -558,6 +558,138 @@ TEST_F(RaftReplDevTest, ComputePriority) {
     g_helper->sync_for_cleanup_start();
 }
 
+
+TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    auto pre_raft_logstore_reserve_threshold = 0;
+    HS_SETTINGS_FACTORY().modifiable_settings([&pre_raft_logstore_reserve_threshold](auto& s) {
+        pre_raft_logstore_reserve_threshold = s.resource_limits.raft_logstore_reserve_threshold;
+        s.resource_limits.raft_logstore_reserve_threshold = 200;
+    });
+    HS_SETTINGS_FACTORY().save();
+
+    uint64_t entries_per_attempt = 100;
+    uint64_t total_entires = 0;
+
+    LOGINFO("Write on leader num_entries={}", entries_per_attempt);
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+    total_entires += entries_per_attempt;
+    // wait for commmit on all members
+    this->wait_for_commits(total_entires);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+    g_helper->sync_for_verify_start();
+
+    // trigger snapshot to update log truncation upper limit
+    // sleep 1s to ensure the new truncation upper limit is updated
+    this->create_snapshot();
+    std::this_thread::sleep_for(std::chrono::seconds{1});
+    ASSERT_GT(this->get_truncation_upper_limit(), 0);
+    LOGINFO("After 100 entries written, truncation upper limit became {}", this->get_truncation_upper_limit());
+
+    // shutdown replica 1.
+    LOGINFO("Shutdown replica 1");
+    this->shutdown_replica(1);
+
+    // write another 100 entries on leader.
+    LOGINFO("Write on leader num_entries={}", entries_per_attempt);
+    if (g_helper->replica_num() == 0 || g_helper->replica_num() == 2) {
+        this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+        // Wait for commmit on leader and follower 2
+        this->wait_for_all_commits();
+        LOGINFO("Got all commits for replica 0 and 2");
+        test_common::HSTestHelper::trigger_cp(true /* wait */);
+        LOGINFO("Trigger cp after writing 100 entries for replica 0 and 2");
+    }
+    total_entires += entries_per_attempt;
+
+    // trigger snapshot and check the truncation upper limit on leader
+    // it should not larger than 200 because replica 1 is shutdown
+    if (g_helper->replica_num() == 0) {
+        this->create_snapshot();
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        ASSERT_LT(this->get_truncation_upper_limit(), 200);
+        LOGINFO("After another 100 entries written, truncation upper limit {}", this->get_truncation_upper_limit());
+    }
+
+    g_helper->sync_for_test_start();
+
+    // start replica 1 after this.
+    LOGINFO("Start replica 1");
+    this->start_replica(1);
+
+    // write on leader to have some entries saved in raft log store.
+    entries_per_attempt = 50;
+    LOGINFO("Write on leader num_entries={}", entries_per_attempt);
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+    total_entires += entries_per_attempt;
+
+    // wait till all writes are down.
+    this->wait_for_commits(total_entires);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+    g_helper->sync_for_verify_start();
+
+    // trigger snapshot and check the truncation upper limit
+    // it should no less than 250 on because all replicas has committed upto 250
+    this->create_snapshot();
+    std::this_thread::sleep_for(std::chrono::seconds{1});
+    ASSERT_GE(this->get_truncation_upper_limit(), 250);
+    LOGINFO("After another 50 entries written, truncation upper limit became {}", this->get_truncation_upper_limit());
+
+    // wait all members sync and test raft_logstore_reserve_threshold limitation
+    g_helper->sync_for_test_start();
+
+    // shutdown replica1 again
+    LOGINFO("Shutdown replica 1 again");
+    this->shutdown_replica(1);
+
+    // write another 300 entries on leader to test one member lagged too much
+    entries_per_attempt = 300;
+    LOGINFO("Write on leader num_entries={}", entries_per_attempt);
+    if (g_helper->replica_num() == 0 || g_helper->replica_num() == 2) {
+        this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+        // Wait for commmit on leader and follower 2
+        this->wait_for_all_commits();
+        LOGINFO("Got all commits for replica 0 and 2");
+        test_common::HSTestHelper::trigger_cp(true /* wait */);
+        LOGINFO("Trigger cp after writing 300 entries for replica 0 and 2");
+    }
+    total_entires += entries_per_attempt;
+
+    // trigger snapshot and check the truncation upper limit on leader
+    // this time leader will use its commit_idx - resource_limits.raft_logstore_reserve_threshold >= 550 - 200 = 350
+    if (g_helper->replica_num() == 0) {
+        this->create_snapshot();
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        ASSERT_GE(this->get_truncation_upper_limit(), 350);
+        ASSERT_LT(this->get_truncation_upper_limit(), 550);
+        LOGINFO("After another 300 entries written, truncation upper limit {}", this->get_truncation_upper_limit());
+    }
+    g_helper->sync_for_verify_start();
+
+    // start replica1 again, wait for replica1 catch up
+    LOGINFO("Start replica 1 again");
+    this->start_replica(1);
+    g_helper->sync_for_test_start();
+    this->wait_for_commits(total_entires);
+    g_helper->sync_for_verify_start();
+
+    // validate all data written so far by reading them
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+
+    // set the settings back and save.
+    LOGINFO("Set the raft_logstore_reserve_threshold back to previous value={}", pre_raft_logstore_reserve_threshold);
+    HS_SETTINGS_FACTORY().modifiable_settings([pre_raft_logstore_reserve_threshold](auto& s) {
+        s.resource_limits.raft_logstore_reserve_threshold = pre_raft_logstore_reserve_threshold;
+    });
+    HS_SETTINGS_FACTORY().save();
+
+    g_helper->sync_for_cleanup_start();
+    LOGINFO("RaftLogTruncationTest done");
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;

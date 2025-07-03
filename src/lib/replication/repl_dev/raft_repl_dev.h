@@ -58,6 +58,13 @@ struct replace_member_ctx {
     }
 };
 
+struct truncate_ctx {
+    repl_lsn_t truncation_upper_limit = 0;
+
+    truncate_ctx() = default;
+    explicit truncate_ctx(repl_lsn_t limit) : truncation_upper_limit(limit) {}
+};
+
 class RaftReplDevMetrics : public sisl::MetricsGroup {
 public:
     explicit RaftReplDevMetrics(const char* inst_name) : sisl::MetricsGroup("RaftReplDev", inst_name) {
@@ -212,6 +219,7 @@ private:
     // the state machine should committed to before accepting traffic. This threshold ensures that
     // all potential committed log be committed before handling incoming requests.
     std::atomic< repl_lsn_t > m_traffic_ready_lsn{0};
+    std::atomic< repl_lsn_t > m_truncation_upper_limit{0}; // LSN upto which it can truncate the logs in log store
 
     std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
 
@@ -309,6 +317,7 @@ public:
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx(); }
+    repl_lsn_t get_truncation_upper_limit() const {  return m_truncation_upper_limit.load(); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
     void set_stage(repl_dev_stage_t stage);
@@ -469,6 +478,9 @@ private:
     void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
+
+    void update_truncation_boundary(repl_req_ptr_t rreq);
+    void propose_truncate_boundary();
 
     void report_blk_metrics_if_needed(repl_req_ptr_t rreq);
     ReplServiceError init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,
