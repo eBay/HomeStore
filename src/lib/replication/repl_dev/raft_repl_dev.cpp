@@ -1277,6 +1277,11 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                             "err_message={}, ignoring this call",
                             err.value(), err.category().name(), err.message());
 
+                    for (auto const& sgs : sgs_vec) {
+                        for (auto const& iov : sgs.iovs) {
+                            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+                        }
+                    }
                     rpc_data->send_response();
                     return;
                     // TODO: Find a way to return error to the Listener
