@@ -60,6 +60,7 @@ SISL_OPTION_GROUP(
     (save_to_file, "", "save_to_file", "save to file", ::cxxopts::value< bool >()->default_value("0"), ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
      ::cxxopts::value< bool >()->default_value("1"), ""),
+    (print_keys_verbose_logging, "", "print_keys_verbose_logging", "print_keys_verbose_logging", ::cxxopts::value< bool >()->default_value("0"), ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -70,6 +71,11 @@ void log_obj_life_counter() {
     });
     LOGINFO("Object Life Counter\n:{}", str);
 }
+
+#define print_keys_logging(msg) \
+    if (SISL_OPTIONS.count("print_keys_verbose_logging")) { \
+        this->print_keys(msg); \
+    }
 
 enum class OperationType {
     Put,
@@ -481,7 +487,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     }
 
     void crash_and_recover_common(OperationList& operations, std::string filename = "") {
-        //          this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
+        print_keys_logging("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
 
@@ -491,6 +497,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             this->visualize_keys(b_filename);
         }
 
+        print_keys_logging("Before crash");
         trigger_cp(false);
         LOGINFO("waiting for crash to recover");
         this->wait_for_crash_recovery(true);
@@ -500,7 +507,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree file after recovery : {}", rec_filename);
             this->visualize_keys(rec_filename);
         }
-        //          this->print_keys("Post crash and recovery, btree structure: ");
+        print_keys_logging("Post crash and recovery, btree structure: ");
         sanity_check(operations);
         //        Added to the index service right after recovery. Not needed here
         //        test_common::HSTestHelper::trigger_cp(true);
@@ -512,7 +519,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             LOGINFO("Visualize the tree after reapply {}", re_filename);
             this->visualize_keys(re_filename);
         }
-        //          this->print_keys("Post reapply, btree structure: ");
+        print_keys_logging("Post reapply, btree structure: ");
 
         this->get_all();
         LOGINFO("After reapply: {} keys in shadow map and actually {} in tress", this->m_shadow_map.size(),
@@ -584,13 +591,14 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         test_common::HSTestHelper::trigger_cp(true);
         this->get_all();
         this->m_shadow_map.save(this->m_shadow_filename);
-        // this->print_keys("reapply: after preload");
+        print_keys_logging("reapply: after preload");
         this->visualize_keys("tree_after_preload.dot");
 
         for (uint32_t round = 1; round <= crash_test_options.rounds && !time_to_stop(); round++) {
             LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, crash_test_options.rounds);
             bool print_time = false;
             elapsed_time = get_elapsed_time_sec(m_start_time);
+            print_keys_logging(fmt::format("Round {}: before crash", round));
 
             if (crash_test_options.load_mode) {
                 operations = SequenceGenerator::load_from_file(fmt::format("/tmp/operations_{}.txt", round));
@@ -732,7 +740,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     this->m_run_time, elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(),
                     crash_test_options.num_entries, this->tree_key_count() * 100.0 / crash_test_options.num_entries);
             }
-            // this->print_keys(fmt::format("reapply: after round {}", round));
+            print_keys_logging(fmt::format("reapply: after round {}", round));
             if (renew_btree_after_crash) { this->reset_btree(); };
         }
         this->destroy_btree();
