@@ -43,11 +43,12 @@ VENUM(repl_req_state_t, uint32_t,
 )
 
 VENUM(journal_type_t, uint16_t,
-      HS_DATA_LINKED = 0,           // Linked data where each entry will store physical blkid where data reside
-      HS_DATA_INLINED = 1,          // Data is inlined in the header of journal entry
-      HS_CTRL_DESTROY = 2,          // Control message to destroy the repl_dev
-      HS_CTRL_START_REPLACE = 3,    // Control message to start replace a member
-      HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member
+      HS_DATA_LINKED = 0,                     // Linked data where each entry will store physical blkid where data reside
+      HS_DATA_INLINED = 1,                    // Data is inlined in the header of journal entry
+      HS_CTRL_DESTROY = 2,                    // Control message to destroy the repl_dev
+      HS_CTRL_START_REPLACE = 3,              // Control message to start replace a member
+      HS_CTRL_COMPLETE_REPLACE = 4,           // Control message to complete replace a member,
+      HS_CTRL_UPDATE_TRUNCATION_BOUNDARY = 5, // Control message to update truncation boundary
 )
 
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, UNREADY, DESTROYING, DESTROYED, PERMANENT_DESTROYED);

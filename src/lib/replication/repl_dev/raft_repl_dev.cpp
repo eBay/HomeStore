@@ -711,8 +711,50 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
     auto null_except = std::shared_ptr< std::exception >();
     HS_REL_ASSERT(result.hasError() == false, "Not expecting creating snapshot to return false. ");
 
+    // propose truncate boundary on leader if needed
+    if (is_leader()) {
+        propose_truncate_boundary();
+    }
+
     auto ret_val{true};
     if (when_done) { when_done(ret_val, null_except); }
+}
+
+void RaftReplDev::propose_truncate_boundary() {
+    incr_pending_request_num();
+    auto repl_status = get_replication_status();
+    repl_lsn_t leader_commit_idx = m_commit_upto_lsn.load();
+    repl_lsn_t minimum_repl_idx = leader_commit_idx;
+    for (auto p : repl_status) {
+        if (p.id_ == m_my_repl_id) { continue; }
+        RD_LOGD(NO_TRACE_ID, "peer_repl_idx={}, minimum_repl_idx={}", p.replication_idx_, minimum_repl_idx);
+        minimum_repl_idx = std::min(minimum_repl_idx, static_cast< repl_lsn_t >(p.replication_idx_));
+
+    }
+    repl_lsn_t raft_logstore_reserve_threshold = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold);
+    repl_lsn_t truncation_upper_limit = std::max(leader_commit_idx - raft_logstore_reserve_threshold, minimum_repl_idx);
+    RD_LOGD(NO_TRACE_ID, "calculated truncation_upper_limit={}, "
+                         "leader_commit_idx={}, raft_logstore_reserve_threshold={}, minimum_repl_idx={}",
+                         truncation_upper_limit, leader_commit_idx, raft_logstore_reserve_threshold, minimum_repl_idx);
+    if (truncation_upper_limit > 0) {
+        auto rreq = repl_req_ptr_t(new repl_req_ctx{});
+        auto ctx = truncate_ctx(truncation_upper_limit);
+
+        sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(truncate_ctx));
+        rreq->init(repl_key{.server_id = server_id(),
+                           .term = raft_server()->get_term(),
+                           .dsn = m_next_dsn.fetch_add(1),
+                           .traceID = std::numeric_limits< uint64_t >::max()},
+                   journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY, true, header, sisl::blob{}, 0, m_listener);
+
+        auto err = m_state_machine->propose_to_raft(std::move(rreq));
+        if (err != ReplServiceError::OK) {
+            // failed to propose to raft to update truncation boundary
+            // the update will be retried next create_snapshot, so we just log the error
+            RD_LOGW(NO_TRACE_ID, "propose to raft for HS_CTRL_UPDATE_TRUNCATION_BOUNDARY req failed, err={}", err);
+        }
+    }
+    decr_pending_request_num();
 }
 
 // 1 before repl_dev.stop() is called, the upper layer should make sure that there is no pending request. so graceful
@@ -1415,6 +1457,8 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
         start_replace_member(rreq);
     } else if (rreq->op_code() == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
         complete_replace_member(rreq);
+    } else if (rreq->op_code() == journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY) {
+        update_truncation_boundary(rreq);
     } else {
         m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), {rreq->local_blkid()}, rreq);
     }
@@ -1546,6 +1590,38 @@ void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
         m_rd_sb.write();
     }
     RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared.");
+}
+
+void RaftReplDev::update_truncation_boundary(repl_req_ptr_t rreq) {
+    repl_lsn_t cur_checkpoint_lsn = 0;
+    {
+        std::unique_lock lg{m_sb_mtx};
+        cur_checkpoint_lsn = m_rd_sb->checkpoint_lsn;
+    }
+    // expected truncation_upper_limit should not larger than the current checkpoint_lsn, this is to ensure that
+    // when a crash happens before index flushed to disk, all the logs larger than checkpoint_lsn are still available
+    // to replay.
+    auto ctx = r_cast< const truncate_ctx* >(rreq->header().cbytes());
+    auto exp_truncation_upper_limit = std::min(ctx->truncation_upper_limit, cur_checkpoint_lsn);
+    auto cur_truncation_upper_limit = m_truncation_upper_limit.load();
+    // exp_truncation_upper_limit might be less or equal to cur_truncation_upper_limit after Baseline Re-sync,
+    // we should skip update to ensure the truncation_upper_limit is always increasing.
+    // for example:
+    // T1: Leader commits upto 10000, truncate logs upto 5000, while one of followers F1 is lagging behind with lsn 100
+    // T2: F1 receives a snapshot with lsn 10000, start catching up
+    // T3: Leader commits upto 11000, propose truncation_upper_limit as 6000
+    // T4: F1 catches up and commits upto 10000, this time truncation_upper_limit is updated as 10000
+    // T5: F1 doing incremental re-sync, applies the log with truncation_upper_limit=6000, which is less than 10000
+    if (exp_truncation_upper_limit <= cur_truncation_upper_limit) {
+        RD_LOGW(NO_TRACE_ID,
+                "exp_truncation_upper_limit {} is no larger than cur_truncation_upper_limit {}",
+                exp_truncation_upper_limit, cur_truncation_upper_limit);
+        return;
+    }
+
+    while (cur_truncation_upper_limit < exp_truncation_upper_limit &&
+           !m_truncation_upper_limit.compare_exchange_weak(cur_truncation_upper_limit, exp_truncation_upper_limit)) {}
+    RD_LOGI(NO_TRACE_ID, "Raft repl update truncation_upper_limit to {}", exp_truncation_upper_limit);
 }
 
 static bool blob_equals(sisl::blob const& a, sisl::blob const& b) {

@@ -114,8 +114,12 @@ std::string ReplLogStore::rdev_name() const { return m_rd.rdev_name(); }
 std::string ReplLogStore::identify_str() const { return m_rd.identify_str(); }
 
 bool ReplLogStore::compact(ulong compact_upto_lsn) {
-    RD_LOGD(NO_TRACE_ID, "Raft Channel: compact_to_lsn={}", compact_upto_lsn);
-    m_rd.on_compact(compact_upto_lsn);
-    return HomeRaftLogStore::compact(compact_upto_lsn);
+    auto truncation_upper_limit = m_rd.get_truncation_upper_limit();
+    auto effective_compact_lsn = std::min(static_cast< repl_lsn_t >(compact_upto_lsn), truncation_upper_limit);
+    RD_LOGD(NO_TRACE_ID,
+            "Raft Channel: effective_compact_lsn={}, raft compact_to_lsn={}, local truncation_upper_limit={}",
+            effective_compact_lsn, compact_upto_lsn, truncation_upper_limit);
+    m_rd.on_compact(effective_compact_lsn);
+    return HomeRaftLogStore::compact(effective_compact_lsn);
 }
 } // namespace homestore

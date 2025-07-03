@@ -444,6 +444,13 @@ public:
         LOGINFO("Manually truncated");
     }
 
+    repl_lsn_t get_truncation_upper_limit() {
+        auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
+        auto limit = raft_repl_dev->get_truncation_upper_limit();
+        LOGINFO("Truncation upper limit is {}", limit);
+        return limit;
+    }
+
     void set_zombie() { zombie_ = true; }
     bool is_zombie() {
         // Wether a group is zombie(non recoverable)
@@ -742,6 +749,7 @@ public:
 
     void create_snapshot() { dbs_[0]->create_snapshot(); }
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
+    repl_lsn_t get_truncation_upper_limit() { return dbs_[0]->get_truncation_upper_limit(); }
 
     void replace_member(std::shared_ptr< TestReplicatedDB > db, std::string& task_id, replica_id_t member_out,
                         replica_id_t member_in, uint32_t commit_quorum = 0,

@@ -401,6 +401,9 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
 
     m_rd.m_listener->write_snapshot_obj(snp_ctx, snp_data);
     if (is_last_obj) {
+        // Nuraft will compact and truncate all logs when processeing the last obj.
+        // Update the truncation upper limit here to ensure all stale logs are truncated.
+        m_rd.m_truncation_upper_limit.exchange(s_cast< repl_lsn_t >(s.get_last_log_idx()));
         hs()->cp_mgr().trigger_cp_flush(true).wait(); // ensure DSN is flushed to disk
     }
 
