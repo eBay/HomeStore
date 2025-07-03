@@ -8,7 +8,7 @@ on:
 
 jobs:
   Build:
-    timeout: 268 # minutes, equal to max + 3*std of the last 2500 successful runs
+    timeout-minutes: 268 # equal to max + 3*std of the last 2500 successful runs
     strategy:
       fail-fast: false
       matrix:
