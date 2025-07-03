@@ -517,6 +517,7 @@ std::string IndexWBCache::to_string_dag_bufs(DagMap& dags, cp_id_t cp_id) {
 
 void IndexWBCache::prune_up_buffers(IndexBufferPtr const& buf, std::vector< IndexBufferPtr >& pruned_bufs_to_repair) {
     auto up_buf = buf->m_up_buffer;
+    auto grand_up_buf = up_buf->m_up_buffer;
     if (!up_buf || !up_buf->m_wait_for_down_buffers.testz()) {
         return;
     }
@@ -527,8 +528,7 @@ void IndexWBCache::prune_up_buffers(IndexBufferPtr const& buf, std::vector< Inde
                 up_buf->to_string(), buf->to_string());
     update_up_buffer_counters(up_buf);
 
-    pruned_bufs_to_repair.push_back(up_buf);
-    auto grand_up_buf = up_buf->m_up_buffer;
+    pruned_bufs_to_repair.push_back(up_buf);    
     if (grand_up_buf && !grand_up_buf->is_meta_buf() && grand_up_buf->m_wait_for_down_buffers.testz()) {
         LOGTRACEMOD(
             wbcache,
