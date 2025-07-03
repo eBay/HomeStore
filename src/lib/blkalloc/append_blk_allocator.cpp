@@ -86,8 +86,9 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 
     // Push 1 blk to the vector which has all the requested nblks;
     out_bid = BlkId{m_last_append_offset.fetch_add(nblks), nblks, m_chunk_id};
-
-    // COUNTER_INCREMENT(m_metrics, num_alloc, 1);
+    LOGDEBUG("chunk {} has successfully allocated nblks: {}, totally used blks: {}, available_blks: {}, actual "
+             "available_blks(exclude reserved blks): {}, last_append_offset: {}",
+             m_chunk_id, nblks, get_used_blks(), available_blks(), avail_blks, m_last_append_offset.load());
 
     return BlkAllocStatus::SUCCESS;
 }
@@ -164,9 +165,9 @@ std::string AppendBlkAllocator::to_string() const {
 
 blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
-blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset.load(std::memory_order_relaxed); }
+blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset.load(); }
 
-blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return m_freeable_nblks.load(std::memory_order_relaxed); }
+blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return m_freeable_nblks.load(); }
 
 nlohmann::json AppendBlkAllocator::get_status(int log_level) const {
     nlohmann::json j;
