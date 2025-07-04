@@ -184,7 +184,8 @@ table ResourceLimits {
 
     /* num entries that raft logstore wants to reserve -- its truncate should not across this */
     /* 0 means HomeStore doesn't reserve anything and let nuraft controlls the truncation */
-    raft_logstore_reserve_threshold: uint32 = 0 (hotswap);   
+    /* default reserve 1 million logs */
+    raft_logstore_reserve_threshold: uint32 = 1000000 (hotswap);
     
     /* resource audit timer in ms */
     resource_audit_timer_ms: uint32 = 120000;
@@ -237,7 +238,9 @@ table Consensus {
     snapshot_freq_distance: uint32 = 2000;
 
     // Num reserved log items while triggering compact from raft server, only consumed by nuraft server;
-    num_reserved_log_items: uint32 = 20000;
+    // Set it same as snapshot_freq_distance, so that every create_snapshot will trigger compact
+    // which is helpful for truncate unused logs
+    num_reserved_log_items: uint32 = 2000;
 
     // Max append batch size
     max_append_batch_size: int32 = 64;

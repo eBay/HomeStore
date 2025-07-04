@@ -130,6 +130,8 @@ if (${io_tests})
         add_test(NAME MetaBlkMgr-Epoll COMMAND test_meta_blk_mgr)
         add_test(NAME DataService-Epoll COMMAND test_data_service)
         # add_test(NAME RaftReplDev-Epoll COMMAND test_raft_repl_dev)
+        # tmp check truncation ut because raft repl ut fix not merged
+        add_test(NAME RaftReplDev-Truncation-Epoll COMMAND test_raft_repl_dev --gtest_filter=RaftReplDevTest.RaftLogTruncationTest)
         # add_test(NAME RaftReplDevDynamic-Epoll COMMAND test_raft_repl_dev_dynamic --override_config homestore_config.consensus.replace_member_sync_check_interval_ms=1000)
         add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev)
     endif()
