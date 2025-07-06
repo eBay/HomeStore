@@ -2068,7 +2068,7 @@ void RaftReplDev::monitor_replace_member_replication_status() {
     if (!catch_up) {
         RD_LOGD(NO_TRACE_ID,
                 "Checking replace member status, task_id={},replica_in={} with lsn={}, replica_out={} with lsn={}",
-                boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_in), in_lsn,
+                task_id, boost::uuids::to_string(replica_in), in_lsn,
                 boost::uuids::to_string(replica_out), out_lsn);
         return;
     }

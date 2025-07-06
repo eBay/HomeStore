@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.18.6"
+    version = "6.19.0"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
