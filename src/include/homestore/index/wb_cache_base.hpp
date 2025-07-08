@@ -38,7 +38,7 @@ public:
     /// @tparam K Key type of the Index
     /// @param node_initializer Callback to be called upon which buffer is turned into btree node
     /// @return Node which was created by the node_initializer
-    virtual BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) = 0;
+    virtual BtreeNodePtr alloc_buf(uint32_t ordinal, node_initializer_t&& node_initializer) = 0;
 
     /// @brief Write buffer
     /// @param buf

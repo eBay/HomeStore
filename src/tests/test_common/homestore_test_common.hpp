@@ -161,6 +161,7 @@ public:
         blk_allocator_type_t blkalloc_type{blk_allocator_type_t::varsize};
         uint32_t blk_size{0};
         shared< ChunkSelector > custom_chunk_selector{nullptr};
+        shared< ChunkSelector > index_chunk_selector{nullptr};
         IndexServiceCallbacks* index_svc_cbs{nullptr};
         shared< ReplApplication > repl_app{nullptr};
         chunk_num_t num_chunks{1};
@@ -439,7 +440,7 @@ private:
             if (svc == HS_SERVICE::DATA) {
                 hsi->with_data_service(tp.custom_chunk_selector);
             } else if (svc == HS_SERVICE::INDEX) {
-                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs));
+                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs), tp.index_chunk_selector);
             } else if ((svc == HS_SERVICE::LOG)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {
@@ -480,7 +481,11 @@ private:
                        ? chunk_selector_type_t::CUSTOM
                        : chunk_selector_type_t::ROUND_ROBIN}},
                  {HS_SERVICE::INDEX,
-                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                  {.dev_type = homestore::HSDevType::Fast,
+                   .size_pct = svc_params[HS_SERVICE::INDEX].size_pct,
+                   .chunk_sel_type = svc_params[HS_SERVICE::INDEX].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}},
                  {HS_SERVICE::REPLICATION,
                   {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
                    .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
