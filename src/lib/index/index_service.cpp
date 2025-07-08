@@ -39,9 +39,7 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
 
     meta_service().register_handler(
         "wb_cache",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            m_wbcache_sb = std::pair{mblk, std::move(buf)};
-        },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { m_wbcache_sb = std::pair{mblk, std::move(buf)}; },
         nullptr);
 }
 
@@ -98,6 +96,15 @@ void IndexService::start() {
 }
 
 IndexService::~IndexService() { m_wb_cache.reset(); }
+
+bool IndexService::sanity_check(const uint32_t index_ordinal, const IndexBufferPtrList& bufs) const {
+    auto tbl = get_index_table(index_ordinal);
+    if (!tbl){
+        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected",
+                      index_ordinal);
+    }
+    return tbl->sanity_check(bufs);
+}
 
 void IndexService::stop() {
     start_stopping();

@@ -79,6 +79,7 @@ public:
     bool remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     std::shared_ptr< IndexTableBase > get_index_table(uuid_t uuid) const;
     std::shared_ptr< IndexTableBase > get_index_table(uint32_t ordinal) const;
+    bool sanity_check(const uint32_t  index_ordinal, const IndexBufferPtrList& bufs) const;
 
     // Reserve an ordinal for the index table
     uint32_t reserve_ordinal();
