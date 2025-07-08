@@ -107,9 +107,22 @@ public:
         }
     }
 
-    void audit_tree() override {
+    void audit_tree() const override {
         cp_mgr().cp_guard();
         Btree< K, V >::sanity_sub_tree();
+    }
+
+    bool sanity_check(const IndexBufferPtrList& bufs) const override {
+        for (auto& buf : bufs) {
+            if (buf->is_meta_buf()) { continue; }
+            try {
+                Btree< K, V >::validate_node(buf->blkid().to_integer());
+            } catch (const std::exception& e) {
+                LOGERROR("Exception during validation of node {}", buf->blkid().to_integer());
+                return false;
+            }
+        }
+        return true;
     }
 
     btree_status_t destroy() override {
