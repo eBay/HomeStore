@@ -723,6 +723,8 @@ private:
     void start_timer();
     folly::Future< int > stop_timer();
 
+    bool is_ready() const { return m_is_ready.load(); }
+
     bool allow_inline_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::INLINE); }
     bool allow_timer_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::TIMER); }
     bool allow_explicit_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::EXPLICIT); }
@@ -806,6 +808,10 @@ private:
     iomgr::FiberManagerLib::mutex m_flush_mtx;
     std::atomic_uint64_t m_pending_callback{0};
     folly::SharedMutexWritePriority m_stream_tracker_mtx;
+
+    // This is used to ensure that the logdev meta is created/loaded
+    // to avoid other threads accessing it before it is ready (e.g., resource_mgr's device truncate thread)
+    std::atomic_bool m_is_ready{false};
 
 private:
     // graceful shutdown related fields

@@ -86,6 +86,9 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
         m_last_flush_idx = m_log_idx - 1;
     }
 
+    // Now that we have create/load logdev metablk, so the log dev is ready to be used
+    m_is_ready = true;
+
     if (allow_timer_flush()) start_timer();
     handle_unopened_log_stores(format);
 
@@ -112,6 +115,7 @@ LogDev::~LogDev() {
     m_log_records.reset(nullptr);
     m_logdev_meta.reset();
     m_log_idx.store(0);
+    m_is_ready = false;
     m_pending_flush_size.store(0);
     m_last_flush_idx = -1;
     m_last_flush_ld_key = logdev_key{0, 0};
@@ -146,6 +150,9 @@ void LogDev::stop() {
     for (auto& [_, store] : m_id_logstore_map) {
         store.log_store->stop();
     }
+
+    // trigger a new flush to make sure all pending writes are flushed
+    flush_under_guard();
 
     // after we call stop, we need to do any pending device truncations
     truncate();
@@ -458,6 +465,10 @@ bool LogDev::flush_under_guard() {
 }
 
 bool LogDev::flush() {
+    if (!is_ready()) {
+        THIS_LOGDEV_LOG(INFO, "LogDev is not ready to flush, log_dev={}", m_logdev_id);
+        return false;
+    }
     m_last_flush_time = Clock::now();
     // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
     auto new_idx = m_log_idx.load(std::memory_order_acquire) - 1;
@@ -566,6 +577,10 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 }
 
 uint64_t LogDev::truncate() {
+    if (!is_ready()) {
+        THIS_LOGDEV_LOG(INFO, "LogDev is not ready to truncate, log_dev={}", m_logdev_id);
+        return 0;
+    }
     auto stopping = is_stopping();
     incr_pending_request_num();
     // Order of this lock has to be preserved. We take externally visible lock which is flush lock first. This
