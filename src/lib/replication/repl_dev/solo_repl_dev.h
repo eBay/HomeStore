@@ -48,6 +48,7 @@ private:
     uuid_t m_group_id;
     std::atomic< logstore_seq_num_t > m_commit_upto{-1};
     std::atomic< bool > m_is_recovered{false};
+    std::atomic< bool > m_paused{false};
 
 public:
     SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_existing);
@@ -80,9 +81,14 @@ public:
     bool is_ready_for_traffic() const override { return true; }
     void set_stage(repl_dev_stage_t stage) override {}
     repl_dev_stage_t get_stage() const override {
-        return repl_dev_stage_t::ACTIVE;
-    }
+        return repl_dev_stage_t::ACTIVE; }
     void purge() override {}
+
+    void pause_state_machine(size_t timeout) override { m_paused.store(true); }
+
+    void resume_state_machine() override { m_paused.store(false); }
+
+    bool is_state_machine_paused() override { return m_paused.load(); }
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return nullptr;

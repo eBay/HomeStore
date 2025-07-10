@@ -328,6 +328,9 @@ public:
     bool is_ready_for_traffic() const override;
     // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
     void purge() override { RD_REL_ASSERT(false, "NOT SUPPORTED YET"); }
+    void pause_state_machine(size_t timeout) override;
+    void resume_state_machine() override;
+    bool is_state_machine_paused() override;
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);

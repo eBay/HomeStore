@@ -555,6 +555,15 @@ public:
     /// @brief Clean up resources on this repl dev.
     virtual void purge() = 0;
 
+    /// @brief Pause repl dev state machine, timeout is in milliseconds.
+    virtual void pause_state_machine(size_t timeout) = 0;
+
+    /// @brief Resume repl dev state machine.
+    virtual void resume_state_machine() = 0;
+
+    /// @brief Check if the state machine is paused.
+    virtual bool is_state_machine_paused() = 0;
+
     virtual std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
