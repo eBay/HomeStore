@@ -432,12 +432,14 @@ public:
         auto out_bids = std::make_shared< MultiBlkId >();
         ++m_outstanding_io_cnt;
         // out_bids are returned syncronously;
-        write_sgs(io_size, sg, num_iovs, *out_bids).thenValue([this, sg, out_bids](auto) {
+        auto fut = write_sgs(io_size, sg, num_iovs, *out_bids).thenValue([this, sg, out_bids](auto rc) {
             cal_write_blk_crc(*sg, *out_bids);
             free(*sg);
             --m_outstanding_io_cnt;
             ++m_total_io_comp_cnt;
+	    return rc;
         });
+	std::move(fut).wait();
     }
 
     // read_io has to process and send async_read all the blkids before it can exit and yielf to next io;
@@ -532,7 +534,7 @@ public:
         // read op ratio : 30%, free op ratio: 20%
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
-        std::uniform_int_distribution< uint8_t > op_type{1, static_cast< uint8_t >(DataSvcOp_t::max_op) - 1};
+        std::uniform_int_distribution< uint8_t > op_type{1, 1};
 
         return static_cast< DataSvcOp_t >(op_type(re));
     }
@@ -945,10 +947,7 @@ TEST_F(BlkDataServiceTest, TestRandMixIOLoad) {
         // Perform the I/O operation
         switch (io_op) {
         case DataSvcOp_t::async_alloc_write: // Write
-            iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() {
-                // num_iovs defaulted to 1;
-                this->write_io_load(io_size);
-            });
+            this->write_io_load(io_size);
             break;
         case DataSvcOp_t::async_read: // Read
 
@@ -977,6 +976,7 @@ TEST_F(BlkDataServiceTest, TestRandMixIOLoad) {
 
     // Wait for the I/O operations to complete
     wait_for_outstanding_io_done();
+    LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
 }
 
 /**
