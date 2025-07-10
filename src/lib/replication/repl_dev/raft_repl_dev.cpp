@@ -2489,4 +2489,19 @@ bool RaftReplDev::is_ready_for_traffic() const {
     }
     return ready;
 }
+
+void RaftReplDev::pause_state_machine(size_t timeout) {
+    RD_LOGI(NO_TRACE_ID, "Pause state machine for group_id={}", group_id_str());
+    raft_server()->pause_state_machine_execution(timeout);
+}
+
+bool RaftReplDev::is_state_machine_paused() {
+    return raft_server()->is_state_machine_execution_paused();
+}
+
+void RaftReplDev::resume_state_machine() {
+    RD_LOGI(NO_TRACE_ID, "Resume state machine execution for group_id={}", group_id_str());
+    raft_server()->resume_state_machine_execution();
+}
+
 } // namespace homestore
