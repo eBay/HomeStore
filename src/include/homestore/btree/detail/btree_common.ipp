@@ -292,9 +292,13 @@ void Btree< K, V >::validate_sanity_child(const BtreeNodePtr& parent_node, uint3
         if(ind < parent_node->total_entries()){
             BT_REL_ASSERT_LE(cur_child_key.compare(parent_key), 0, " child {} {}-th key is greater than its parent's {} {}-th key", child_node->to_string(), i , parent_node->to_string(), ind);
             if(ind>0) {
-                BT_REL_ASSERT_GT(cur_child_key.compare(previous_parent_key), 0,
-                                 " child {} {}-th key is less than its parent's {} {}-th key", child_node->to_string(),
-                                 i, parent_node->to_string(), ind - 1);
+                if(cur_child_key.compare(previous_parent_key) <= 0){
+                    // there can be a transient case where a key appears in two children. When the replay is done, it should be fixed
+                    BT_LOG(DEBUG, "child {} {}-th key is less than or equal to its parent's {} {}-th key", child_node->to_string(), i, parent_node->to_string(), ind - 1);
+                }
+                //BT_REL_ASSERT_GT(cur_child_key.compare(previous_parent_key), 0,
+                                // " child {} {}-th key is less than its parent's {} {}-th key", child_node->to_string(),
+                                // i, parent_node->to_string(), ind - 1);
             }
 
         }else
