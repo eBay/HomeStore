@@ -100,6 +100,9 @@ public:
                                get_product_name(), get_system_uuid_str());
         return str;
     }
+    bool is_empty() const {
+        return gen_number == 0 && version == 0 && std::string(product_name).empty();
+    }
 };
 
 struct pdev_info_header {

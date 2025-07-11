@@ -35,6 +35,8 @@ blk_num_t VChunk::get_defrag_nblks() const { return m_internal_chunk->blk_alloca
 
 uint32_t VChunk::get_pdev_id() const { return m_internal_chunk->physical_dev()->pdev_id(); }
 
+const std::string& VChunk::get_pdev_name() const { return m_internal_chunk->physical_dev()->get_devname(); }
+
 uint16_t VChunk::get_chunk_id() const { return m_internal_chunk->chunk_id(); }
 
 uint64_t VChunk::size() const { return m_internal_chunk->size(); }

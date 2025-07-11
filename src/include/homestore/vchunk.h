@@ -34,6 +34,7 @@ public:
     blk_num_t get_used_blks() const;
     blk_num_t get_defrag_nblks() const;
     uint32_t get_pdev_id() const;
+    const std::string& get_pdev_name() const;
     uint16_t get_chunk_id() const;
     cshared< Chunk > get_internal_chunk() const;
     uint64_t size() const;
