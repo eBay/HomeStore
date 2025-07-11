@@ -515,6 +515,30 @@ std::string IndexWBCache::to_string_dag_bufs(DagMap& dags, cp_id_t cp_id) {
     return str;
 }
 
+void IndexWBCache::prune_up_buffers(IndexBufferPtr const& buf, std::vector< IndexBufferPtr >& pruned_bufs_to_repair) {
+    auto up_buf = buf->m_up_buffer;
+    auto grand_up_buf = up_buf->m_up_buffer;
+    if (!up_buf || !up_buf->m_wait_for_down_buffers.testz()) {
+        return;
+    }
+
+    // if up buffer has up buffer, then we need to decrement its wait_for_down_buffers
+    LOGINFOMOD(wbcache,
+                "\n\npruning up_buffer due to zero dependency of child\n up buffer {}\n buffer {}",
+                up_buf->to_string(), buf->to_string());
+    update_up_buffer_counters(up_buf);
+
+    pruned_bufs_to_repair.push_back(up_buf);    
+    if (grand_up_buf && !grand_up_buf->is_meta_buf() && grand_up_buf->m_wait_for_down_buffers.testz()) {
+        LOGTRACEMOD(
+            wbcache,
+            "\nadding grand_buffer to repair list due to zero dependency of child\n grand buffer {}\n buffer {}",
+            grand_up_buf->to_string(),
+            buf->to_string());
+        pruned_bufs_to_repair.push_back(grand_up_buf);
+    }
+}
+
 void IndexWBCache::recover(sisl::byte_view sb) {
     // If sb is empty, its possible a first time boot.
     if ((sb.bytes() == nullptr) || (sb.size() == 0)) {
@@ -573,6 +597,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         potential_parent_recovered_bufs(
             [](const IndexBufferPtr& a, const IndexBufferPtr& b) { return a->m_node_level < b->m_node_level; });
 
+    std::vector< IndexBufferPtr > pruned_bufs_to_repair;
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
     for (auto const& [_, buf] : bufs) {
         load_buf(buf);
@@ -612,14 +637,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                     LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
                                 buf->m_up_buffer->to_string());
                     buf->m_up_buffer->remove_down_buffer(buf);
-                    if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
-                        // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
-                        LOGINFOMOD(wbcache,
-                                   "\n\npruning up_buffer due to zero dependency of child\n up buffer {}\n buffer {}",
-                                   buf->m_up_buffer ? buf->m_up_buffer->to_string() : std::string("nullptr"),
-                                   buf->to_string());
-                        update_up_buffer_counters(buf->m_up_buffer /*,visited_bufs*/);
-                    }
+                    prune_up_buffers(buf, pruned_bufs_to_repair);
                     buf->m_up_buffer = nullptr;
                 }
             }
@@ -628,18 +646,16 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             // New node
             if (was_node_committed(buf) && was_node_committed(buf->m_up_buffer)) {
                 // Both current and up buffer is commited, we can safely commit the current block
+                LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
+                            buf->m_up_buffer->to_string());
                 m_vdev->commit_blk(buf->m_blkid);
                 pending_bufs.push_back(buf->m_up_buffer);
             } else {
                 // Up buffer is not committed, we need to repair it first
+                LOGTRACEMOD(wbcache, "The up buffer {} is not committed for the new buffer {}",
+                            buf->m_up_buffer->to_string(), buf->to_string());
                 buf->m_up_buffer->remove_down_buffer(buf);
-                if (buf->m_up_buffer->m_wait_for_down_buffers.testz()) {
-                    // if up buffer has upbuffer, then we need to decrement its wait_for_down_buffers
-                    LOGINFOMOD(wbcache, "\npruning due to zero dependency of child\n up buffer {} \n buffer \n{}",
-                               buf->m_up_buffer ? buf->m_up_buffer->to_string() : std::string("nullptr"),
-                               buf->to_string());
-                    update_up_buffer_counters(buf->m_up_buffer);
-                }
+                prune_up_buffers(buf, pruned_bufs_to_repair);
                 //                buf->m_up_buffer = nullptr;
             }
         }
@@ -651,6 +667,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     // add deleted bufs to logs here as well
     auto modified_dags = generate_dag_buffers(bufs);
     LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log({}, pending_bufs));
+    LOGTRACEMOD(wbcache, "All pruned bufs for recovery\n{}", detailed_log({}, pruned_bufs_to_repair));
     LOGTRACEMOD(wbcache, "After recovery: {}", to_string_dag_bufs(modified_dags, icp_ctx->id()));
 
 #endif
@@ -684,6 +701,15 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     for (auto const& buf : pending_bufs) {
         LOGTRACEMOD(wbcache, "recover and repairing  up_buffer buf {}", buf->to_string());
         recover_buf(buf);
+    }
+
+    // When we prune a buffer due to zero down dependency, there is a case where the key range of the parent needs to be adjusted.
+    // This can happen when a child is merged and its right sibling is flushed before the parent is flushed.
+    // And during recovery, we prune the node and keep the deleted child and keep the parent as is. 
+    // We need to call repair_links directly on them as the recovery_buf() path will not trigger it.
+    for (auto const& buf : pruned_bufs_to_repair) {
+        LOGTRACEMOD(wbcache, "pruned buf {} is repaired", buf->to_string());
+        index_service().repair_index_node(buf->m_index_ordinal, buf);
     }
 
     for (auto const& buf : deleted_bufs) {
