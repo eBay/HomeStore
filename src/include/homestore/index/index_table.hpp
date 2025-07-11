@@ -498,6 +498,9 @@ protected:
 
         auto last_parent_key = parent_node->get_last_key< K >();
         auto sibling_node_id = find_true_sibling(parent_node);
+        // during delete stale links, the current edge node can be deleted and its left sibling will become edge node.
+        // While repairing the left sibling, has_valid_edge() is false but we need to make it an edge node.
+        // So we check if the true_sibling is empty to determine if we need to make it an edge node.
         auto const is_parent_edge_node = (sibling_node_id == empty_bnodeid);
         if ((parent_node->total_entries() == 0) && !is_parent_edge_node) {
             BT_LOG_ASSERT(false, "Parent node={} is empty and not an edge node but was asked to repair",

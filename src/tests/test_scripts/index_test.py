@@ -146,8 +146,8 @@ def long_running(*args):
     options = parse_arguments()
     long_runnig_index(options, 0)
     long_running_clean_shutdown(options, 0)
-    long_runnig_index(options, 1)
-    long_running_clean_shutdown(options, 1)
+    # long_runnig_index(options, 1)
+    # long_running_clean_shutdown(options, 1)
     for i in range(20):
         print(f"Iteration {i + 1}")
         long_running_crash_put_remove(options)

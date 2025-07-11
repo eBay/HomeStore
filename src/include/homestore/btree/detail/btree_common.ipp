@@ -294,11 +294,12 @@ void Btree< K, V >::validate_sanity_child(const BtreeNodePtr& parent_node, uint3
             if(ind>0) {
                 if(cur_child_key.compare(previous_parent_key) <= 0){
                     // there can be a transient case where a key appears in two children. When the replay is done, it should be fixed
+                    // Consider the example Parent P, children C1, C2, C3, C4. A key is deleted resulting in a merge and C3 deleted, and the same key is inserted in the current cp
+                    // Our case is that P is dirtied, C3 deleted, C4 updated and flushed. During recover, we will keep C3 and P remains the same.
+                    // Since C4 is flushed, the key that was removd and inserted will showup in C3 and C4. 
+                    // After the replay post recovery, C3 should be gone and the tree is valid again.
                     BT_LOG(DEBUG, "child {} {}-th key is less than or equal to its parent's {} {}-th key", child_node->to_string(), i, parent_node->to_string(), ind - 1);
                 }
-                //BT_REL_ASSERT_GT(cur_child_key.compare(previous_parent_key), 0,
-                                // " child {} {}-th key is less than its parent's {} {}-th key", child_node->to_string(),
-                                // i, parent_node->to_string(), ind - 1);
             }
 
         }else

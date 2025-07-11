@@ -703,7 +703,10 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         recover_buf(buf);
     }
 
-    // repair the pruned bufs
+    // When we prune a buffer due to zero down dependency, there is a case where the key range of the parent needs to be adjusted.
+    // This can happen when a child is merged and its right sibling is flushed before the parent is flushed.
+    // And during recovery, we prune the node and keep the deleted child and keep the parent as is. 
+    // We need to call repair_links directly on them as the recovery_buf() path will not trigger it.
     for (auto const& buf : pruned_bufs_to_repair) {
         LOGTRACEMOD(wbcache, "pruned buf {} is repaired", buf->to_string());
         index_service().repair_index_node(buf->m_index_ordinal, buf);
