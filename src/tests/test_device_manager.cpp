@@ -249,6 +249,145 @@ TEST_F(DeviceMgrTest, ReplaceDeviceWithEmptyDevice) {
     this->validate_striped_vdevs();
 }
 
+TEST_F(DeviceMgrTest, ReplaceTwoDevicesAtOnce) {
+    static constexpr uint32_t num_test_vdevs = 5;
+    uint64_t avail_size{0};
+    for (auto& pdev : m_pdevs) {
+        avail_size += pdev->data_size();
+    }
+
+    uint32_t size_pct = 4;
+    uint64_t remain_size = avail_size;
+
+    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
+    for (uint32_t i = 0; i < num_test_vdevs; ++i) {
+        std::string name = "test_vdev_" + std::to_string(i + 1);
+        uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);
+        remain_size -= size;
+        size_pct *= 2; // Double the next vdev size
+
+        LOGINFO("Step 1a: Creating vdev of name={} with size={}", name, in_bytes(size));
+        auto vdev =
+            m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
+                                                           .vdev_size = size,
+                                                           .num_chunks = uint32_cast(m_pdevs.size() * 2),
+                                                           .blk_size = 4096,
+                                                           .dev_type = HSDevType::Data,
+                                                           .alloc_type = blk_allocator_type_t::none,
+                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
+                                                           .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                           .context_data = sisl::blob{}});
+        m_vdevs.push_back(std::move(vdev));
+    }
+
+    LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
+    this->validate_striped_vdevs();
+
+    auto fpath1 = m_data_dev_names[0];
+    m_data_dev_names.erase(m_data_dev_names.begin());
+    auto dinfo = m_dev_infos[0];
+    m_dev_infos.erase(m_dev_infos.begin());
+    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath1);
+    if (std::filesystem::exists(fpath1)) { std::filesystem::remove(fpath1); }
+
+    auto fpath2 = m_data_dev_names[1];
+    m_data_dev_names.erase(m_data_dev_names.end());
+    auto dinfo2 = m_dev_infos[1];
+    m_dev_infos.erase(m_dev_infos.end());
+    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath2);
+    if (std::filesystem::exists(fpath2)) { std::filesystem::remove(fpath2); }
+
+    LOGINFO("Step 3b: Restart dmgr");
+    this->restart();
+
+    LOGINFO("Step 4: Validate after one device is removed");
+    this->validate_striped_vdevs(1);
+
+    LOGINFO("Step 5: Recreate files to simulate new devices");
+    auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+    this->add_data_file(fpath1, data_dev_size);
+    this->add_data_file(fpath2, data_dev_size);
+
+    LOGINFO("Step 6: Restart and validate if new device can be added to vdevs");
+    this->restart();
+    this->validate_striped_vdevs();
+
+    LOGINFO("Step 7: Restart and validate again");
+    this->restart();
+    this->validate_striped_vdevs();
+}
+
+TEST_F(DeviceMgrTest, ReplaceTwoDevicesOneByOne) {
+    static constexpr uint32_t num_test_vdevs = 5;
+    uint64_t avail_size{0};
+    for (auto& pdev : m_pdevs) {
+        avail_size += pdev->data_size();
+    }
+
+    uint32_t size_pct = 4;
+    uint64_t remain_size = avail_size;
+
+    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
+    for (uint32_t i = 0; i < num_test_vdevs; ++i) {
+        std::string name = "test_vdev_" + std::to_string(i + 1);
+        uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);
+        remain_size -= size;
+        size_pct *= 2; // Double the next vdev size
+
+        LOGINFO("Step 1a: Creating vdev of name={} with size={}", name, in_bytes(size));
+        auto vdev =
+            m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
+                                                           .vdev_size = size,
+                                                           .num_chunks = uint32_cast(m_pdevs.size() * 2),
+                                                           .blk_size = 4096,
+                                                           .dev_type = HSDevType::Data,
+                                                           .alloc_type = blk_allocator_type_t::none,
+                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
+                                                           .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                           .context_data = sisl::blob{}});
+        m_vdevs.push_back(std::move(vdev));
+    }
+
+    LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
+    this->validate_striped_vdevs();
+
+    auto fpath1 = m_data_dev_names[0];
+    m_data_dev_names.erase(m_data_dev_names.begin());
+    auto dinfo = m_dev_infos[0];
+    m_dev_infos.erase(m_dev_infos.begin());
+    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath1);
+    if (std::filesystem::exists(fpath1)) { std::filesystem::remove(fpath1); }
+
+    auto fpath2 = m_data_dev_names[1];
+    m_data_dev_names.erase(m_data_dev_names.end());
+    auto dinfo2 = m_dev_infos[1];
+    m_dev_infos.erase(m_dev_infos.end());
+    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath2);
+    if (std::filesystem::exists(fpath2)) { std::filesystem::remove(fpath2); }
+
+    LOGINFO("Step 3b: Restart dmgr after removing devices");
+    this->restart();
+
+    LOGINFO("Step 4: Validate after devices is removed");
+    this->validate_striped_vdevs(1);
+
+    LOGINFO("Step 5: Recreate file to simulate replacement with a new device, file={}", fpath1);
+    auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+    this->add_data_file(fpath1, data_dev_size);
+
+    this->restart();
+    this->validate_striped_vdevs(2);
+
+    LOGINFO("Step 6: Recreate file to simulate replacement with a new device, file={}", fpath2);
+    this->add_data_file(fpath2, data_dev_size);
+    this->restart();
+    this->validate_striped_vdevs();
+
+    LOGINFO("Step 7: Restart and validate again");
+    this->restart();
+    this->validate_striped_vdevs();
+}
+
 TEST_F(DeviceMgrTest, SmallStripedVDevCreation) {
     std::string name = "test_vdev_small";
 

@@ -224,14 +224,14 @@ void DeviceManager::load_devices() {
 
         // vparam.num_chunks will be inferred.
         compose_vparam(vdev->info().vdev_id, vparam, pdevs);
-        auto missing_chunk_num = vparam.num_chunks - vdev->get_total_chunk_num();
-        if (missing_chunk_num == 0) {
-            LOGDEBUG("Virtual device {} is already sized correctly, no need to add new devices",
+        if (vdev->get_pdevs().size() == pdevs.size()) {
+            LOGDEBUG("Virtual device {} is already sized correctly, no new devices to add",
                      vdev->info().get_name());
             continue;
         }
-        LOGINFO("Virtual device {} is undersized, missing_chunk_num={}, add new devices to it", vdev->info().get_name(),
-                missing_chunk_num);
+        LOGINFO(
+            "Virtual device {} is undersized, pdevs already added={}, qualified pdevs ={}, need to add new devices to it",
+            vdev->info().get_name(), vdev->get_pdevs().size(), pdevs.size());
 
         // calculate the number of chunks to be created in each new pdev
         auto pdev_chunk_num_map = calculate_vdev_chunk_num_on_new_pdevs(vdev, pdevs, vparam.num_chunks);
@@ -450,6 +450,8 @@ void DeviceManager::compose_vparam(uint64_t vdev_id, vdev_parameters& vparam, st
         pdevs.size(), vparam.num_chunks, in_bytes(vparam.chunk_size));
 }
 
+// The actual total chunk num might be not the same as vdev.num_chunks, as it is calculated based on the pdevs data
+// size proportion.
 std::map< PhysicalDev*, uint32_t >
 DeviceManager::calculate_vdev_chunk_num_on_new_pdevs(shared< VirtualDev > vdev, std::vector< PhysicalDev* > pdevs,
                                                      uint64_t total_chunk_num) {
@@ -463,7 +465,8 @@ DeviceManager::calculate_vdev_chunk_num_on_new_pdevs(shared< VirtualDev > vdev, 
         chunk_num = total_chunk_num;
         LOGDEBUG("total size of type {} in this homestore is  {}", vdev->get_dev_type(), total_pdev_data_size)
     } else {
-        // vdev is recovered from existing pdevs, infer the initial total size of all pdevs.
+        // vdev is recovered from existing pdevs, in this case, calculate the number of chunks needed based on the
+        // proportional relationship between the size of the new disk and the existing disks.
         total_pdev_data_size = std::accumulate(added_pdevs.begin(), added_pdevs.end(), 0ull,
                                                [](uint64_t r, const PhysicalDev* a) { return r + a->data_size(); });
         chunk_num = vdev->get_total_chunk_num();
@@ -693,9 +696,9 @@ static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
     out_info->compute_checksum();
 }
 
-// This function populates the vdev_parameters from the vdev_info in the vdev recovery process.
-// chunk_num is not populated here, because vinfo doesn't have chunk_num. It should be calculated based on the logic in
-// compose_vparam.
+// This function populates the vdev_parameters from the vdev_info(loaded from existing disks) in the vdev recovery
+// process. Because vdev_info doesn't store chunk_num, leave vparam.chunk_num empty and it will be calculated in
+// `compose_vparam` as an intermediate param to calculate the chunk num on each pdev.
 static void populate_vparam(vdev_parameters& vparam, vdev_info& vinfo) {
     vparam.vdev_size = vinfo.vdev_size;
     vparam.chunk_size = vinfo.chunk_size;
