@@ -28,6 +28,7 @@
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/index_service.hpp>
+#include <homestore/fault_cmt_service.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 
@@ -56,6 +57,7 @@
 namespace homestore {
 HomeStoreSafePtr HomeStore::s_instance{nullptr};
 
+static std::unique_ptr< FaultContainmentCallback > s_fc_cb;
 static std::unique_ptr< IndexServiceCallbacks > s_index_cbs;
 static shared< ChunkSelector > s_custom_chunk_selector{nullptr};
 static shared< ReplApplication > s_repl_app{nullptr};
@@ -64,6 +66,12 @@ std::string version = PACKAGE_VERSION;
 HomeStore* HomeStore::instance() {
     if (s_instance == nullptr) { s_instance = std::make_shared< HomeStore >(); }
     return s_instance.get();
+}
+
+HomeStore& HomeStore::with_fault_containment(std::unique_ptr< FaultContainmentCallback > cb) {
+    m_services.svcs |= HS_SERVICE::FAULT_CMT;
+    s_fc_cb = std::move(cb);
+    return *this;
 }
 
 HomeStore& HomeStore::with_data_service(cshared< ChunkSelector >& custom_chunk_selector) {
@@ -144,8 +152,8 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
         HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < s_cast< int >(data_fetch_max_size_in_byte)) {
         LOGERROR("max_grpc_message_size {} is too small to hold max_data_size {}, max_snapshot_batch_size {} and "
                  "data_fetch_max_size {}",
-                 HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size,
-                 input.max_snapshot_batch_size, data_fetch_max_size_in_byte);
+                 HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size, input.max_snapshot_batch_size,
+                 data_fetch_max_size_in_byte);
         throw std::invalid_argument("max_grpc_message_size is insufficient for the configured data or snapshot sizes");
     }
 
@@ -168,6 +176,8 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
             m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
         }
     }
+    if (has_fc_service()) { m_fc_service = std::make_unique< FaultContainmentService >(std::move(s_fc_cb)); }
+
     m_cp_mgr = std::make_unique< CPManager >();
     m_dev_mgr = std::make_unique< DeviceManager >(input.devices, bind_this(HomeStore::create_vdev_cb, 2));
 
@@ -388,6 +398,7 @@ bool HomeStore::has_log_service() const {
     auto const s = m_services.svcs;
     return (s & HS_SERVICE::LOG);
 }
+bool HomeStore::has_fc_service() const { return (m_services.svcs & HS_SERVICE::FAULT_CMT); }
 
 #if 0
 void HomeStore::init_cache() {
