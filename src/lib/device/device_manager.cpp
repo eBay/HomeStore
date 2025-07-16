@@ -479,13 +479,16 @@ DeviceManager::calculate_vdev_chunk_num_on_new_pdevs(shared< VirtualDev > vdev, 
             LOGDEBUG("pdev {} is already added to vdev {}, skip it", pdev->get_devname(), vdev->info().get_name());
             continue;
         }
-        auto expect_chunk_num_on_pdev =
-            static_cast< uint32_t >(chunk_num * (pdev->data_size() / static_cast< float >(total_pdev_data_size)));
+        // the device size is expected to be the same, so multiple should be an integer, and chunk_num can be divisible
+        // by multiple.
+        auto multiple = static_cast< float >(total_pdev_data_size) / pdev->data_size();
+        auto expect_chunk_num_on_pdev = static_cast< uint32_t >(chunk_num / multiple);
         auto available_chunks_on_pdev = static_cast< uint32_t >(pdev->data_size() / vdev->info().chunk_size);
         pdev_chunk_num_map[pdev] = std::min(expect_chunk_num_on_pdev, available_chunks_on_pdev);
-        LOGINFO("pdev {} should add {} chunks to vdev {} , expect_chunk_num_on_pdev={}, available_chunks_on_pdev={}",
+        LOGINFO("pdev {} should add {} chunks to vdev {} , expect_chunk_num_on_pdev={}, available_chunks_on_pdev={}, "
+                "pdev_size={}",
                 pdev->get_devname(), pdev_chunk_num_map[pdev], vdev->info().get_name(), expect_chunk_num_on_pdev,
-                available_chunks_on_pdev);
+                available_chunks_on_pdev, pdev->data_size());
     }
     return pdev_chunk_num_map;
 }
