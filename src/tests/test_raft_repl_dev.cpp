@@ -558,7 +558,6 @@ TEST_F(RaftReplDevTest, ComputePriority) {
     g_helper->sync_for_cleanup_start();
 }
 
-
 TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -699,6 +698,8 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < argc; ++i) {
         args.emplace_back(argv[i]);
     }
+
+    RaftReplDev::enable_fetch_data_only_from_originator(true);
 
     ::testing::InitGoogleTest(&parsed_argc, argv);
 

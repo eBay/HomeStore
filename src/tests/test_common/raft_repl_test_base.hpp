@@ -755,8 +755,8 @@ public:
                         replica_id_t member_in, uint32_t commit_quorum = 0,
                         ReplServiceError error = ReplServiceError::OK) {
         this->run_on_leader(db, [this, error, db, &task_id, member_out, member_in, commit_quorum]() {
-            LOGINFO("Start replace member task_id={}, out={}, in={}", task_id,
-                    boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
+            LOGINFO("Start replace member task_id={}, out={}, in={}", task_id, boost::uuids::to_string(member_out),
+                    boost::uuids::to_string(member_in));
 
             replica_member_info out{member_out, ""};
             replica_member_info in{member_in, ""};
@@ -773,8 +773,8 @@ public:
 
     ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
                                                     replica_id_t member_out, replica_id_t member_in) {
-        LOGINFO("check replace member status, task_id={}, out={} in={}", task_id,
-                boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
+        LOGINFO("check replace member status, task_id={}, out={} in={}", task_id, boost::uuids::to_string(member_out),
+                boost::uuids::to_string(member_in));
 
         replica_member_info out{member_out, ""};
         replica_member_info in{member_in, ""};
