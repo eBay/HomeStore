@@ -146,6 +146,9 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
 
     // If the node things have been changed between unlock and lock example, it has been made invalid (probably by merge
     // nodes) ask caller to start over again.
+    if(parent_prev_gen != parent_node->node_gen() || child_prev_gen != child_node->node_gen()) {
+            COUNTER_INCREMENT(m_metrics, btree_num_pc_gen_mismatch, 1);
+    }
     if (parent_node->is_node_deleted() || (parent_prev_gen != parent_node->node_gen()) ||
         child_node->is_node_deleted() || (child_prev_gen != child_node->node_gen())) {
         unlock_node(child_node, locktype_t::WRITE);
@@ -195,7 +198,9 @@ btree_status_t Btree< K, V >::upgrade_node_lock(const BtreeNodePtr& node, lockty
 
     auto ret = lock_node(node, locktype_t::WRITE, context);
     if (ret != btree_status_t::success) { return ret; }
-
+    if(prev_gen != node->node_gen()) {
+        COUNTER_INCREMENT(m_metrics, btree_num_gen_mismatch, 1);
+    }
     if (node->is_node_deleted() || (prev_gen != node->node_gen())) {
         unlock_node(node, locktype_t::WRITE);
         return btree_status_t::retry;
@@ -232,7 +237,7 @@ BtreeNodePtr Btree< K, V >::alloc_leaf_node() {
     BtreeNodePtr n = alloc_node(true /* is_leaf */);
     if (n) {
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
-        ++m_total_nodes;
+        ++m_total_leaf_nodes;
     }
     return n;
 }
@@ -242,7 +247,7 @@ BtreeNodePtr Btree< K, V >::alloc_interior_node() {
     BtreeNodePtr n = alloc_node(false /* is_leaf */);
     if (n) {
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
-        ++m_total_nodes;
+        ++m_total_interior_nodes;
     }
     return n;
 }
@@ -302,7 +307,7 @@ void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, voi
         node->set_node_deleted();
         unlock_node(node, cur_lock);
     }
-    --m_total_nodes;
+    node->is_leaf()?--m_total_leaf_nodes:--m_total_interior_nodes;
 
     free_node_impl(node, context);
     // intrusive_ptr_release(node.get());

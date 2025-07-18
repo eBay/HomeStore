@@ -41,6 +41,7 @@ private:
     std::mutex m_flush_mtx;
     void* m_meta_blk;
     bool m_in_recovery{false};
+    std::unordered_set< uint32_t > m_updated_ordinals;
 
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,

@@ -82,8 +82,8 @@ std::optional< IndexBufferPtr > IndexCPContext::next_dirty() {
 }
 
 std::string IndexCPContext::to_string_small() {
-    return fmt::format("IndexCPContext cpid={}, dirty_buf_count={}, dirty_buf_list_size={}", m_cp->id(), m_dirty_buf_count.get(), 
-                       m_dirty_buf_list.size());
+    return fmt::format("IndexCPContext cpid={}, dirty_buf_count={}, dirty_buf_list_size={}", m_cp->id(),
+                       m_dirty_buf_count.get(), m_dirty_buf_list.size());
 }
 
 std::string IndexCPContext::to_string() {

@@ -50,6 +50,15 @@ void Btree< K, V >::set_root_node_info(const BtreeLinkInfo& info) {
 }
 
 template < typename K, typename V >
+uint16_t Btree< K, V >::get_btree_depth() const {return m_btree_depth;}
+
+template < typename K, typename V >
+std::pair<uint64_t,uint64_t> Btree< K, V >::get_num_nodes() const {
+    return {m_total_interior_nodes, m_total_leaf_nodes};
+}
+
+
+template < typename K, typename V >
 std::pair< btree_status_t, uint64_t > Btree< K, V >::destroy_btree(void* context) {
     btree_status_t ret{btree_status_t::success};
     uint64_t n_freed_nodes{0};
@@ -145,7 +154,7 @@ template < typename ReqT >
 btree_status_t Btree< K, V >::get(ReqT& greq) const {
     static_assert(std::is_same_v< BtreeSingleGetRequest, ReqT > || std::is_same_v< BtreeGetAnyRequest< K >, ReqT >,
                   "get api is called with non get request type");
-
+    COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
     btree_status_t ret = btree_status_t::success;
 
     m_btree_lock.lock_shared();
@@ -171,7 +180,7 @@ btree_status_t Btree< K, V >::remove(ReqT& req) {
                       std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > > ||
                       std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >,
                   "remove api is called with non remove request type");
-
+    COUNTER_INCREMENT(m_metrics, btree_remove_ops_count, 1);
     locktype_t acq_lock = locktype_t::READ;
     m_btree_lock.lock_shared();
 

@@ -65,7 +65,8 @@ int32_t RaftReplService::compute_raft_follower_priority() {
     auto max_wait_round = std::min(raft_priority_election_round_upper_limit,
                                    HS_DYNAMIC_CONFIG(consensus.max_wait_rounds_of_priority_election));
     if (max_wait_round == 0) { return raft_leader_priority; }
-    auto priority = 1 + static_cast< int32_t >(
+    auto priority = 1 +
+        static_cast< int32_t >(
                         std::ceil(raft_leader_priority * std::pow(raft_priority_decay_coefficient, max_wait_round)));
     return priority;
 }
@@ -368,12 +369,12 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
         for (auto& member : members) {
             if (member == my_id) { continue; } // Skip myself
             do {
-                auto srv_config = nuraft::srv_config(nuraft_mesg::to_server_id(member), 0, boost::uuids::to_string(member), "",
-                                                     false, follower_priority);
+                auto srv_config = nuraft::srv_config(nuraft_mesg::to_server_id(member), 0,
+                                                     boost::uuids::to_string(member), "", false, follower_priority);
                 auto const result = m_msg_mgr->add_member(group_id, srv_config).get();
                 if (result) {
-                    LOGINFOMOD(replication, "Groupid={}, new member={} added with priority={}", boost::uuids::to_string(group_id),
-                               boost::uuids::to_string(member), follower_priority);
+                    LOGINFOMOD(replication, "Groupid={}, new member={} added with priority={}",
+                               boost::uuids::to_string(group_id), boost::uuids::to_string(member), follower_priority);
                     break;
                 } else if (result.error() != nuraft::CONFIG_CHANGING) {
                     LOGWARNMOD(replication, "Groupid={}, add member={} failed with error={}",
@@ -489,7 +490,8 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 // In this function, it only invokes replDev start_replace_member. There is
 // a background reaper thread helps periodically check the member_in replication status, after in_member has caught up,
 // will trigger replDev complete_replace_member.
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::string& task_id,
+                                                  const replica_member_info& member_out,
                                                   const replica_member_info& member_in, uint32_t commit_quorum,
                                                   uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
@@ -513,8 +515,9 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::stri
         });
 }
 
-AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target, uint32_t commit_quorum,
-                                    bool wait_and_verify, uint64_t trace_id) const {
+AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member,
+                                                     bool target, uint32_t commit_quorum, bool wait_and_verify,
+                                                     uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
     incr_pending_request_num();
     auto rdev_result = get_repl_dev(group_id);
@@ -578,11 +581,11 @@ void RaftReplService::start_reaper_thread() {
                 HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) { flush_durable_commit_lsn(); });
 
-            // Check replace_member sync status to see a new member is fully synced up and ready to remove the old member
+            // Check replace_member sync status to see a new member is fully synced up and ready to remove the old
+            // member
             m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) { monitor_replace_member_replication_status(); });
-
 
             p.setValue();
         } else {

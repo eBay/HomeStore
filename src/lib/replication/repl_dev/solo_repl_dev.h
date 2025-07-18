@@ -80,8 +80,7 @@ public:
     }
     bool is_ready_for_traffic() const override { return true; }
     void set_stage(repl_dev_stage_t stage) override {}
-    repl_dev_stage_t get_stage() const override {
-        return repl_dev_stage_t::ACTIVE; }
+    repl_dev_stage_t get_stage() const override { return repl_dev_stage_t::ACTIVE; }
     void purge() override {}
 
     void pause_state_machine(size_t timeout) override { m_paused.store(true); }

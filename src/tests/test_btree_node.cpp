@@ -378,8 +378,8 @@ TYPED_TEST(NodeTest, SimpleInsert) {
 }
 
 TYPED_TEST(NodeTest, RangeChangeInsert) {
-    if (this->m_node1->get_node_type() != btree_node_type::PREFIX) {return;}
-    this->put_range(0xFFFFFFFF - 10,20);
+    if (this->m_node1->get_node_type() != btree_node_type::PREFIX) { return; }
+    this->put_range(0xFFFFFFFF - 10, 20);
     this->print();
 }
 
