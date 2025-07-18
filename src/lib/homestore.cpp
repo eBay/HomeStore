@@ -82,7 +82,8 @@ HomeStore& HomeStore::with_data_service(cshared< ChunkSelector >& custom_chunk_s
     return *this;
 }
 
-HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs, cshared< ChunkSelector >& custom_chunk_selector) {
+HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs,
+                                         cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::INDEX;
     s_index_cbs = std::move(cbs);
     s_custom_index_chunk_selector = std::move(custom_chunk_selector);
@@ -168,9 +169,9 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     LOGINFO("Homestore is loading with following services: {}", m_services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_index_service()) {
-        m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs),
- std::move(s_custom_index_chunk_selector));
- }
+        m_index_service =
+            std::make_unique< IndexService >(std::move(s_index_cbs), std::move(s_custom_index_chunk_selector));
+    }
     if (has_repl_data_service()) {
         m_log_service = std::make_unique< LogStoreService >();
         m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_data_chunk_selector));

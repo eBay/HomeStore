@@ -51,15 +51,18 @@ struct index_table_sb {
     uint64_t root_link_version{0};      // Link version to btree root node
     int64_t index_size{0};              // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
+    uint64_t total_leaf_nodes{0};     // Number of leaf nodes in the index
+    uint64_t total_interior_nodes{0}; // Number of internal nodes in the index
+    uint8_t btree_depth{0};           // Depth of the btree
 
     uint32_t ordinal{0}; // Ordinal of the Index
 
     uint32_t user_sb_size; // Size of the user superblk
     uint8_t user_sb_bytes[0];
     uint32_t pdev_id;
-    uint32_t index_num_chunks {0};
+    uint32_t index_num_chunks{0};
     // List of chunk ids allocated for this index table are stored after this.
-    void init_chunks(std::vector<chunk_num_t > const& chunk_ids){
+    void init_chunks(std::vector< chunk_num_t > const& chunk_ids) {
         index_num_chunks = chunk_ids.size();
         auto chunk_id_ptr = get_chunk_ids_mutable();
         for (auto& chunk_id : chunk_ids) {
@@ -67,13 +70,10 @@ struct index_table_sb {
             chunk_id_ptr++;
         }
     }
-    chunk_num_t* get_chunk_ids_mutable() {
-        return r_cast<chunk_num_t* >(uintptr_cast(this) + sizeof(index_table_sb));
-    }
+    chunk_num_t* get_chunk_ids_mutable() { return r_cast< chunk_num_t* >(uintptr_cast(this) + sizeof(index_table_sb)); }
     const chunk_num_t* get_chunk_ids() const {
         return r_cast< const chunk_num_t* >(reinterpret_cast< const uint8_t* >(this) + sizeof(index_table_sb));
     }
-
 };
 #pragma pack()
 
@@ -95,6 +95,8 @@ public:
     virtual void repair_root_node(IndexBufferPtr const& buf) = 0;
     virtual void delete_stale_children(IndexBufferPtr const& buf) = 0;
     virtual void audit_tree() = 0;
+    virtual void update_sb() = 0;
+    virtual void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) = 0;
 };
 
 enum class index_buf_state_t : uint8_t {

@@ -218,9 +218,7 @@ public:
 
 #ifdef _PRERELEASE
     void wait_for_crash_recovery(bool check_will_crash = false) {
-        if(check_will_crash && !homestore::HomeStore::instance()->crash_simulator().will_crash()) {
-            return;
-        }
+        if (check_will_crash && !homestore::HomeStore::instance()->crash_simulator().will_crash()) { return; }
         LOGDEBUG("Waiting for m_crash_recovered future");
         m_crash_recovered.getFuture().get();
         m_crash_recovered = folly::Promise< folly::Unit >();
@@ -440,7 +438,8 @@ private:
             if (svc == HS_SERVICE::DATA) {
                 hsi->with_data_service(tp.custom_chunk_selector);
             } else if (svc == HS_SERVICE::INDEX) {
-                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs), tp.index_chunk_selector);
+                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs),
+                                        tp.index_chunk_selector);
             } else if ((svc == HS_SERVICE::LOG)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {

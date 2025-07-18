@@ -45,7 +45,7 @@ struct BtreeTestHelper {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
         m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
-        if (SISL_OPTIONS.count("disable_merge")){m_cfg.m_merge_turned_on = false;}
+        if (SISL_OPTIONS.count("disable_merge")) { m_cfg.m_merge_turned_on = false; }
 
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
 
@@ -327,8 +327,8 @@ public:
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
             req.enable_route_tracing();
             const auto ret = m_bt->get(req);
-            ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map" << 
-                " - status=" << enum_name(ret);
+            ASSERT_EQ(ret, btree_status_t::success)
+                << "Missing key " << key << " in btree but present in shadow map" << " - status=" << enum_name(ret);
             ASSERT_EQ((const V&)req.value(), value)
                 << "Found value in btree doesn't return correct data for key=" << key;
         });
@@ -379,6 +379,16 @@ public:
             preload(preload_size);
         }
         run_in_parallel(op_list);
+    }
+
+    std::tuple< uint64_t, uint64_t, uint8_t > get_btree_metrics(const nlohmann::json& metrics_json) {
+        const auto& counters = metrics_json.at("Counters");
+
+        uint64_t int_cnt = counters.at("Btree Interior node count").get< uint64_t >();
+        uint64_t leaf_cnt = counters.at("Btree Leaf node count").get< uint64_t >();
+        uint8_t depth = counters.at("Depth of btree").get< uint8_t >();
+
+        return std::make_tuple(int_cnt, leaf_cnt, depth);
     }
 
     void dump_to_file(const std::string& file = "") const { m_bt->dump_tree_to_file(file); }

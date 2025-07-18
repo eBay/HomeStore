@@ -43,7 +43,7 @@ public:
 
 private:
     std::function< void(void) > m_restart_cb{nullptr};
-    std::atomic<bool> m_will_crash{false};
+    std::atomic< bool > m_will_crash{false};
     sisl::urcu_scoped_ptr< bool > m_crashed;
 };
 } // namespace homestore

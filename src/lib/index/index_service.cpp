@@ -29,7 +29,7 @@ namespace homestore {
 IndexService& index_service() { return hs()->index_service(); }
 
 IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs, shared< ChunkSelector > chunk_selector) :
-        m_svc_cbs {std::move(cbs)}, m_custom_chunk_selector{std::move(chunk_selector)} {
+        m_svc_cbs{std::move(cbs)}, m_custom_chunk_selector{std::move(chunk_selector)} {
     m_ordinal_reserver = std::make_unique< sisl::IDReserver >();
     meta_service().register_handler(
         "index",
@@ -40,9 +40,7 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs, shared<
 
     meta_service().register_handler(
         "wb_cache",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            m_wbcache_sb = std::pair{mblk, std::move(buf)};
-        },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { m_wbcache_sb = std::pair{mblk, std::move(buf)}; },
         nullptr);
 }
 
@@ -80,7 +78,13 @@ void IndexService::start() {
     for (auto const& [meta_cookie, buf] : m_itable_sbs) {
         superblk< index_table_sb > sb;
         sb.load(buf, meta_cookie);
-        add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
+        auto inode = sb->total_interior_nodes;
+        auto lnode = sb->total_leaf_nodes;
+        auto depth = sb->btree_depth;
+        LOGINFO("sb metrics interior {},  leaf: {} depth {}", inode, lnode, depth);
+        auto tbl = m_svc_cbs->on_index_table_found(std::move(sb));
+        tbl->load_metrics(inode, lnode, depth);
+        add_index_table(tbl);
     }
 
     // Recover the writeback cache, which in-turns recovers any index table nodes
@@ -97,6 +101,15 @@ void IndexService::start() {
     // Force taking cp after recovery done. This makes sure that the index table is in consistent state and dirty
     // buffer after recovery can be added to dirty list for flushing in the new cp
     hs()->cp_mgr().trigger_cp_flush(true /* force */);
+}
+
+void IndexService::write_sb(uint32_t ordinal) {
+    if (is_stopping()) return;
+    incr_pending_request_num();
+    std::unique_lock lg(m_index_map_mtx);
+    auto const it = m_ordinal_index_map.find(ordinal);
+    if (it != m_ordinal_index_map.cend()) { it->second->update_sb(); }
+    decr_pending_request_num();
 }
 
 IndexService::~IndexService() { m_wb_cache.reset(); }

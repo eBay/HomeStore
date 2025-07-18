@@ -92,13 +92,13 @@ void IndexWBCache::start_flush_threads() {
     }
 }
 
-BtreeNodePtr IndexWBCache::alloc_buf(uint32_t ordinal,node_initializer_t&& node_initializer) {
+BtreeNodePtr IndexWBCache::alloc_buf(uint32_t ordinal, node_initializer_t&& node_initializer) {
     auto cpg = cp_mgr().cp_guard();
     auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
 
     // Alloc a block of data from underlying vdev
     MultiBlkId blkid;
-	// Ordinal used as a hint in the case of custom chunk selector exists
+    // Ordinal used as a hint in the case of custom chunk selector exists
     blk_alloc_hints hints;
     hints.application_hint = ordinal;
     auto ret = m_vdev->alloc_contiguous_blks(1, hints, blkid);
@@ -521,23 +521,19 @@ std::string IndexWBCache::to_string_dag_bufs(DagMap& dags, cp_id_t cp_id) {
 void IndexWBCache::prune_up_buffers(IndexBufferPtr const& buf, std::vector< IndexBufferPtr >& pruned_bufs_to_repair) {
     auto up_buf = buf->m_up_buffer;
     auto grand_up_buf = up_buf->m_up_buffer;
-    if (!up_buf || !up_buf->m_wait_for_down_buffers.testz()) {
-        return;
-    }
+    if (!up_buf || !up_buf->m_wait_for_down_buffers.testz()) { return; }
 
     // if up buffer has up buffer, then we need to decrement its wait_for_down_buffers
-    LOGINFOMOD(wbcache,
-                "\n\npruning up_buffer due to zero dependency of child\n up buffer {}\n buffer {}",
-                up_buf->to_string(), buf->to_string());
+    LOGINFOMOD(wbcache, "\n\npruning up_buffer due to zero dependency of child\n up buffer {}\n buffer {}",
+               up_buf->to_string(), buf->to_string());
     update_up_buffer_counters(up_buf);
 
-    pruned_bufs_to_repair.push_back(up_buf);    
+    pruned_bufs_to_repair.push_back(up_buf);
     if (grand_up_buf && !grand_up_buf->is_meta_buf() && grand_up_buf->m_wait_for_down_buffers.testz()) {
         LOGTRACEMOD(
             wbcache,
             "\nadding grand_buffer to repair list due to zero dependency of child\n grand buffer {}\n buffer {}",
-            grand_up_buf->to_string(),
-            buf->to_string());
+            grand_up_buf->to_string(), buf->to_string());
         pruned_bufs_to_repair.push_back(grand_up_buf);
     }
 }
@@ -706,9 +702,9 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         recover_buf(buf);
     }
 
-    // When we prune a buffer due to zero down dependency, there is a case where the key range of the parent needs to be adjusted.
-    // This can happen when a child is merged and its right sibling is flushed before the parent is flushed.
-    // And during recovery, we prune the node and keep the deleted child and keep the parent as is. 
+    // When we prune a buffer due to zero down dependency, there is a case where the key range of the parent needs to be
+    // adjusted. This can happen when a child is merged and its right sibling is flushed before the parent is flushed.
+    // And during recovery, we prune the node and keep the deleted child and keep the parent as is.
     // We need to call repair_links directly on them as the recovery_buf() path will not trigger it.
     for (auto const& buf : pruned_bufs_to_repair) {
         LOGTRACEMOD(wbcache, "pruned buf {} is repaired", buf->to_string());
@@ -829,7 +825,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
     }
 
     cp_ctx->prepare_flush_iteration();
-
+    m_updated_ordinals.clear();
     for (auto& fiber : m_cp_flush_fibers) {
         iomanager.run_on_forget(fiber, [this, cp_ctx]() {
             IndexBufferPtrList buf_list;
@@ -903,10 +899,16 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
 
     LOGTRACEMOD(wbcache, "cp {} buf {}", cp_ctx->id(), buf->to_string());
     resource_mgr().dec_dirty_buf_size(m_node_size);
+    m_updated_ordinals.insert(buf->m_index_ordinal);
     auto [next_buf, has_more] = on_buf_flush_done(cp_ctx, buf);
     if (next_buf) {
         do_flush_one_buf(cp_ctx, next_buf, false);
     } else if (!has_more) {
+        for (const auto& ordinal : m_updated_ordinals) {
+            LOGTRACEMOD(wbcache, "Updating sb for ordinal {}", ordinal);
+            index_service().write_sb(ordinal);
+        }
+
         // We are done flushing the buffers, We flush the vdev to persist the vdev bitmaps and free blks
         // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
         iomanager.run_on_forget(cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {

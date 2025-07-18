@@ -65,7 +65,7 @@ public:
                      chunk_selector_type_t chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN);
     // Open the existing vdev which is represnted by the vdev_info_block
     shared< VirtualDev > open_vdev(const vdev_info& vb, bool load_existing);
-    std::shared_ptr< ChunkSelector > get_chunk_selector(){ return m_custom_chunk_selector;};
+    std::shared_ptr< ChunkSelector > get_chunk_selector() { return m_custom_chunk_selector; };
     // for now, we don't support start after stop and there is no use case for this.
     // TODO: support start after stop if necessary
 
@@ -81,6 +81,7 @@ public:
     bool remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     std::shared_ptr< IndexTableBase > get_index_table(uuid_t uuid) const;
     std::shared_ptr< IndexTableBase > get_index_table(uint32_t ordinal) const;
+    void write_sb(uint32_t ordinal);
 
     // Reserve an ordinal for the index table
     uint32_t reserve_ordinal();

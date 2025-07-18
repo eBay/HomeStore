@@ -456,7 +456,7 @@ public:
             // every piece in bid is a single block, e.g.  nblks = 1
             auto const nbids = bid.num_pieces();
             auto sub_io_size = nbids * inst().get_blk_size();
-	    HS_REL_ASSERT_LE(sub_io_size, remaining_io_size, "not expecting sub_io_size to exceed remaining_io_size");
+            HS_REL_ASSERT_LE(sub_io_size, remaining_io_size, "not expecting sub_io_size to exceed remaining_io_size");
 
             // we pass crc from lambda becaues if there is any async_free_blk, the written blks in the blkcrc map will
             // be removed by the time read thenVlue is called;

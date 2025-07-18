@@ -46,15 +46,15 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
     m_init_private_data = std::make_shared< JournalChunkPrivate >();
     m_chunk_pool = std::make_unique< ChunkPool >(
         dmgr,
-        ChunkPool::Params{
-            HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
-            [this]() {
-                m_init_private_data->created_at = get_time_since_epoch_ms();
-                m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
-                sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()), sizeof(JournalChunkPrivate)};
-                return private_blob;
-            },
-            m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+        ChunkPool::Params{HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
+                          [this]() {
+                              m_init_private_data->created_at = get_time_since_epoch_ms();
+                              m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
+                              sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()),
+                                                      sizeof(JournalChunkPrivate)};
+                              return private_blob;
+                          },
+                          m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
 
     resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         // either it is critical or non-critical, call cp_flush;

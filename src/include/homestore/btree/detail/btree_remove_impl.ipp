@@ -211,6 +211,7 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
 
     free_node(root, locktype_t::WRITE, req.m_op_context);
     m_root_node_info = child->link_info();
+    this->m_btree_depth = child->level();
     unlock_node(child, locktype_t::WRITE);
     COUNTER_DECREMENT(m_metrics, btree_depth, 1);
 
@@ -352,7 +353,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     available_size = 0;
     while (src_cursor.ith_node < old_nodes.size()) {
         if (available_size == 0) {
-            new_node.reset(alloc_node(leftmost_node->is_leaf()).get());
+            new_node.reset(leftmost_node->is_leaf() ? alloc_leaf_node().get() : alloc_interior_node().get());
             if (new_node == nullptr) {
                 ret = btree_status_t::merge_failed;
                 goto out;

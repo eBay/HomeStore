@@ -558,7 +558,6 @@ TEST_F(RaftReplDevTest, ComputePriority) {
     g_helper->sync_for_cleanup_start();
 }
 
-
 TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
