@@ -241,6 +241,7 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     } else {
         if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
+        this->m_btree_depth = root->level();
         unlock_node(child_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
     }

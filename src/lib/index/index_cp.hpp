@@ -37,7 +37,7 @@ public:
         uint8_t has_inplace_parent : 1; // Do we have parent_id in the list of ids. It will be first
         uint8_t has_inplace_child : 1;  // Do we have child_id in the list of ids. It will be second
         uint8_t is_parent_meta : 1;     // Is the parent buffer a meta buffer
-        uint8_t free_node_level : 4;      // Free/created node level
+        uint8_t free_node_level : 4;    // Free/created node level
         uint8_t reserved1 : 1;
         uint8_t num_new_ids;
         uint8_t num_freed_ids;
@@ -101,8 +101,7 @@ public:
 
         std::string child_id_string() const {
             auto const idx = (has_inplace_parent == 0x1) ? 1 : 0;
-            return (has_inplace_child == 0x1) ? fmt::format("{}", blk_id(idx).to_integer())
-                                              : "empty";
+            return (has_inplace_child == 0x1) ? fmt::format("{}", blk_id(idx).to_integer()) : "empty";
         }
 
         std::string to_string() const;

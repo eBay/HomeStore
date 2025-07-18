@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.19.1"
+    version = "6.19.2"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -95,6 +95,7 @@ class HomestoreConan(ConanFile):
         tc.variables["CONAN_CMAKE_SILENT_OUTPUT"] = "ON"
         tc.variables['CMAKE_EXPORT_COMPILE_COMMANDS'] = 'ON'
         tc.variables["CTEST_OUTPUT_ON_FAILURE"] = "ON"
+        tc.variables["CTEST_PARALLEL_LEVEL"] = "8"
         tc.variables["MEMORY_SANITIZER_ON"] = "OFF"
         tc.variables["BUILD_COVERAGE"] = "OFF"
         if self.settings.build_type == "Debug":
@@ -115,7 +116,8 @@ class HomestoreConan(ConanFile):
         cmake.configure()
         cmake.build()
         if not self.conf.get("tools.build:skip_test", default=False):
-            cmake.test()
+            import os
+            os.system("ctest --output-on-failure -j10")
 
     def package(self):
         copy(self, "LICENSE", self.source_folder, join(self.package_folder, "licenses"), keep_path=False)

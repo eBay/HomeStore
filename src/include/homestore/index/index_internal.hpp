@@ -51,6 +51,9 @@ struct index_table_sb {
     uint64_t root_link_version{0};      // Link version to btree root node
     int64_t index_size{0};              // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
+    uint64_t total_leaf_nodes{0};     // Number of leaf nodes in the index
+    uint64_t total_interior_nodes{0}; // Number of internal nodes in the index
+    uint8_t btree_depth{0};           // Depth of the btree
 
     uint32_t ordinal{0}; // Ordinal of the Index
 
@@ -77,6 +80,8 @@ public:
     virtual void repair_root_node(IndexBufferPtr const& buf) = 0;
     virtual void delete_stale_children(IndexBufferPtr const& buf) = 0;
     virtual void audit_tree() = 0;
+    virtual void update_sb() = 0;
+    virtual void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) = 0;
 };
 
 enum class index_buf_state_t : uint8_t {

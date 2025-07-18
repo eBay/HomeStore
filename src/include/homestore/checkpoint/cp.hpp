@@ -72,8 +72,8 @@ class CPManager;
 VENUM(cp_consumer_t, uint8_t,
       // Sealer is a special consumer that provides information regarding where the cp is up to.
       // It will be the first one during cp switch over , as a conservative marker of everything
-      // before or equals to this point, should be in current cp, possibly some consumer are above this point which is fine.
-      // And Sealer is the last one during cp flush after all other services flushed successfully.
+      // before or equals to this point, should be in current cp, possibly some consumer are above this point which is
+      // fine. And Sealer is the last one during cp flush after all other services flushed successfully.
       SEALER = 3,
       HS_CLIENT = 0,       // Client of the homestore module
       INDEX_SVC = 1,       // Index service module

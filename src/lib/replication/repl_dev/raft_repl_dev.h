@@ -249,8 +249,9 @@ public:
 
     bool bind_data_service();
     bool join_group();
-    AsyncReplResult<> start_replace_member(std::string& task_id, const replica_member_info& member_out, const replica_member_info& member_in,
-                                           uint32_t commit_quorum = 0, uint64_t trace_id = 0);
+    AsyncReplResult<> start_replace_member(std::string& task_id, const replica_member_info& member_out,
+                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                           uint64_t trace_id = 0);
     AsyncReplResult<> complete_replace_member(std::string& task_id, const replica_member_info& member_out,
                                               const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                               uint64_t trace_id = 0);
@@ -266,7 +267,7 @@ public:
                                      uint64_t trace_id = 0);
     ReplServiceError set_priority(const replica_id_t& member, int32_t priority, uint64_t trace_id = 0);
     nuraft::cmd_result_code retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
-                                                     uint64_t trace_id = 0);
+                                                       uint64_t trace_id = 0);
     bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
 
     std::string get_replace_member_task_id() const { return {m_rd_sb->replace_member_task.task_id}; }
@@ -317,7 +318,7 @@ public:
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx(); }
-    repl_lsn_t get_truncation_upper_limit() const {  return m_truncation_upper_limit.load(); }
+    repl_lsn_t get_truncation_upper_limit() const { return m_truncation_upper_limit.load(); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
     void set_stage(repl_dev_stage_t stage);
@@ -405,7 +406,8 @@ public:
     void flush_durable_commit_lsn();
 
     /**
-     * Monitor the replace_member replication status, if the new member is fully synced up and ready to take over, remove the old member.
+     * Monitor the replace_member replication status, if the new member is fully synced up and ready to take over,
+     * remove the old member.
      */
     void monitor_replace_member_replication_status();
 

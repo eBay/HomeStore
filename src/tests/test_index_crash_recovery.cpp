@@ -60,7 +60,8 @@ SISL_OPTION_GROUP(
     (save_to_file, "", "save_to_file", "save to file", ::cxxopts::value< bool >()->default_value("0"), ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
      ::cxxopts::value< bool >()->default_value("1"), ""),
-    (print_keys_verbose_logging, "", "print_keys_verbose_logging", "print_keys_verbose_logging", ::cxxopts::value< bool >()->default_value("0"), ""),
+    (print_keys_verbose_logging, "", "print_keys_verbose_logging", "print_keys_verbose_logging",
+     ::cxxopts::value< bool >()->default_value("0"), ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -72,10 +73,8 @@ void log_obj_life_counter() {
     LOGINFO("Object Life Counter\n:{}", str);
 }
 
-#define print_keys_logging(msg) \
-    if (SISL_OPTIONS.count("print_keys_verbose_logging")) { \
-        this->print_keys(msg); \
-    }
+#define print_keys_logging(msg)                                                                                        \
+    if (SISL_OPTIONS.count("print_keys_verbose_logging")) { this->print_keys(msg); }
 
 enum class OperationType {
     Put,
@@ -996,6 +995,56 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
         test_common::HSTestHelper::trigger_cp(true);
         this->get_all();
     }
+}
+
+TYPED_TEST(IndexCrashTest, MetricsTest) {
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    std::vector< uint32_t > vec(num_entries);
+    iota(vec.begin(), vec.end(), 0);
+    std::random_shuffle(vec.begin(), vec.end());
+    for (auto key : vec) {
+        this->put(key, btree_put_type::INSERT, true /* expect_success */);
+    }
+    print_keys_logging("After populating");
+
+    auto log_btree_metrics = [this](std::string prompt) {
+        auto metrics = this->m_bt->get_metrics_in_json().dump(1, '\t');
+        LOGDEBUG("metrics: \n{}", metrics);
+        auto metrics_json = this->m_bt->get_metrics_in_json();
+        auto bt_cnts = this->m_bt->get_num_nodes();
+        auto bt_d = this->m_bt->get_btree_depth();
+        auto com_cnts = this->m_bt->compute_node_count();
+        auto com_d = this->m_bt->compute_btree_depth();
+        auto [int_cnt, leaf_cnt, depth] = this->get_btree_metrics(metrics_json);
+
+        LOGDEBUG("\n{}:\nmetrics  (interior, leaf, height):\ncompute ({}, {}, {})\nbtree   ({}, {}, {})\nmetrics ({}, "
+                 "{}, {})",
+                 prompt, com_cnts.first, com_cnts.second, com_d, bt_cnts.first, bt_cnts.second, bt_d, int_cnt, leaf_cnt,
+                 depth);
+        ASSERT_EQ(bt_cnts.first, com_cnts.first) << "btree interior count doesn't match the actual node counts";
+        ASSERT_EQ(bt_cnts.first, int_cnt) << "btree interior count doesn't match the metrics node counts";
+        ASSERT_EQ(bt_cnts.second, com_cnts.second) << "btree leaf count doesn't match the actual node counts";
+        ASSERT_EQ(bt_cnts.second, leaf_cnt) << "btree leaf count doesn't match the metrics node counts";
+        ASSERT_EQ(bt_d, com_d) << "btree depth doesn't match the actual btee depth";
+        ASSERT_EQ(bt_d, depth) << "btree depth doesn't match the metrics depth report";
+    };
+    log_btree_metrics("node count before CP");
+
+    test_common::HSTestHelper::trigger_cp(true);
+    log_btree_metrics("node count after CP");
+
+    this->m_shadow_map.save(this->m_shadow_filename);
+    this->restart_homestore();
+    print_keys_logging("After restart");
+    log_btree_metrics("node count after restart");
+    std::string flip = "crash_flush_on_merge_at_parent";
+    for (auto key : vec) {
+        this->remove_one(key, true);
+    }
+    this->trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+    log_btree_metrics("node count after crash recovery");
+    print_keys_logging("after removing all keys");
 }
 
 //

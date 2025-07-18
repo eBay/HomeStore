@@ -130,7 +130,10 @@ public:
             auto cpg = cp_mgr().cp_guard();
             put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
             ret = Btree< K, V >::put(put_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying put"); }
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying put");
+                COUNTER_INCREMENT(this->m_metrics, btree_retry_count, 1);
+            }
         } while (ret == btree_status_t::cp_mismatch);
         decr_pending_request_num();
         return ret;
@@ -145,7 +148,10 @@ public:
             auto cpg = cp_mgr().cp_guard();
             remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
             ret = Btree< K, V >::remove(remove_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove"); }
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove");
+                COUNTER_INCREMENT(this->m_metrics, btree_retry_count, 1);
+            }
         } while (ret == btree_status_t::cp_mismatch);
         decr_pending_request_num();
         return ret;
@@ -329,6 +335,10 @@ protected:
         LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node, new_root->node_id());
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
+        m_sb->btree_depth = new_root->level();
+        m_sb->total_interior_nodes = this->m_total_interior_nodes;
+        m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
+        std::tie(m_sb->total_interior_nodes, m_sb->total_leaf_nodes) = this->get_num_nodes();
 
         if (!wb_cache().refresh_meta_buf(m_sb_buffer, r_cast< CPContext* >(context))) {
             LOGTRACEMOD(wbcache, "CP mismatch error - discard transact for meta node");
@@ -338,6 +348,22 @@ protected:
         auto& root_buf = static_cast< IndexBtreeNode* >(new_root.get())->m_idx_buf;
         wb_cache().transact_bufs(ordinal(), m_sb_buffer, root_buf, {}, {}, r_cast< CPContext* >(context));
         return btree_status_t::success;
+    }
+
+    void update_sb() override {
+        m_sb->total_interior_nodes = this->m_total_interior_nodes;
+        m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
+        m_sb->btree_depth = this->m_btree_depth;
+        m_sb.write();
+    }
+
+    void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) override {
+        this->m_total_leaf_nodes = leaf;
+        this->m_total_interior_nodes = interior;
+        this->m_btree_depth = depth;
+        COUNTER_INCREMENT(this->m_metrics, btree_int_node_count, interior);
+        COUNTER_INCREMENT(this->m_metrics, btree_leaf_node_count, leaf);
+        COUNTER_INCREMENT(this->m_metrics, btree_depth, depth);
     }
 
     btree_status_t delete_stale_links(BtreeNodePtr const& parent_node, void* cp_ctx) {
@@ -442,8 +468,10 @@ protected:
         bnodeid_t sibling_first_child_id = empty_bnodeid;
         if (!parent_node->is_leaf() && !parent_node->has_valid_edge()) {
             BtreeNodePtr parent_right_sibling;
-            if (auto parent_right_sibling_id = find_true_sibling(parent_node); parent_right_sibling_id != empty_bnodeid) {
-                if (auto ret = read_node_impl(parent_right_sibling_id, parent_right_sibling); ret == btree_status_t::success) {
+            if (auto parent_right_sibling_id = find_true_sibling(parent_node);
+                parent_right_sibling_id != empty_bnodeid) {
+                if (auto ret = read_node_impl(parent_right_sibling_id, parent_right_sibling);
+                    ret == btree_status_t::success) {
                     if (parent_right_sibling->total_entries() > 0) {
                         BtreeLinkInfo sibling_first_child_info;
                         parent_right_sibling->get_nth_value(0, &sibling_first_child_info, false);
@@ -458,11 +486,9 @@ protected:
         return sibling_first_child_id;
     }
 
-    void update_root(BtreeNodePtr const& left_child,  BtreeNodeList& new_nodes, void* cp_ctx) {
+    void update_root(BtreeNodePtr const& left_child, BtreeNodeList& new_nodes, void* cp_ctx) {
         auto new_root = this->alloc_interior_node();
-        if (new_root == nullptr) {
-            return;
-        }
+        if (new_root == nullptr) { return; }
         new_root->set_level(left_child->level() + 1);
         auto cur_child = left_child;
         uint32_t i = 0;
@@ -474,16 +500,16 @@ protected:
             } else {
                 auto child_last_key = cur_child->get_last_key< K >();
                 new_root->insert(new_root->total_entries(), child_last_key,
-                                   BtreeLinkInfo{cur_child->node_id(), cur_child->link_version()});
+                                 BtreeLinkInfo{cur_child->node_id(), cur_child->link_version()});
             }
             if (i == new_nodes.size()) { break; }
             auto next_child_id = cur_child->next_bnode();
             cur_child = new_nodes[i++];
             DEBUG_ASSERT_EQ(next_child_id, cur_child->node_id(),
-                            "Next node id {} does not match current child node id {}", 
-                            next_child_id, cur_child->node_id());
+                            "Next node id {} does not match current child node id {}", next_child_id,
+                            cur_child->node_id());
         } while (true);
-       
+
         new_nodes.push_back(new_root);
         LOGTRACEMOD(wbcache, "New root node created {}", new_root->to_string());
         on_root_changed(new_root, cp_ctx);
@@ -559,19 +585,18 @@ protected:
                     last_child_last_key = cur_child->get_last_key< K >();
                     found_child = true;
                 }
-                
+
                 next_cur_child = nullptr;
-                if(cur_child->next_bnode() == empty_bnodeid || 
-                   read_node_impl(cur_child->next_bnode(), next_cur_child) != btree_status_t::success) {
+                if (cur_child->next_bnode() == empty_bnodeid ||
+                    read_node_impl(cur_child->next_bnode(), next_cur_child) != btree_status_t::success) {
                     break; // No next child, so we can stop here
                 }
-                
+
                 if (sibling_first_child != empty_bnodeid && sibling_first_child == cur_child->next_bnode()) {
-                    LOGTRACEMOD(
-                        wbcache,
-                        "Last child last key {} for child_node [{}] parent node [{}],  next neigbor is [{}]",
-                        last_child_last_key.to_string(), cur_child->to_string(), parent_node->to_string(),
-                        next_cur_child->to_string());
+                    LOGTRACEMOD(wbcache,
+                                "Last child last key {} for child_node [{}] parent node [{}],  next neigbor is [{}]",
+                                last_child_last_key.to_string(), cur_child->to_string(), parent_node->to_string(),
+                                next_cur_child->to_string());
                     break;
                 }
                 cur_child = next_cur_child;
@@ -606,7 +631,7 @@ protected:
                         last_parent_key = last_child_last_key;
                         parent_node->set_next_bnode(true_sibling->node_id());
                         LOGTRACEMOD(wbcache, "True sibling [{}] for parent_node {}", true_sibling->to_string(),
-                                parent_node->to_string());
+                                    parent_node->to_string());
                     }
                     if (!true_sibling) {
                         LOGTRACEMOD(wbcache, "No true sibling found for parent_node [{}]", parent_node->to_string());
@@ -619,7 +644,7 @@ protected:
                 }
             }
         }
-        
+
         // Keep a copy of the node buffer, in case we need to revert back
         uint8_t* tmp_buffer = new uint8_t[this->m_node_size];
         std::memcpy(tmp_buffer, parent_node->m_phys_node_buf, this->m_node_size);
@@ -632,8 +657,7 @@ protected:
         BtreeNodeList new_parent_nodes;
         do {
             if (child_node->has_valid_edge() || (child_node->is_leaf() && child_node->next_bnode() == empty_bnodeid)) {
-                LOGTRACEMOD(wbcache, "Child node [{}] is an edge node or a leaf with no next",
-                            child_node->to_string());
+                LOGTRACEMOD(wbcache, "Child node [{}] is an edge node or a leaf with no next", child_node->to_string());
                 if (child_node->is_node_deleted()) {
                     // Edge node is merged, we need to set the current last entry as edge
                     if (cur_parent->total_entries() > 0) {
@@ -750,7 +774,8 @@ protected:
                 // No room in the parent_node, let us split the parent_node and continue
                 LOGTRACEMOD(wbcache,
                             "Repairing node={}, child_node=[{}] has no room for put, so we need to split the parent "
-                            "node", cur_parent->node_id(), child_node->to_string());
+                            "node",
+                            cur_parent->node_id(), child_node->to_string());
                 auto new_parent = this->alloc_interior_node();
                 if (new_parent == nullptr) {
                     ret = btree_status_t::space_not_avail;
@@ -857,12 +882,10 @@ protected:
         // if last parent has the key less than the last child key, then we need to update the parent node with
         // the last child key if it doesn't have edge.
         auto last_parent = parent_node;
-        if (new_parent_nodes.size() > 0) { 
+        if (new_parent_nodes.size() > 0) {
             last_parent = new_parent_nodes.back();
             // handle the case where we are splitting the root node
-            if (m_sb->root_node == parent_node->node_id()) {
-                update_root(parent_node, new_parent_nodes, cp_ctx);
-            }
+            if (m_sb->root_node == parent_node->node_id()) { update_root(parent_node, new_parent_nodes, cp_ctx); }
         }
         if (last_parent->total_entries() && !last_parent->has_valid_edge()) {
             if (last_parent->compare_nth_key(last_parent_key, last_parent->total_entries() - 1) < 0) {
@@ -921,9 +944,9 @@ protected:
             return empty_bnodeid;
         } else {
             BtreeNodePtr sibling_node;
-            if (read_node_impl(sibling_id, sibling_node) != btree_status_t::success) { 
+            if (read_node_impl(sibling_id, sibling_node) != btree_status_t::success) {
                 LOGTRACEMOD(wbcache, "Failed to read sibling node with id {}", sibling_id);
-                return empty_bnodeid; 
+                return empty_bnodeid;
             }
 
             if (sibling_node->is_node_deleted()) {

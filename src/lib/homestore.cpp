@@ -144,8 +144,8 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
         HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size) < s_cast< int >(data_fetch_max_size_in_byte)) {
         LOGERROR("max_grpc_message_size {} is too small to hold max_data_size {}, max_snapshot_batch_size {} and "
                  "data_fetch_max_size {}",
-                 HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size,
-                 input.max_snapshot_batch_size, data_fetch_max_size_in_byte);
+                 HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size), input.max_data_size, input.max_snapshot_batch_size,
+                 data_fetch_max_size_in_byte);
         throw std::invalid_argument("max_grpc_message_size is insufficient for the configured data or snapshot sizes");
     }
 
