@@ -46,7 +46,7 @@ public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                  const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);
 
-    BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) override;
+    BtreeNodePtr alloc_buf(uint32_t ordinal, node_initializer_t&& node_initializer) override;
     void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
 

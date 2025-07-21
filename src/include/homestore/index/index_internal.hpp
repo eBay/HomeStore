@@ -56,6 +56,24 @@ struct index_table_sb {
 
     uint32_t user_sb_size; // Size of the user superblk
     uint8_t user_sb_bytes[0];
+    uint32_t pdev_id;
+    uint32_t index_num_chunks {0};
+    // List of chunk ids allocated for this index table are stored after this.
+    void init_chunks(std::vector<chunk_num_t > const& chunk_ids){
+        index_num_chunks = chunk_ids.size();
+        auto chunk_id_ptr = get_chunk_ids_mutable();
+        for (auto& chunk_id : chunk_ids) {
+            *chunk_id_ptr = chunk_id;
+            chunk_id_ptr++;
+        }
+    }
+    chunk_num_t* get_chunk_ids_mutable() {
+        return r_cast<chunk_num_t* >(uintptr_cast(this) + sizeof(index_table_sb));
+    }
+    const chunk_num_t* get_chunk_ids() const {
+        return r_cast< const chunk_num_t* >(reinterpret_cast< const uint8_t* >(this) + sizeof(index_table_sb));
+    }
+
 };
 #pragma pack()
 
