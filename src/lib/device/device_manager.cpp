@@ -102,6 +102,7 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& devs, vdev_create_cb
 void DeviceManager::format_devices() {
     // Only the first time boot, we will generate the first block header. After that, the first block header will be
     // loaded from the existing devices.
+    ++m_first_blk_hdr.gen_number;
     m_first_blk_hdr.version = first_block_header::CURRENT_SUPERBLOCK_VERSION;
     std::strncpy(m_first_blk_hdr.product_name, first_block_header::PRODUCT_NAME,
                  first_block_header::s_product_name_size - 1);
@@ -194,6 +195,8 @@ void DeviceManager::load_devices() {
             if (fblk.hdr.gen_number > m_first_blk_hdr.gen_number) {
                 // cur_pdev_id will be updated to the max pdev id found in the formatted devices. The stale number will
                 // be flushed in commit_formatting().
+                LOGINFO("newer generation number {} found in device {}, updating first block header",
+                        fblk.hdr.gen_number, d.dev_name);
                 m_first_blk_hdr = fblk.hdr;
             }
         }
@@ -211,6 +214,7 @@ void DeviceManager::load_devices() {
     if (pdevs_to_format.empty() && !stale_first_blk_found) return;
 
     if (!pdevs_to_format.empty()) {
+        ++m_first_blk_hdr.gen_number;
         // 4. Add new physical devices to existing vdevs.
         for (auto vdev : m_vdevs) {
             vdev_parameters vparam;
@@ -269,7 +273,7 @@ void DeviceManager::load_devices() {
 
 void DeviceManager::commit_formatting() {
     auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
-    ++m_first_blk_hdr.gen_number;
+    LOGINFO("commit formatting  first block with gen_number={}", m_first_blk_hdr.gen_number);
     for (auto& pdev : m_all_pdevs) {
         if (!pdev) { continue; }
 
