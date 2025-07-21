@@ -87,6 +87,8 @@ public:
     uint32_t num_pdevs{0};         // Total number of pdevs homestore is being created on
     uint32_t max_vdevs{0};         // Max VDevs possible, this cannot be changed post formatting
     uint32_t max_system_chunks{0}; // Max Chunks possible, this cannot be changed post formatting
+    uint32_t cur_pdev_id{0}; // Current pdev id, this is the max pdev id of all formatted disks and used to assign next pdev id for new
+    // disks. It is a monotonically increasing value and is not inherited in case of disk replacement.
     uuid_t system_uuid;
 
 public:

@@ -190,7 +190,11 @@ void DeviceManager::load_devices() {
             }
             it->second.push_back(pdev.get());
             m_all_pdevs[pinfo->pdev_id] = std::move(pdev);
-            m_cur_pdev_id = std::max(m_cur_pdev_id, pinfo->pdev_id);
+            if (fblk.hdr.cur_pdev_id > m_first_blk_hdr.cur_pdev_id) {
+                // Update the current pdev id to the max pdev id found in the formatted devices. The stale number will
+                // be flushed in commit_formatting().
+                m_first_blk_hdr.cur_pdev_id = fblk.hdr.cur_pdev_id;
+            }
         }
     }
 
@@ -253,8 +257,8 @@ void DeviceManager::load_devices() {
         }
 
         hs_utils::iobuf_free(buf, sisl::buftag::superblk);
-        commit_formatting();
     }
+    commit_formatting();
 }
 
 void DeviceManager::commit_formatting() {
@@ -269,6 +273,7 @@ void DeviceManager::commit_formatting() {
         }
 
         first_block* fblk = r_cast< first_block* >(buf);
+        fblk->hdr.cur_pdev_id = m_first_blk_hdr.cur_pdev_id;
         fblk->formatting_done = 0x1;
         fblk->checksum = crc32_ieee(init_crc32, uintptr_cast(fblk), first_block::s_atomic_fb_size);
 
@@ -647,7 +652,7 @@ uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::d
                                            const uuid_t& uuid, pdev_info_header& pinfo) {
     bool hdd = is_hdd(dinfo.dev_name);
 
-    pinfo.pdev_id = ++m_cur_pdev_id;
+    pinfo.pdev_id = ++m_first_blk_hdr.cur_pdev_id;
     pinfo.mirror_super_block = hdd ? 0x01 : 0x00;
     pinfo.max_pdev_chunks = hs_super_blk::max_chunks_in_pdev(dinfo);
 
