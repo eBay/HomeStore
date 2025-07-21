@@ -224,6 +224,12 @@ TEST_F(DeviceMgrTest, ReplaceDeviceWithEmptyDevice) {
     LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
     this->validate_striped_vdevs();
 
+    std::set< uint32_t > pdev_ids;
+    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+
     auto fpath = m_data_dev_names[0];
     m_data_dev_names.erase(m_data_dev_names.begin());
     auto dinfo = m_dev_infos[0];
@@ -247,6 +253,13 @@ TEST_F(DeviceMgrTest, ReplaceDeviceWithEmptyDevice) {
     LOGINFO("Step 7: Restart and validate again");
     this->restart();
     this->validate_striped_vdevs();
+
+    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 1)
+        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
 }
 
 TEST_F(DeviceMgrTest, ReplaceTwoDevicesAtOnce) {
@@ -283,6 +296,12 @@ TEST_F(DeviceMgrTest, ReplaceTwoDevicesAtOnce) {
     LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
     this->validate_striped_vdevs();
 
+    std::set< uint32_t > pdev_ids;
+    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+
     auto fpath1 = m_data_dev_names[0];
     m_data_dev_names.erase(m_data_dev_names.begin());
     auto dinfo = m_dev_infos[0];
@@ -315,6 +334,13 @@ TEST_F(DeviceMgrTest, ReplaceTwoDevicesAtOnce) {
     LOGINFO("Step 7: Restart and validate again");
     this->restart();
     this->validate_striped_vdevs();
+
+    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 2)
+        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
 }
 
 TEST_F(DeviceMgrTest, ReplaceTwoDevicesOneByOne) {
@@ -351,6 +377,12 @@ TEST_F(DeviceMgrTest, ReplaceTwoDevicesOneByOne) {
     LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
     this->validate_striped_vdevs();
 
+    std::set< uint32_t > pdev_ids;
+    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+
     auto fpath1 = m_data_dev_names[0];
     m_data_dev_names.erase(m_data_dev_names.begin());
     auto dinfo = m_dev_infos[0];
@@ -386,6 +418,13 @@ TEST_F(DeviceMgrTest, ReplaceTwoDevicesOneByOne) {
     LOGINFO("Step 7: Restart and validate again");
     this->restart();
     this->validate_striped_vdevs();
+
+    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    for (auto d : pdevs) {
+        pdev_ids.insert(d->pdev_id());
+    }
+    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 2)
+        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
 }
 
 TEST_F(DeviceMgrTest, SmallStripedVDevCreation) {

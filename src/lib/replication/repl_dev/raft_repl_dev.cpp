@@ -2052,15 +2052,24 @@ void RaftReplDev::monitor_replace_member_replication_status() {
     repl_lsn_t in_lsn = 0;
     repl_lsn_t out_lsn = 0;
     repl_lsn_t laggy = HS_DYNAMIC_CONFIG(consensus.laggy_threshold);
+    auto in_member_found = false;
 
     for (auto& peer : peers) {
         if (peer.id_ == replica_out) {
             out_lsn = peer.replication_idx_;
             RD_LOGD(NO_TRACE_ID, "Replica out {} with lsn {}", boost::uuids::to_string(peer.id_), out_lsn);
         } else if (peer.id_ == replica_in) {
+            in_member_found = true;
             in_lsn = peer.replication_idx_;
             RD_LOGD(NO_TRACE_ID, "Replica in {} with lsn {}", boost::uuids::to_string(peer.id_), in_lsn);
         }
+    }
+    if (!in_member_found) {
+        RD_LOGW(NO_TRACE_ID,
+                "Checking replace member status, task_id={}, Replica in {} not found in the peers, add_member might "
+                "fail, wait for users to retry or rollback the task",
+                task_id, boost::uuids::to_string(replica_in));
+        return;
     }
     // TODO optimize the condition
     bool catch_up = in_lsn + laggy >= out_lsn;

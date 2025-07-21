@@ -77,16 +77,18 @@ struct disk_attr {
 struct first_block_header {
     static constexpr const char* PRODUCT_NAME{"HomeStore4x"};
     static constexpr size_t s_product_name_size{64};
-    static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{4};
+    static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{5};
 
 public:
-    uint64_t gen_number{0};                   // Generation count of this structure
-    uint32_t version{0};                      // Version Id of this structure
+    uint64_t gen_number{0}; // Generation count of this structure, will be incremented on every fields change
+    uint32_t version{0};    // Version Id of this structure
     char product_name[s_product_name_size]{}; // Product name
 
     uint32_t num_pdevs{0};         // Total number of pdevs homestore is being created on
     uint32_t max_vdevs{0};         // Max VDevs possible, this cannot be changed post formatting
     uint32_t max_system_chunks{0}; // Max Chunks possible, this cannot be changed post formatting
+    uint32_t cur_pdev_id{0}; // The current max pdev id of all formatted disks and used to assign next pdev id for new
+    // disks. It is a monotonically increasing value and is not inherited in case of disk replacement.
     uuid_t system_uuid;
 
 public:
@@ -100,9 +102,7 @@ public:
                                get_product_name(), get_system_uuid_str());
         return str;
     }
-    bool is_empty() const {
-        return gen_number == 0 && version == 0 && std::string(product_name).empty();
-    }
+    bool is_empty() const { return gen_number == 0 && version == 0 && std::string(product_name).empty(); }
 };
 
 struct pdev_info_header {
