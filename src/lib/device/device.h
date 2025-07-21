@@ -133,8 +133,6 @@ private:
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_all_pdevs;
     std::map< HSDevType, std::vector< PhysicalDev* > > m_pdevs_by_type;
-    uint32_t m_cur_pdev_id{0}; // This is a monotonically increasing value. In case of disk replacement, this value is
-                               // not inherited, new device will get a new id.
 
     std::map< uint16_t, shared< Chunk > > m_chunks;                 // Chunks organized as array (indexed on chunk id)
     sisl::Bitset m_chunk_id_bm{hs_super_blk::MAX_CHUNKS_IN_SYSTEM}; // Bitmap to keep track of chunk ids available
