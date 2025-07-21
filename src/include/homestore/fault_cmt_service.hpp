@@ -22,7 +22,7 @@
 #include <homestore/homestore_decl.hpp>
 
 namespace homestore {
-ENUM(FaultContainmentEvent, uint8_t, ENTER = 0, EXIT = 1, ENTER_GLOABLE = 2);
+ENUM(FaultContainmentEvent, uint8_t, ENTER = 0, EXIT = 1, ENTER_GLOBAL = 2);
 
 class FaultContainmentCallback {
 public:
