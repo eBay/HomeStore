@@ -57,10 +57,10 @@ struct index_table_sb {
     uint32_t user_sb_size; // Size of the user superblk
     uint8_t user_sb_bytes[0];
     uint32_t pdev_id;
-    uint32_t num_chunks {0};
-    // List of chunk ids allocated for this volume are stored after this.
+    uint32_t index_num_chunks {0};
+    // List of chunk ids allocated for this index table are stored after this.
     void init_chunks(std::vector<chunk_num_t > const& chunk_ids){
-        num_chunks = chunk_ids.size();
+        index_num_chunks = chunk_ids.size();
         auto chunk_id_ptr = get_chunk_ids_mutable();
         for (auto& chunk_id : chunk_ids) {
             *chunk_id_ptr = chunk_id;

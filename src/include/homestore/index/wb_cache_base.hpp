@@ -36,6 +36,7 @@ public:
 
     /// @brief Allocate the buffer and initialize the btree node. It adds the node to the wb cache.
     /// @tparam K Key type of the Index
+    /// @param ordinal The index table ordinal used when custom index chunk selector exists
     /// @param node_initializer Callback to be called upon which buffer is turned into btree node
     /// @return Node which was created by the node_initializer
     virtual BtreeNodePtr alloc_buf(uint32_t ordinal, node_initializer_t&& node_initializer) = 0;
