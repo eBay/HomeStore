@@ -53,6 +53,8 @@ class VirtualDev;
 class ChunkSelector;
 class ReplDevListener;
 class ReplApplication;
+class FaultContainmentService;
+class FaultContainmentCallback;
 
 #ifdef _PRERELEASE
 class CrashSimulator;
@@ -83,6 +85,7 @@ struct HS_SERVICE {
     static constexpr uint32_t DATA = 1 << 2;
     static constexpr uint32_t INDEX = 1 << 3;
     static constexpr uint32_t REPLICATION = 1 << 4;
+    static constexpr uint32_t FAULT_CMT = 1 << 5;
 
     uint32_t svcs;
 
@@ -95,6 +98,7 @@ struct HS_SERVICE {
         if (svcs & INDEX) { str += "index,"; }
         if (svcs & LOG) { str += "log,"; }
         if (svcs & REPLICATION) { str += "replication,"; }
+        if (svcs & FAULT_CMT) { str += "fault_containment,"; }
         return str;
     }
 };
@@ -116,6 +120,7 @@ private:
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
     std::shared_ptr< ReplicationService > m_repl_service;
+    std::unique_ptr< FaultContainmentService > m_fc_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;
@@ -149,6 +154,7 @@ public:
                                   cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_repl_data_service(cshared< ReplApplication >& repl_app,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
+    HomeStore& with_fault_containment(std::unique_ptr< FaultContainmentCallback > cb);
 
     bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);
     void format_and_start(std::map< uint32_t, hs_format_params >&& format_opts);
@@ -164,6 +170,7 @@ public:
     bool has_meta_service() const;
     bool has_log_service() const;
     bool has_repl_data_service() const;
+    bool has_fc_service() const;
 
     BlkDataService& data_service() { return *m_data_service; }
     MetaBlkService& meta_service() { return *m_meta_service; }
@@ -173,6 +180,10 @@ public:
         return *m_index_service;
     }
     ReplicationService& repl_service() { return *m_repl_service; }
+    FaultContainmentService& fc_service() {
+        if (!m_fc_service) { throw std::runtime_error("fc_service is nullptr"); }
+        return *m_fc_service;
+    }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
