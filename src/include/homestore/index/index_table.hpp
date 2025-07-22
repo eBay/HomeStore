@@ -36,6 +36,7 @@ class IndexTable : public IndexTableBase, public Btree< K, V > {
 private:
     superblk< index_table_sb > m_sb;
     shared< MetaIndexBuffer > m_sb_buffer;
+    static constexpr uint32_t INVALID_ORDINAL = std::numeric_limits<uint32_t>::max();
 
     // graceful shutdown
 private:
@@ -59,12 +60,17 @@ public:
         }
     }
 
-    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg) :
+    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg, uint32_t ordinal= INVALID_ORDINAL, const std::vector< chunk_num_t >& chunk_ids ={}, uint32_t pdev_id = 0):
             Btree< K, V >{cfg}, m_sb{"index"} {
+        auto ord_num = (ordinal == INVALID_ORDINAL)? (hs()->index_service().reserve_ordinal()) : ordinal;
+		BT_LOG_ASSERT(!hs()->index_service().get_index_table(ord_num), "table with ordinal {} already exists");
+
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
-        m_sb.create(sizeof(index_table_sb));
+        m_sb.create(sizeof(index_table_sb)+(chunk_ids.size() * sizeof(chunk_num_t)));
+        m_sb->init_chunks(chunk_ids);
+        m_sb->pdev_id = pdev_id;
+        m_sb->ordinal = ord_num;
         m_sb->uuid = uuid;
-        m_sb->ordinal = hs()->index_service().reserve_ordinal();
         m_sb->parent_uuid = parent_uuid;
         m_sb->user_sb_size = user_sb_size;
         m_sb.write();
@@ -107,8 +113,11 @@ public:
     btree_status_t destroy() override {
         if (is_stopping()) return btree_status_t::stopping;
         incr_pending_request_num();
-        auto cpg = cp_mgr().cp_guard();
-        Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
+         auto chunk_selector {hs()->index_service().get_chunk_selector()};
+        if(!chunk_selector){
+            auto cpg = cp_mgr().cp_guard();
+            Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
+        }
         m_sb.destroy();
         m_sb_buffer->m_valid = false;
         decr_pending_request_num();
@@ -249,7 +258,7 @@ public:
 protected:
     ////////////////// Override Implementation of underlying store requirements //////////////////
     BtreeNodePtr alloc_node(bool is_leaf) override {
-        return wb_cache().alloc_buf([this, is_leaf](const IndexBufferPtr& idx_buf) -> BtreeNodePtr {
+        return wb_cache().alloc_buf(ordinal(), [this, is_leaf](const IndexBufferPtr& idx_buf) -> BtreeNodePtr {
             BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), true, is_leaf);
             static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
             return BtreeNodePtr{n};

@@ -150,7 +150,8 @@ public:
     ///////////////////////////// Member functions /////////////////////////////////////////////
     HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_log_service();
-    HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs);
+    HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs,
+                                  cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_repl_data_service(cshared< ReplApplication >& repl_app,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_fault_containment(std::unique_ptr< FaultContainmentCallback > cb);

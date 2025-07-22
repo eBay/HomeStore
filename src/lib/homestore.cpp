@@ -59,7 +59,8 @@ HomeStoreSafePtr HomeStore::s_instance{nullptr};
 
 static std::unique_ptr< FaultContainmentCallback > s_fc_cb;
 static std::unique_ptr< IndexServiceCallbacks > s_index_cbs;
-static shared< ChunkSelector > s_custom_chunk_selector{nullptr};
+static shared< ChunkSelector > s_custom_data_chunk_selector{nullptr};
+static shared< ChunkSelector > s_custom_index_chunk_selector{nullptr};
 static shared< ReplApplication > s_repl_app{nullptr};
 std::string version = PACKAGE_VERSION;
 
@@ -77,13 +78,14 @@ HomeStore& HomeStore::with_fault_containment(std::unique_ptr< FaultContainmentCa
 HomeStore& HomeStore::with_data_service(cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::DATA;
     m_services.svcs &= ~HS_SERVICE::REPLICATION; // ReplicationDataSvc or DataSvc are mutually exclusive
-    s_custom_chunk_selector = std::move(custom_chunk_selector);
+    s_custom_data_chunk_selector = std::move(custom_chunk_selector);
     return *this;
 }
 
-HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs) {
+HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs, cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::INDEX;
     s_index_cbs = std::move(cbs);
+    s_custom_index_chunk_selector = std::move(custom_chunk_selector);
     return *this;
 }
 
@@ -97,7 +99,7 @@ HomeStore& HomeStore::with_repl_data_service(cshared< ReplApplication >& repl_ap
     m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG;
     m_services.svcs &= ~HS_SERVICE::DATA; // ReplicationDataSvc or DataSvc are mutually exclusive
     s_repl_app = repl_app;
-    s_custom_chunk_selector = std::move(custom_chunk_selector);
+    s_custom_data_chunk_selector = std::move(custom_chunk_selector);
     return *this;
 }
 
@@ -165,15 +167,18 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     LOGINFO("Homestore is loading with following services: {}", m_services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
-    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs)); }
+    if (has_index_service()) {
+        m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs),
+ std::move(s_custom_index_chunk_selector));
+ }
     if (has_repl_data_service()) {
         m_log_service = std::make_unique< LogStoreService >();
-        m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
+        m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_data_chunk_selector));
         m_repl_service = GenericReplService::create(std::move(s_repl_app));
     } else {
         if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
         if (has_data_service()) {
-            m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
+            m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_data_chunk_selector));
         }
     }
     if (has_fc_service()) { m_fc_service = std::make_unique< FaultContainmentService >(std::move(s_fc_cb)); }
@@ -245,7 +250,7 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
                                                          fparams.dev_type, fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
             m_index_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
-                                         fparams.num_chunks);
+                                         fparams.num_chunks, fparams.chunk_sel_type);
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
             m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
                                         fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
