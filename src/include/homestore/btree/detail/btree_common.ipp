@@ -96,32 +96,56 @@ btree_status_t Btree< K, V >::do_destroy(uint64_t& n_freed_nodes, void* context)
 }
 
 template < typename K, typename V >
-uint64_t Btree< K, V >::get_btree_node_cnt() const {
-    uint64_t cnt = 1; /* increment it for root */
+std::pair<uint64_t,uint64_t> Btree< K, V >::compute_node_count()  {
+    uint64_t leaf_cnt = 0;
+    uint64_t interior_cnt = 0;
     m_btree_lock.lock_shared();
-    cnt += get_child_node_cnt(m_root_node_info.bnode_id());
+    get_child_node_count(m_root_node_info.bnode_id(), interior_cnt, leaf_cnt);
+    m_total_leaf_nodes = leaf_cnt;
+    m_total_interior_nodes= interior_cnt;
     m_btree_lock.unlock_shared();
-    return cnt;
+    return {interior_cnt, leaf_cnt};
 }
 
 template < typename K, typename V >
-uint64_t Btree< K, V >::get_child_node_cnt(bnodeid_t bnodeid) const {
-    uint64_t cnt{0};
+uint16_t Btree< K, V >::compute_btree_depth()  {
+    m_btree_lock.lock_shared();
+    BtreeNodePtr root;
+    locktype_t acq_lock = locktype_t::READ;
+    if (read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, nullptr) != btree_status_t::success){ return -1; }
+    m_btree_depth = root->level();
+    unlock_node(root, acq_lock);
+    m_btree_lock.unlock_shared();
+    return m_btree_depth;
+}
+
+template < typename K, typename V >
+void Btree< K, V >::get_child_node_count(bnodeid_t bnodeid, uint64_t& interior_cnt, uint64_t& leaf_cnt) const {
     BtreeNodePtr node;
     locktype_t acq_lock = locktype_t::READ;
 
-    if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return cnt; }
+    if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return ; }
+    if(node->is_leaf()) {
+        ++leaf_cnt;
+    } else {
+        ++interior_cnt;
+    }
     if (!node->is_leaf()) {
-        uint32_t i = 0;
-        while (i < node->total_entries()) {
-            BtreeLinkInfo p = node->get_nth_key< K >(i, false);
-            cnt += get_child_node_cnt(p.bnode_id()) + 1;
-            ++i;
+        if(node->level()==1){
+                leaf_cnt += node->total_entries() + (node->has_valid_edge()?1:0);
+        }else{
+            uint32_t i = 0;
+            while (i < node->total_entries()) {
+                BtreeLinkInfo p;
+                node->get_nth_value(i, &p, false);
+                get_child_node_count(p.bnode_id(), interior_cnt, leaf_cnt);
+                ++i;
+            }
+            if (node->has_valid_edge()) {get_child_node_count(node->edge_id(), interior_cnt, leaf_cnt); }
         }
-        if (node->has_valid_edge()) { cnt += get_child_node_cnt(node->edge_id()) + 1; }
     }
     unlock_node(node, acq_lock);
-    return cnt;
+    return ;
 }
 
 template < typename K, typename V >

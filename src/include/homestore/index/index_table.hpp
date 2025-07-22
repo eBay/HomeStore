@@ -36,7 +36,7 @@ class IndexTable : public IndexTableBase, public Btree< K, V > {
 private:
     superblk< index_table_sb > m_sb;
     shared< MetaIndexBuffer > m_sb_buffer;
-    static constexpr uint32_t INVALID_ORDINAL = std::numeric_limits<uint32_t>::max();
+    static constexpr uint32_t INVALID_ORDINAL = std::numeric_limits< uint32_t >::max();
 
     // graceful shutdown
 private:
@@ -60,13 +60,15 @@ public:
         }
     }
 
-    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg, uint32_t ordinal= INVALID_ORDINAL, const std::vector< chunk_num_t >& chunk_ids ={}, uint32_t pdev_id = 0):
+    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
+               uint32_t ordinal = INVALID_ORDINAL, const std::vector< chunk_num_t >& chunk_ids = {},
+               uint32_t pdev_id = 0) :
             Btree< K, V >{cfg}, m_sb{"index"} {
-        auto ord_num = (ordinal == INVALID_ORDINAL)? (hs()->index_service().reserve_ordinal()) : ordinal;
-		BT_LOG_ASSERT(!hs()->index_service().get_index_table(ord_num), "table with ordinal {} already exists");
+        auto ord_num = (ordinal == INVALID_ORDINAL) ? (hs()->index_service().reserve_ordinal()) : ordinal;
+        BT_LOG_ASSERT(!hs()->index_service().get_index_table(ord_num), "table with ordinal {} already exists");
 
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
-        m_sb.create(sizeof(index_table_sb)+(chunk_ids.size() * sizeof(chunk_num_t)));
+        m_sb.create(sizeof(index_table_sb) + (chunk_ids.size() * sizeof(chunk_num_t)));
         m_sb->init_chunks(chunk_ids);
         m_sb->pdev_id = pdev_id;
         m_sb->ordinal = ord_num;
@@ -113,8 +115,8 @@ public:
     btree_status_t destroy() override {
         if (is_stopping()) return btree_status_t::stopping;
         incr_pending_request_num();
-         auto chunk_selector {hs()->index_service().get_chunk_selector()};
-        if(!chunk_selector){
+        auto chunk_selector{hs()->index_service().get_chunk_selector()};
+        if (!chunk_selector) {
             auto cpg = cp_mgr().cp_guard();
             Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
         }
@@ -140,7 +142,10 @@ public:
             auto cpg = cp_mgr().cp_guard();
             put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
             ret = Btree< K, V >::put(put_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying put"); }
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying put");
+                COUNTER_INCREMENT(this->m_metrics, btree_retry_count, 1);
+            }
         } while (ret == btree_status_t::cp_mismatch);
         decr_pending_request_num();
         return ret;
@@ -155,7 +160,10 @@ public:
             auto cpg = cp_mgr().cp_guard();
             remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
             ret = Btree< K, V >::remove(remove_req);
-            if (ret == btree_status_t::cp_mismatch) { LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove"); }
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove");
+                COUNTER_INCREMENT(this->m_metrics, btree_retry_count, 1);
+            }
         } while (ret == btree_status_t::cp_mismatch);
         decr_pending_request_num();
         return ret;
@@ -348,6 +356,10 @@ protected:
         LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node, new_root->node_id());
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
+        m_sb->btree_depth = new_root->level();
+        m_sb->total_interior_nodes = this->m_total_interior_nodes;
+        m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
+        std::tie(m_sb->total_interior_nodes, m_sb->total_leaf_nodes) = this->get_num_nodes();
 
         if (!wb_cache().refresh_meta_buf(m_sb_buffer, r_cast< CPContext* >(context))) {
             LOGTRACEMOD(wbcache, "CP mismatch error - discard transact for meta node");
@@ -357,6 +369,22 @@ protected:
         auto& root_buf = static_cast< IndexBtreeNode* >(new_root.get())->m_idx_buf;
         wb_cache().transact_bufs(ordinal(), m_sb_buffer, root_buf, {}, {}, r_cast< CPContext* >(context));
         return btree_status_t::success;
+    }
+
+    void update_sb() override {
+        m_sb->total_interior_nodes = this->m_total_interior_nodes;
+        m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
+        m_sb->btree_depth = this->m_btree_depth;
+        m_sb.write();
+    }
+
+    void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) override {
+        this->m_total_leaf_nodes = leaf;
+        this->m_total_interior_nodes = interior;
+        this->m_btree_depth = depth;
+        COUNTER_INCREMENT(this->m_metrics, btree_int_node_count, interior);
+        COUNTER_INCREMENT(this->m_metrics, btree_leaf_node_count, leaf);
+        COUNTER_INCREMENT(this->m_metrics, btree_depth, depth);
     }
 
     btree_status_t delete_stale_links(BtreeNodePtr const& parent_node, void* cp_ctx) {

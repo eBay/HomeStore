@@ -256,13 +256,14 @@ struct BtreeConfig {
     std::string m_btree_name; // Unique name for the btree
     bool m_merge_turned_on{true};
     uint8_t m_max_merge_level{1};
+
 private:
     uint32_t m_suggested_min_size; // Precomputed values
     uint32_t m_ideal_fill_size;
 
 public:
     BtreeConfig(uint32_t node_size, const std::string& btree_name = "") :
-            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name}{
+            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name} {
         set_node_data_size(node_size - 512); // Just put estimate at this point of time.
     }
 
@@ -320,8 +321,6 @@ public:
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
-        REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
-        REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");
         REGISTER_COUNTER(btree_write_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_query_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");

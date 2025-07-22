@@ -254,8 +254,9 @@ public:
                     }
                     V new_val{s_cast< V const& >(val)};
                     new_val.shift(s_cast< K const& >(cur_key).distance(first_input_key), app_ctx);
-                    if(get_prefix_entry_c(prefix_slot)->compare(cur_key, new_val)) {
-                        LOGTRACEMOD(btree, "Adding new prefix entry for key={} val={}", cur_key.to_string(), new_val.to_string());
+                    if (get_prefix_entry_c(prefix_slot)->compare(cur_key, new_val)) {
+                        LOGTRACEMOD(btree, "Adding new prefix entry for key={} val={}", cur_key.to_string(),
+                                    new_val.to_string());
                         prefix_slot = add_prefix(cur_key, new_val);
                     }
                     write_suffix(idx, prefix_slot, cur_key, new_val);

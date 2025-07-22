@@ -248,15 +248,16 @@ VENUM(BlkAllocStatus, uint32_t,
 );
 
 struct blk_alloc_hints {
-    blk_temp_t desired_temp{0};                  // Temperature hint for the device
-    std::optional< uint32_t > reserved_blks;     // Reserved blks in a chunk
-    std::optional< uint32_t > pdev_id_hint;      // which physical device to pick (hint if any) -1 for don't care
-    std::optional< chunk_num_t > chunk_id_hint;  // any specific chunk id to pick for this allocation
-    std::optional<MultiBlkId> committed_blk_id; //  blk id indicates the blk was already allocated and committed, don't allocate and commit again
-    std::optional< stream_id_t > stream_id_hint; // any specific stream to pick
-    std::optional< uint64_t > application_hint;  // hints in uint64 what will be passed opaque to select_chunk
-    bool can_look_for_other_chunk{true};         // If alloc on device not available can I pick other device
-    bool is_contiguous{true};                    // Should the entire allocation be one contiguous block
+    blk_temp_t desired_temp{0};                   // Temperature hint for the device
+    std::optional< uint32_t > reserved_blks;      // Reserved blks in a chunk
+    std::optional< uint32_t > pdev_id_hint;       // which physical device to pick (hint if any) -1 for don't care
+    std::optional< chunk_num_t > chunk_id_hint;   // any specific chunk id to pick for this allocation
+    std::optional< MultiBlkId > committed_blk_id; //  blk id indicates the blk was already allocated and committed,
+                                                  //  don't allocate and commit again
+    std::optional< stream_id_t > stream_id_hint;  // any specific stream to pick
+    std::optional< uint64_t > application_hint;   // hints in uint64 what will be passed opaque to select_chunk
+    bool can_look_for_other_chunk{true};          // If alloc on device not available can I pick other device
+    bool is_contiguous{true};                     // Should the entire allocation be one contiguous block
     bool partial_alloc_ok{false};   // ok to allocate only portion of nblks? Mutually exclusive with is_contiguous
     uint32_t min_blks_per_piece{1}; // blks allocated in a blkid should be atleast this size per entry
     uint32_t max_blks_per_piece{max_blks_per_blkid()}; // Number of blks on every entry

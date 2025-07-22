@@ -79,7 +79,9 @@ protected:
 
     BtreeMetrics m_metrics;
     std::atomic< bool > m_destroyed{false};
-    std::atomic< uint64_t > m_total_nodes{0};
+    std::atomic< uint64_t > m_total_leaf_nodes{0};
+    std::atomic< uint64_t > m_total_interior_nodes{0};
+    std::atomic< uint8_t > m_btree_depth{0};
     uint32_t m_node_size{4096};
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id{0};
@@ -124,6 +126,10 @@ public:
     std::string to_custom_string(to_string_cb_t< K, V > const& cb) const;
     std::string visualize_tree_keys(const std::string& file) const;
     uint64_t count_keys(bnodeid_t bnodeid = 0) const;
+    std::pair< uint64_t, uint64_t > compute_node_count();
+    std::pair< uint64_t, uint64_t > get_num_nodes() const;
+    uint16_t compute_btree_depth();
+    uint16_t get_btree_depth() const;
 
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
@@ -198,13 +204,13 @@ protected:
     btree_status_t post_order_traversal(const BtreeNodePtr& node, locktype_t acq_lock, const auto& cb);
     void get_all_kvs(std::vector< std::pair< K, V > >& kvs) const;
     btree_status_t do_destroy(uint64_t& n_freed_nodes, void* context);
-    uint64_t get_btree_node_cnt() const;
-    uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
+    void get_child_node_count(bnodeid_t bnodeid, uint64_t& interior_cnt, uint64_t& leaf_cnt) const;
     void to_string(bnodeid_t bnodeid, std::string& buf) const;
-    void to_custom_string_internal(bnodeid_t bnodeid, std::string& buf, to_string_cb_t< K, V > const& cb, int nindent=-1) const;
+    void to_custom_string_internal(bnodeid_t bnodeid, std::string& buf, to_string_cb_t< K, V > const& cb,
+                                   int nindent = -1) const;
     void to_dot_keys(bnodeid_t bnodeid, std::string& buf, std::map< uint32_t, std::vector< uint64_t > >& l_map,
                      std::map< uint64_t, BtreeVisualizeVariables >& info_map) const;
-    void sanity_sub_tree(bnodeid_t bnodeid=0) const;
+    void sanity_sub_tree(bnodeid_t bnodeid = 0) const;
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void print_node(const bnodeid_t& bnodeid) const;
