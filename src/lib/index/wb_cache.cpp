@@ -716,6 +716,31 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(icp_ctx));
     }
 
+    if (pending_bufs.empty()) {
+        LOGTRACEMOD(wbcache, "No buffers to repair, recovery completed");
+    } else {
+        std::map< uint32_t, IndexBufferPtrList > changed_bufs;
+        for (auto const& [_, buf] : bufs) {
+            LOGTRACEMOD(wbcache, "{}", buf->to_string());
+            if (!buf->m_node_freed) { changed_bufs[buf->m_index_ordinal].push_back(buf); }
+        }
+        for (auto const& [index_ordinal, bufs] : changed_bufs) {
+            LOGTRACEMOD(wbcache, "Sanity checking buffers for index ordinal {}: # of bufs {}", index_ordinal,
+                        bufs.size());
+            auto ret = index_service().sanity_check(index_ordinal, bufs);
+            if (ret) {
+                LOGTRACEMOD(wbcache, "Sanity check for index ordinal {} passed", index_ordinal);
+            } else {
+                LOGERRORMOD(wbcache, "Sanity check for index ordinal {} failed", index_ordinal);
+#ifdef _PRELEASE
+                HS_DBG_ASSERT(true, "sanity failed: {}", ret);
+#else
+                // TODO: make this index table offline and let others work
+                HS_REL_ASSERT(0, "sanity failed: {}", ret);
+#endif
+            }
+        }
+    }
     m_in_recovery = false;
     m_vdev->recovery_completed();
 }

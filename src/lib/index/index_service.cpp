@@ -114,6 +114,14 @@ void IndexService::write_sb(uint32_t ordinal) {
 
 IndexService::~IndexService() { m_wb_cache.reset(); }
 
+bool IndexService::sanity_check(const uint32_t index_ordinal, const IndexBufferPtrList& bufs) const {
+    auto tbl = get_index_table(index_ordinal);
+    if (!tbl) {
+        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", index_ordinal);
+    }
+    return tbl->sanity_check(bufs);
+}
+
 void IndexService::stop() {
     start_stopping();
     while (true) {
