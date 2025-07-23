@@ -26,7 +26,7 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
-
+#include <boost/uuid/nil_generator.hpp>
 #include <homestore/homestore_decl.hpp>
 #include <homestore/logstore/log_store.hpp>
 #include <homestore/superblk_handler.hpp>
@@ -94,7 +94,7 @@ public:
      * chunks. Logdev can start with zero chunks and dynamically add chunks based on write request.
      * @return Newly created log dev id.
      */
-    logdev_id_t create_new_logdev(flush_mode_t flush_mode);
+    logdev_id_t create_new_logdev(flush_mode_t flush_mode, uuid_t pid = boost::uuids::nil_uuid());
 
     /**
      * @brief Open a log dev.
@@ -102,7 +102,7 @@ public:
      * @param logdev_id: Logdev ID
      * @return Newly created log dev id.
      */
-    void open_logdev(logdev_id_t logdev_id, flush_mode_t flush_mode);
+    void open_logdev(logdev_id_t logdev_id, flush_mode_t flush_mode, uuid_t pid = boost::uuids::nil_uuid());
 
     /**
      * @brief Destroy a log dev.
@@ -178,7 +178,8 @@ public:
     void delete_unopened_logdevs();
 
 private:
-    std::shared_ptr< LogDev > create_new_logdev_internal(logdev_id_t logdev_id, flush_mode_t flush_mode);
+    std::shared_ptr< LogDev > create_new_logdev_internal(logdev_id_t logdev_id, flush_mode_t flush_mode,
+                                                         uuid_t pid = boost::uuids::nil_uuid());
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     logdev_id_t get_next_logdev_id();
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
