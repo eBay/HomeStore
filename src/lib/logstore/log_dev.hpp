@@ -33,7 +33,7 @@
 #include <folly/futures/SharedPromise.h>
 #include <fmt/format.h>
 #include <sisl/logging/logging.h>
-
+#include <boost/uuid/nil_generator.hpp>
 #include <homestore/logstore/log_store_internal.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_config.hpp"
@@ -405,6 +405,7 @@ struct logdev_superblk {
     uint64_t start_dev_offset{0};
     logid_t key_idx{0};
     flush_mode_t flush_mode;
+    uuid_t pid{boost::uuids::nil_uuid()};
 
     // The meta data starts immediately after the super block
     // Equivalent of:
@@ -483,7 +484,7 @@ public:
     LogDevMetadata& operator=(LogDevMetadata&&) noexcept = delete;
     ~LogDevMetadata() = default;
 
-    logdev_superblk* create(logdev_id_t id, flush_mode_t);
+    logdev_superblk* create(logdev_id_t id, flush_mode_t, uuid_t);
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
@@ -583,7 +584,8 @@ public:
     }
 
     LogDev(logdev_id_t logdev_id,
-           flush_mode_t flush_mode = static_cast< flush_mode_t >(HS_DYNAMIC_CONFIG(logstore.flush_mode)));
+           flush_mode_t flush_mode = static_cast< flush_mode_t >(HS_DYNAMIC_CONFIG(logstore.flush_mode)),
+           uuid_t pid = boost::uuids::nil_uuid());
     LogDev(const LogDev&) = delete;
     LogDev& operator=(const LogDev&) = delete;
     LogDev(LogDev&&) noexcept = delete;
@@ -778,6 +780,7 @@ private:
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
     HomeStoreSafePtr m_hs;                             // Back pointer to homestore
     flush_mode_t m_flush_mode;
+    uuid_t m_parent_id;
 
     folly::SharedMutexWritePriority m_store_map_mtx;
     std::unordered_map< logstore_id_t, logstore_info > m_id_logstore_map;

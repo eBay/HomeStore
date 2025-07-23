@@ -43,7 +43,8 @@ SISL_LOGGING_DECL(logstore)
 static bool has_data_service() { return HomeStore::instance()->has_data_service(); }
 // static BlkDataService& data_service() { return HomeStore::instance()->data_service(); }
 
-LogDev::LogDev(logdev_id_t id, flush_mode_t flush_mode) : m_logdev_id{id}, m_flush_mode{flush_mode} {
+LogDev::LogDev(logdev_id_t id, flush_mode_t flush_mode, uuid_t pid) :
+        m_logdev_id{id}, m_flush_mode{flush_mode}, m_parent_id{pid} {
     m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_logdev);
 }
 
@@ -64,7 +65,7 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
     // First read the info block
     if (format) {
         HS_LOG_ASSERT(m_logdev_meta.is_empty(), "Expected meta to be not present");
-        m_logdev_meta.create(m_logdev_id, m_flush_mode);
+        m_logdev_meta.create(m_logdev_id, m_flush_mode, m_parent_id);
         m_vdev_jd->update_data_start_offset(0);
     } else {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(),
@@ -832,7 +833,7 @@ nlohmann::json LogDev::get_status(int verbosity) const {
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
 LogDevMetadata::LogDevMetadata() : m_sb{logdev_sb_meta_name}, m_rollback_sb{logdev_rollback_sb_meta_name} {}
 
-logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode) {
+logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode, uuid_t pid) {
     logdev_superblk* sb = m_sb.create(logdev_sb_size_needed(0));
     rollback_superblk* rsb = m_rollback_sb.create(rollback_superblk::size_needed(1));
 
@@ -842,6 +843,7 @@ logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode)
     m_id_reserver = std::make_unique< sisl::IDReserver >();
     m_sb->logdev_id = id;
     m_sb->flush_mode = flush_mode;
+    m_sb->pid = pid;
     m_sb.write();
 
     m_rollback_sb->logdev_id = id;
