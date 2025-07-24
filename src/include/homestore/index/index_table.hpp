@@ -64,9 +64,15 @@ public:
                uint32_t ordinal = INVALID_ORDINAL, const std::vector< chunk_num_t >& chunk_ids = {},
                uint32_t pdev_id = 0) :
             Btree< K, V >{cfg}, m_sb{"index"} {
-        auto ord_num = (ordinal == INVALID_ORDINAL) ? (hs()->index_service().reserve_ordinal()) : ordinal;
-        BT_LOG_ASSERT(!hs()->index_service().get_index_table(ord_num), "table with ordinal {} already exists");
-
+        uint32_t ord_num = INVALID_ORDINAL;
+        if (ordinal != INVALID_ORDINAL) {
+            BT_LOG_ASSERT(!hs()->index_service().get_index_table(ordinal), "table with ordinal {} already exists",
+                          ordinal);
+            hs()->index_service().reserve_ordinal(ordinal);
+            ord_num = ordinal;
+        } else {
+            ord_num = hs()->index_service().reserve_ordinal();
+        }
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
         m_sb.create(sizeof(index_table_sb) + (chunk_ids.size() * sizeof(chunk_num_t)));
         m_sb->init_chunks(chunk_ids);
@@ -385,6 +391,10 @@ protected:
     }
 
     void update_sb() override {
+        if (!this->m_sb_buffer || !this->m_sb_buffer->m_valid) {
+            LOGERROR("Attempting to update superblk when it is already invalid");
+            return;
+        }
         m_sb->total_interior_nodes = this->m_total_interior_nodes;
         m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
         m_sb->btree_depth = this->m_btree_depth;

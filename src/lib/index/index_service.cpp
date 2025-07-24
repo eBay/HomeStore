@@ -69,6 +69,24 @@ shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo, bool load_e
 
 uint32_t IndexService::reserve_ordinal() { return m_ordinal_reserver->reserve(); }
 
+bool IndexService::reserve_ordinal(uint32_t ordinal) {
+    if (m_ordinal_reserver->is_reserved(ordinal)) {
+        LOGERROR("ordinal {} is already reserved", ordinal);
+        return false;
+    }
+    m_ordinal_reserver->reserve(ordinal);
+    return true;
+}
+
+bool IndexService::unreserve_ordinal(uint32_t ordinal) {
+    if (!m_ordinal_reserver->is_reserved(ordinal)) {
+        LOGERROR("ordinal {} doesn't exist", ordinal);
+        return false;
+    }
+    m_ordinal_reserver->unreserve(ordinal);
+    return true;
+}
+
 void IndexService::start() {
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, m_wbcache_sb, hs()->evictor(),
@@ -84,6 +102,7 @@ void IndexService::start() {
         LOGINFO("sb metrics interior {},  leaf: {} depth {}", inode, lnode, depth);
         auto tbl = m_svc_cbs->on_index_table_found(std::move(sb));
         tbl->load_metrics(inode, lnode, depth);
+        reserve_ordinal(tbl->ordinal());
         add_index_table(tbl);
     }
 
@@ -152,6 +171,10 @@ bool IndexService::remove_index_table(const std::shared_ptr< IndexTableBase >& t
     if (is_stopping()) return false;
     incr_pending_request_num();
     std::unique_lock lg(m_index_map_mtx);
+    if (!unreserve_ordinal(tbl->ordinal())) {
+        decr_pending_request_num();
+        return false;
+    }
     m_index_map.erase(tbl->uuid());
     m_ordinal_index_map.erase(tbl->ordinal());
     decr_pending_request_num();

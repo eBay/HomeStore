@@ -351,14 +351,18 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     }
 
     void reset_btree() {
+        LOGINFO("Destroying index btree with uuid {} root id {}", boost::uuids::to_string(this->m_bt->uuid()),
+                this->m_bt->root_node_id());
         hs()->index_service().remove_index_table(this->m_bt);
         this->m_bt->destroy();
         this->trigger_cp(true);
+        ASSERT_EQ(hs()->index_service().num_tables(), 0) << "After destroying the index table, some table still exists";
 
         auto uuid = boost::uuids::random_generator()();
         auto parent_uuid = boost::uuids::random_generator()();
         this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
         hs()->index_service().add_index_table(this->m_bt);
+        auto num_keys = this->m_bt->count_keys(this->m_bt->root_node_id());
         this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
         this->m_shadow_map.save(m_shadow_filename);
         LOGINFO("Reset btree with uuid {} - erase shadow map {}", boost::uuids::to_string(uuid), m_shadow_filename);

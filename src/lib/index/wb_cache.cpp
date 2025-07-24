@@ -885,12 +885,17 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     buf->set_state(index_buf_state_t::FLUSHING);
 
     if (buf->is_meta_buf()) {
-        LOGTRACEMOD(wbcache, "Flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
-                    buf->to_string());
+        LOGTRACEMOD(wbcache, "Flushing cp {} meta buf {}", cp_ctx->id(), buf->to_string());
         auto const sb_buf = r_cast< MetaIndexBuffer* >(buf.get());
         if (sb_buf->m_valid) {
             auto const& sb = sb_buf->m_sb;
-            if (!sb.is_empty()) { meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk()); }
+            if (!sb.is_empty()) {
+                meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk());
+            } else {
+                LOGTRACEMOD(wbcache, "Skipping flushing meta buf {} as sb is empty", buf->to_string());
+            }
+        } else {
+            LOGTRACEMOD(wbcache, "Skipping flushing meta buf {} as it is not valid", buf->to_string());
         }
         process_write_completion(cp_ctx, buf);
     } else if (buf->m_node_freed) {

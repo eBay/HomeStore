@@ -84,8 +84,10 @@ public:
     void write_sb(uint32_t ordinal);
     bool sanity_check(const uint32_t index_ordinal, const IndexBufferPtrList& bufs) const;
 
-    // Reserve an ordinal for the index table
+    // Reserve/unreserve an ordinal for the index table
     uint32_t reserve_ordinal();
+    bool reserve_ordinal(uint32_t ordinal);
+    bool unreserve_ordinal(uint32_t ordinal);
 
     uint64_t used_size() const;
     uint32_t node_size() const;
