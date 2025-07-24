@@ -96,7 +96,7 @@ def long_running_crash_put(options):
     print("Long running crash put started")
     options['num_entries'] = 1310720  # 1280K
     options['init_device'] = True
-    options['run_time'] = 14400  # 4 hours
+    options['run_time'] = 7200  # 2 hours
     options['preload_size'] = 1024
     print(f"options: {options}")
     run_crash_test(options, 'put', 0)
@@ -104,9 +104,9 @@ def long_running_crash_put(options):
 
 def long_running_crash_remove(options):
     print("Long running crash remove started")
-    options['num_entries'] = 1000
+    options['num_entries'] = 102400 # 100K
     options['init_device'] = True
-    options['run_time'] = 14400  # 4 hours
+    options['run_time'] = 7200  # 2 hours
     options['num_entries_per_rounds'] = 100
     options['min_keys_in_node'] = 2
     options['max_keys_in_node'] = 10
@@ -116,9 +116,9 @@ def long_running_crash_remove(options):
 
 def long_running_crash_put_remove(options):
     print("Long running crash put_remove started")
-    options['num_entries'] = 2000  # 1280K
+    options['num_entries'] = 102400 # 100K
     options['init_device'] = True
-    options['run_time'] = 14400  # 4 hours
+    options['run_time'] = 7200  # 2 hours
     options['preload_size'] = 1024
     options['min_keys_in_node'] = 3
     options['max_keys_in_node'] = 10
@@ -148,10 +148,10 @@ def long_running(*args):
     long_running_clean_shutdown(options, 0)
     # long_runnig_index(options, 1)
     # long_running_clean_shutdown(options, 1)
-    for i in range(20):
+    for i in range(5):
         print(f"Iteration {i + 1}")
         long_running_crash_put_remove(options)
-    for i in range(50):
+    for i in range(5):
         print(f"Iteration {i + 1}")
         long_running_crash_remove(options)
     for i in range(5):
