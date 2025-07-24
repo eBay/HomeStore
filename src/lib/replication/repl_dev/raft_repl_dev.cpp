@@ -1303,17 +1303,19 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         // accumulate the sgs for later use (send back to the requester));
         sgs_vec.push_back(sgs);
 
-        if (originator != server_id()) {
+        const auto is_originator = (originator == server_id());
+
+        if (is_originator) {
+            RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
+        } else {
             RD_LOGD(NO_TRACE_ID, "non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}",
                     req->dsn(), lsn, originator, server_id());
-        } else {
-            RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
         }
 
         auto const& header = req->user_header();
         sisl::blob user_header = sisl::blob{header->Data(), header->size()};
         RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData handled, my_blkid={}", local_blkid.to_string());
-        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
+        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs, is_originator)));
     }
 
     folly::collectAllUnsafe(futs).thenValue(
