@@ -163,6 +163,7 @@ public:
     std::optional< IndexBufferPtr > next_dirty();
     std::string to_string();
     std::string to_string_small();
+    std::string to_string_free_list();
     std::string to_string_with_dags();
     uint16_t num_dags();
     void to_string_dot(const std::string& filename);

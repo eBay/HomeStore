@@ -86,6 +86,15 @@ std::string IndexCPContext::to_string_small() {
                        m_dirty_buf_count.get(), m_dirty_buf_list.size());
 }
 
+std::string IndexCPContext::to_string_free_list() {
+    std::string str{
+        fmt::format("IndexCPContext cpid={} free_blkid_list_size={}\n[", m_cp->id(), m_free_blkid_list.size())};
+    if (m_free_blkid_list.size() == 0) { return str + "empty]"; }
+    m_free_blkid_list.foreach_entry(
+        [&str](BlkId bid) { fmt::format_to(std::back_inserter(str), "{}:{}, ", bid.to_integer(), bid.to_string()); });
+    return str + "]";
+}
+
 std::string IndexCPContext::to_string() {
     std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}\n", m_cp->id(),
                                 m_dirty_buf_count.get(), m_dirty_buf_list.size())};
