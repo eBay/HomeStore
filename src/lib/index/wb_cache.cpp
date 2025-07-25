@@ -442,6 +442,8 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
     buf->m_node_freed = true;
     resource_mgr().inc_free_blk(m_node_size);
     m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(cp_ctx));
+    LOGTRACEMOD(wbcache, "Freeing bkid = {}. Remove from cache?(aka not recovery mode) = {}", buf->m_blkid.to_integer(),
+                !m_in_recovery);
 }
 
 //////////////////// Recovery Related section /////////////////////////////////
@@ -903,6 +905,10 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                     buf->to_string());
         process_write_completion(cp_ctx, buf);
     } else {
+        if (buf->m_created_cp_id == cp_ctx->id()) {
+            LOGTRACEMOD(wbcache, "Flushing cp {} new node buf {} blkid {}", cp_ctx->id(), buf->to_string(),
+                        buf->blkid().to_string());
+        }
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
                 try {
@@ -927,7 +933,8 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
     }
 #endif
 
-    LOGTRACEMOD(wbcache, "cp {} buf {}", cp_ctx->id(), buf->to_string());
+    LOGTRACEMOD(wbcache, "cp {} completed flushed for buf {} blkid {}", cp_ctx->id(), buf->to_string(),
+                buf->blkid().to_string());
     resource_mgr().dec_dirty_buf_size(m_node_size);
     m_updated_ordinals.insert(buf->m_index_ordinal);
     auto [next_buf, has_more] = on_buf_flush_done(cp_ctx, buf);
@@ -942,9 +949,12 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
         // We are done flushing the buffers, We flush the vdev to persist the vdev bitmaps and free blks
         // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
         iomanager.run_on_forget(cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
-            LOGTRACEMOD(wbcache, "Initiating CP flush");
+            auto cp_id = cp_ctx->id();
+            LOGTRACEMOD(wbcache, "Initiating CP {} flush", cp_id);
             m_vdev->cp_flush(cp_ctx); // This is a blocking io call
+            LOGTRACEMOD(wbcache, "CP {} freed blkids: \n{}", cp_id, cp_ctx->to_string_free_list());
             cp_ctx->complete(true);
+            LOGTRACEMOD(wbcache, "Completed CP {} flush", cp_id);
         });
     }
 }
