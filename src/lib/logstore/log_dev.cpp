@@ -23,6 +23,7 @@
 
 #include <homestore/logstore_service.hpp>
 #include <homestore/meta_service.hpp>
+#include <homestore/fault_cmt_service.hpp>
 #include <homestore/homestore.hpp>
 
 #include "log_dev.hpp"
@@ -489,11 +490,25 @@ bool LogDev::flush() {
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
-        HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
+        if (sisl_unlikely(sz < lg->actual_data_size()) && hs()->has_fc_service()) {
+            auto const reason = fmt::format("parent_uuid: {}, size {} lg size {}",
+                                            boost::uuids::to_string(get_parent_id()), sz, lg->actual_data_size());
+            hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&m_parent_id), reason);
+            return false;
+        } else {
+            HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
+        }
         off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
         lg->m_log_dev_offset = offset;
 
-        HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+        if (sisl_unlikely(lg->m_log_dev_offset == INVALID_OFFSET) && hs()->has_fc_service()) {
+            auto const reason =
+                fmt::format("parent_uuid: {}, log dev is full", boost::uuids::to_string(get_parent_id()));
+            hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&m_parent_id), reason);
+            return false;
+        } else {
+            HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+        }
         THIS_LOGDEV_LOG(TRACE, "Flushing log group data size={} at offset={} log_group={}", lg->actual_data_size(),
                         offset, *lg);
 

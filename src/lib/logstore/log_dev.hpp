@@ -720,6 +720,7 @@ public:
     LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
     logdev_id_t get_id() const { return m_logdev_id; }
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+    uuid_t get_parent_id() const { return m_parent_id; }
 
 private:
     void start_timer();
