@@ -1023,6 +1023,9 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
         std::optional< IndexBufferPtr > buf = cp_ctx->next_dirty();
         if (!buf) { break; } // End of list
 
+        // If a buffer is reused during overlapping cp, there is a possibility that
+        // the buffer which is already flushed in cp x is dirtied by cp x + 1
+        // and is picked up again to flush by cp x through this code path.
         if ((*buf)->state() == index_buf_state_t::DIRTY && (*buf)->m_dirtied_cp_id == cp_ctx->id()
             && (*buf)->m_wait_for_down_buffers.testz()) {
             bufs.emplace_back(std::move(*buf));
