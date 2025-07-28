@@ -599,6 +599,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             [](const IndexBufferPtr& a, const IndexBufferPtr& b) { return a->m_node_level < b->m_node_level; });
 
     std::vector< IndexBufferPtr > pruned_bufs_to_repair;
+    std::set< IndexBufferPtr > bufs_to_skip_sanity_check;
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
     for (auto const& [_, buf] : bufs) {
         load_buf(buf);
@@ -657,6 +658,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                             buf->m_up_buffer->to_string(), buf->to_string());
                 buf->m_up_buffer->remove_down_buffer(buf);
                 prune_up_buffers(buf, pruned_bufs_to_repair);
+                //  Skip the sanity check on this buf as we do not keep it
+                bufs_to_skip_sanity_check.insert(buf);
                 //                buf->m_up_buffer = nullptr;
             }
         }
@@ -724,7 +727,9 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         std::map< uint32_t, IndexBufferPtrList > changed_bufs;
         for (auto const& [_, buf] : bufs) {
             LOGTRACEMOD(wbcache, "{}", buf->to_string());
-            if (!buf->m_node_freed) { changed_bufs[buf->m_index_ordinal].push_back(buf); }
+            if (!buf->m_node_freed && !bufs_to_skip_sanity_check.contains(buf)) { 
+                changed_bufs[buf->m_index_ordinal].push_back(buf);
+            }
         }
         for (auto const& [index_ordinal, bufs] : changed_bufs) {
             LOGTRACEMOD(wbcache, "Sanity checking buffers for index ordinal {}: # of bufs {}", index_ordinal,
