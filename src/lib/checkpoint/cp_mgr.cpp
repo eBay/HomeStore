@@ -111,6 +111,7 @@ void CPManager::create_first_cp() {
     m_cur_cp = new CP(this);
     m_cur_cp->m_cp_status = cp_status_t::cp_io_ready;
     m_cur_cp->m_cp_id = m_sb->m_last_flushed_cp + 1;
+    m_cur_cp->m_cp_start_time = Clock::now();
 }
 
 void CPManager::shutdown() {
@@ -220,6 +221,7 @@ folly::Future< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_on_s
     // allocate a new cp and ask consumers to switchover to new cp
     auto new_cp = new CP(this);
     new_cp->m_cp_id = cur_cp->m_cp_id + 1;
+    new_cp->m_cp_start_time = Clock::now();
 
     HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
     // sealer should be the first one to switch over
@@ -291,6 +293,7 @@ void CPManager::on_cp_flush_done(CP* cp) {
         ++(m_sb->m_last_flushed_cp);
         m_sb.write();
 
+        HISTOGRAM_OBSERVE(*m_metrics, cp_latency, get_elapsed_time_us(cp->m_cp_start_time));
         cleanup_cp(cp);
 
         // Setting promise will cause the CP manager destructor to cleanup before getting a chance to do the
