@@ -230,6 +230,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         BlkAllocStatus status;
         Chunk* chunk;
         size_t attempt{0};
+        auto start_time = Clock::now();
         if (hints.chunk_id_hint) {
             // this is a target-chunk allocation;
             chunk = m_dmgr.get_chunk_mutable(*(hints.chunk_id_hint));
@@ -257,6 +258,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
 
+        HISTOGRAM_OBSERVE(m_metrics, blk_alloc_latency, get_elapsed_time_us(start_time));
         return status;
     } catch (const std::exception& e) {
         LOGERROR("exception happened {}", e.what());
@@ -274,7 +276,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
     h.is_contiguous = true;
     blk_count_t nblks_remain = nblks;
     BlkAllocStatus status;
-
+    auto start_time = Clock::now();
     do {
         MultiBlkId mbid;
         status = alloc_n_contiguous_blks(nblks_remain, h, mbid);
@@ -296,6 +298,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
 
     } while (nblks_remain);
 
+    HISTOGRAM_OBSERVE(m_metrics, blk_alloc_latency, get_elapsed_time_us(start_time));
     return status;
 }
 

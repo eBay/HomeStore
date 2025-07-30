@@ -89,6 +89,7 @@ struct CP {
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
     folly::SharedPromise< bool > m_comp_promise;
+    Clock::time_point m_cp_start_time;
 #ifdef _PRERELEASE
     std::atomic< bool > m_abrupt_cp{false};
 #endif
