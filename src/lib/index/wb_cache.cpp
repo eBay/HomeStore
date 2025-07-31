@@ -982,12 +982,13 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(Index
         buf->m_down_buffers.clear();
     }
 #endif
-    buf->set_state(index_buf_state_t::CLEAN);
 
     if (cp_ctx->m_dirty_buf_count.decrement_testz()) {
+        buf->set_state(index_buf_state_t::CLEAN);
         return std::make_pair(nullptr, false);
     } else {
         get_next_bufs_internal(cp_ctx, 1u, buf, buf_list);
+        buf->set_state(index_buf_state_t::CLEAN);
         return std::make_pair((buf_list.size() ? buf_list[0] : nullptr), true);
     }
 }
