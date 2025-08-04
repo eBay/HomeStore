@@ -241,7 +241,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
             do {
                 chunk = m_chunk_selector->select_chunk(nblks, hints).get();
                 if (chunk == nullptr) {
-                    status = BlkAllocStatus::SPACE_FULL;
+                    status = BlkAllocStatus::BLK_ALLOC_NONE;
                     break;
                 }
 
