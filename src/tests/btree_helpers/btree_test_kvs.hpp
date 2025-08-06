@@ -406,7 +406,7 @@ public:
     virtual ~TestFixedValue() = default;
 
     static TestFixedValue generate_rand() { return TestFixedValue{g_randval_generator(g_re)}; }
-    static TestFixedValue zero() {return TestFixedValue{uint32_t(0)};}
+    static TestFixedValue zero() { return TestFixedValue{uint32_t(0)}; }
 
     TestFixedValue& operator=(const TestFixedValue& other) {
         m_val = other.m_val;
@@ -466,7 +466,7 @@ public:
     }
 
     static TestVarLenValue generate_rand() { return TestVarLenValue{gen_random_string(rand_val_size())}; }
-    static TestVarLenValue zero() {return TestVarLenValue{""};}
+    static TestVarLenValue zero() { return TestVarLenValue{""}; }
 
     sisl::blob serialize() const override {
         sisl::blob b{r_cast< const uint8_t* >(m_val.c_str()), uint32_cast(m_val.size())};
@@ -520,7 +520,7 @@ public:
     static TestIntervalValue generate_rand() {
         return TestIntervalValue{g_randval_generator(g_re), s_cast< uint16_t >(0)};
     }
-    static TestIntervalValue zero() {return TestIntervalValue{0, 0};}
+    static TestIntervalValue zero() { return TestIntervalValue{0, 0}; }
 
     ///////////////////////////// Overriding methods of BtreeValue //////////////////////////
     TestIntervalValue& operator=(const TestIntervalValue& other) = default;

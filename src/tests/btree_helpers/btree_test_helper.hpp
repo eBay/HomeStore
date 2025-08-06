@@ -181,13 +181,9 @@ public:
         K key = K{k};
         V value = V::generate_rand();
         auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT, existing_v.get()};
+
         sreq.enable_route_tracing();
-
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->put(sreq);
-        } while (ret == btree_status_t::cp_mismatch);
-
+        auto const ret = m_bt->put(sreq);
         ASSERT_EQ(ret, btree_status_t::success) << "Upsert key=" << k << " failed with error=" << enum_name(ret);
         m_shadow_map.force_put(k, value);
     }
@@ -200,12 +196,7 @@ public:
         auto preq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true},
                                               update ? btree_put_type::UPDATE : btree_put_type::UPSERT, &value};
         preq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->put(preq);
-        } while (ret == btree_status_t::cp_mismatch);
-
-        ASSERT_EQ(ret, btree_status_t::success) << "range_put failed for " << start_k << "-" << end_k;
+        ASSERT_EQ(m_bt->put(preq), btree_status_t::success) << "range_put failed for " << start_k << "-" << end_k;
 
         if (update) {
             m_shadow_map.range_update(start_key, nkeys, value);
@@ -234,12 +225,7 @@ public:
 
         auto rreq = BtreeSingleRemoveRequest{pk.get(), existing_v.get()};
         rreq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->remove(rreq);
-        } while (ret == btree_status_t::cp_mismatch);
-
-        bool removed = (ret == btree_status_t::success);
+        bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
         if (care_success) {
             ASSERT_EQ(removed, m_shadow_map.exists(*pk))
@@ -276,10 +262,7 @@ public:
         auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPDATE, existing_v.get(), filter_cb};
         sreq.enable_route_tracing();
 
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->put(sreq);
-        } while (ret == btree_status_t::cp_mismatch);
+        const auto ret = m_bt->put(sreq);
         ASSERT_EQ(ret, expected_status) << "UPDATING key=" << k << " failed with error=" << enum_name(ret);
     }
 
@@ -304,10 +287,8 @@ public:
                                               std::numeric_limits< uint32_t >::max(),
                                               filter_cb};
         preq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->put(preq);
-        } while (ret == btree_status_t::cp_mismatch);
+        const auto ret = m_bt->put(preq);
+
         ASSERT_EQ(ret, expected_status) << "UPDATING key=[" << start_key << ", " << end_key
                                         << "] failed with error=" << enum_name(ret);
     }
@@ -325,10 +306,8 @@ public:
             }};
 
         rreq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->remove(rreq);
-        } while (ret == btree_status_t::cp_mismatch);
+        const auto ret = m_bt->remove(rreq);
+
         LOGDEBUG("Range remove from {} to {} returned {}", start_key, end_key, enum_name(ret));
         ASSERT_EQ(ret, expected_status) << "GC key=[" << start_key << ", " << end_key
                                         << "] failed with error=" << enum_name(ret);
@@ -535,12 +514,7 @@ private:
         K key = K{k};
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
         sreq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->put(sreq);
-        } while (ret == btree_status_t::cp_mismatch);
-        bool done = expect_success == (ret == btree_status_t::success);
-
+        bool done = expect_success == (m_bt->put(sreq) == btree_status_t::success);
         if (put_type == btree_put_type::INSERT) {
             ASSERT_EQ(done, !m_shadow_map.exists(key));
         } else if (put_type == btree_put_type::UPDATE) {
@@ -555,10 +529,7 @@ private:
 
         auto rreq = BtreeRangeRemoveRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true}};
         rreq.enable_route_tracing();
-        btree_status_t ret = btree_status_t::success;
-        do {
-            ret = m_bt->remove(rreq);
-        } while (ret == btree_status_t::cp_mismatch);
+        const auto ret = m_bt->remove(rreq);
 
         if (all_existing) {
             m_shadow_map.range_erase(start_key, end_key);
