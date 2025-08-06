@@ -246,6 +246,7 @@ void RaftReplService::monitor_cert_changes() {
     auto cert_change_cb = [this](const std::string filepath, const bool deleted) {
         LOGINFO("file change event for {}, deleted? {}", filepath, deleted)
         // do not block file_watcher thread
+        restart_counter.fetch_add(1);
         std::thread restart_svc(&RaftReplService::restart_raft_svc, this, filepath, deleted);
         restart_svc.detach();
     };
@@ -264,10 +265,22 @@ void RaftReplService::monitor_cert_changes() {
 
 void RaftReplService::restart_raft_svc(const std::string filepath, const bool deleted) {
     if (deleted && !wait_for_cert(filepath)) {
-        LOGINFO("file {} deleted, ", filepath)
+        LOGINFO("file {} deleted, ", filepath);
+        restart_counter.fetch_sub(1);
         // wait for the deleted file to be added again
         throw std::runtime_error(fmt::format("file {} not found! Can not start grpc server", filepath));
     }
+
+    // wait for a while before restarting services to avoid multiple restarts
+    std::this_thread::sleep_for(std::chrono::seconds{HS_DYNAMIC_CONFIG(generic.wait_before_restart_sec)});
+    int32_t prev_restart_counter = restart_counter.fetch_sub(1);
+    if (prev_restart_counter > 1) {
+        LOGINFO("There are {} restart requests pending, will not restart services now. filepath: {}",
+                prev_restart_counter, filepath);
+        return;
+    }
+    LOGINFO("Restarting Raft services for file change event on {}", filepath);
+
     const std::unique_lock lock(raft_restart_mutex);
     m_msg_mgr->restart_server();
     if (deleted) { monitor_cert_changes(); }

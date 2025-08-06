@@ -157,6 +157,10 @@ table Generic {
 
     // Check for repl_dev cleanup in this interval
     repl_dev_cleanup_interval_sec : uint32 = 60;
+
+    // The time in seconds to wait before restarting the service after a cert change
+    // All restart operations will be aggregated and done once after this time interval
+    wait_before_restart_sec: int32 = 600;
 }
 
 table ResourceLimits {
