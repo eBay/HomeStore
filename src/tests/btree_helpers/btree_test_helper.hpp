@@ -181,8 +181,8 @@ public:
         K key = K{k};
         V value = V::generate_rand();
         auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT, existing_v.get()};
-        sreq.enable_route_tracing();
 
+        sreq.enable_route_tracing();
         auto const ret = m_bt->put(sreq);
         ASSERT_EQ(ret, btree_status_t::success) << "Upsert key=" << k << " failed with error=" << enum_name(ret);
         m_shadow_map.force_put(k, value);
@@ -247,6 +247,70 @@ public:
     void range_remove_existing(uint32_t start_k, uint32_t count) {
         auto [start_key, end_key] = m_shadow_map.pick_existing_range(K{start_k}, count);
         do_range_remove(start_k, end_key.key(), true /* removing_all_existing */);
+    }
+
+    void move_to_tombstone(uint64_t k, btree_status_t expected_status = btree_status_t::success) {
+        auto existing_v = std::make_unique< V >();
+        K key = K{k};
+        V value = V::zero();
+        put_filter_cb_t filter_cb = [](BtreeKey const& key, BtreeValue const& existing_value, BtreeValue const& value) {
+            if (static_cast< const V& >(existing_value) == static_cast< const V& >(value)) {
+                return put_filter_decision::keep;
+            }
+            return put_filter_decision::replace;
+        };
+        auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPDATE, existing_v.get(), filter_cb};
+        sreq.enable_route_tracing();
+
+        const auto ret = m_bt->put(sreq);
+        ASSERT_EQ(ret, expected_status) << "UPDATING key=" << k << " failed with error=" << enum_name(ret);
+    }
+
+    void move_to_tombstone(uint64_t start_key, uint64_t end_key, std::vector< std::pair< K, V > >& previous_entities,
+                           btree_status_t expected_status = btree_status_t::success) {
+        auto existing_v = std::make_unique< V >();
+        V value = V::zero();
+        previous_entities.clear();
+        put_filter_cb_t filter_cb = [&previous_entities](BtreeKey const& key, BtreeValue const& existing_value,
+                                                         BtreeValue const& value) {
+            if (static_cast< const V& >(existing_value) == static_cast< const V& >(value)) {
+                return put_filter_decision::keep;
+            }
+            previous_entities.push_back(
+                std::make_pair(static_cast< const K& >(key), static_cast< const V& >(existing_value)));
+            return put_filter_decision::replace;
+        };
+        auto preq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true},
+                                              btree_put_type::UPDATE,
+                                              &value,
+                                              nullptr,
+                                              std::numeric_limits< uint32_t >::max(),
+                                              filter_cb};
+        preq.enable_route_tracing();
+        const auto ret = m_bt->put(preq);
+
+        ASSERT_EQ(ret, expected_status) << "UPDATING key=[" << start_key << ", " << end_key
+                                        << "] failed with error=" << enum_name(ret);
+    }
+
+    void remove_tombstone(uint64_t start_key, uint64_t end_key, std::vector< std::pair< K, V > >& previous_entities,
+                          btree_status_t expected_status = btree_status_t::success) {
+        previous_entities.clear();
+        auto rreq = BtreeRangeRemoveRequest< K >{
+            BtreeKeyRange< K >{start_key, true, end_key, true}, nullptr, std::numeric_limits< uint32_t >::max(),
+            [&previous_entities](BtreeKey const& key, BtreeValue const& value) mutable -> bool {
+                if (static_cast< const V& >(value) == V::zero()) { return true; }
+                previous_entities.push_back(
+                    std::make_pair(static_cast< const K& >(key), static_cast< const V& >(value)));
+                return false;
+            }};
+
+        rreq.enable_route_tracing();
+        const auto ret = m_bt->remove(rreq);
+
+        LOGDEBUG("Range remove from {} to {} returned {}", start_key, end_key, enum_name(ret));
+        ASSERT_EQ(ret, expected_status) << "GC key=[" << start_key << ", " << end_key
+                                        << "] failed with error=" << enum_name(ret);
     }
 
     void range_remove_existing_random() {
@@ -451,7 +515,6 @@ private:
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
         sreq.enable_route_tracing();
         bool done = expect_success == (m_bt->put(sreq) == btree_status_t::success);
-
         if (put_type == btree_put_type::INSERT) {
             ASSERT_EQ(done, !m_shadow_map.exists(key));
         } else if (put_type == btree_put_type::UPDATE) {
@@ -466,7 +529,7 @@ private:
 
         auto rreq = BtreeRangeRemoveRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true}};
         rreq.enable_route_tracing();
-        auto const ret = m_bt->remove(rreq);
+        const auto ret = m_bt->remove(rreq);
 
         if (all_existing) {
             m_shadow_map.range_erase(start_key, end_key);
