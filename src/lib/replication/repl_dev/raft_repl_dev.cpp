@@ -796,14 +796,17 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             return;
         }
 
+        // Push the data to all followers if push data is enabled
+        if (rreq->is_push_data_enabled()) {
 #ifdef _PRERELEASE
-        if (iomgr_flip::instance()->test_flip("disable_leader_push_data")) {
-            RD_LOGD(tid, "Simulating push data failure, so that all the follower will have to fetch data");
-        } else
-            push_data_to_all_followers(rreq, data);
+            if (iomgr_flip::instance()->test_flip("disable_leader_push_data")) {
+                RD_LOGD(tid, "Simulating push data failure, so that all the follower will have to fetch data");
+            } else
+                push_data_to_all_followers(rreq, data);
 #else
-        push_data_to_all_followers(rreq, data);
+            push_data_to_all_followers(rreq, data);
 #endif
+        }
 
         COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
         COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
