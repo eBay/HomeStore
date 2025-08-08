@@ -203,6 +203,7 @@ private:
                                 pdev_info_header& pinfo);
 
     const std::vector< PhysicalDev* >& pdevs_by_type_internal(HSDevType dtype) const;
+    bool verify_unique_devs() const;
 }; // class DeviceManager
 
 // Chunk pool is used to get chunks when there is no space
