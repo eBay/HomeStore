@@ -40,6 +40,12 @@ void BlkId::invalidate() { s.m_nblks = 0; }
 
 bool BlkId::is_valid() const { return (blk_count() > 0); }
 
+std::pair< BlkId, BlkId > BlkId::split(blk_count_t count) const {
+    BlkId lb{blk_num(), count, chunk_num()};
+    BlkId rb{blk_num() + count, (blk_count_t)(blk_count() - count), chunk_num()};
+    return std::pair(lb, rb);
+}
+
 std::string BlkId::to_string() const {
     return is_valid() ? fmt::format("blk#={} count={} chunk={}", blk_num(), blk_count(), chunk_num()) : "Invalid_Blkid";
 }
@@ -121,6 +127,12 @@ uint32_t MultiBlkId::max_serialized_size() { return expected_serialized_size(max
 uint16_t MultiBlkId::num_pieces() const { return BlkId::is_valid() ? n_addln_piece + 1 : 0; }
 
 bool MultiBlkId::has_room() const { return (n_addln_piece < max_addln_pieces); }
+
+std::pair< MultiBlkId, MultiBlkId > MultiBlkId::split(blk_count_t count) const {
+    MultiBlkId lb{blk_num(), count, chunk_num()};
+    MultiBlkId rb{blk_num() + count, (blk_count_t)(blk_count() - count), chunk_num()};
+    return std::pair(lb, rb);
+}
 
 MultiBlkId::iterator MultiBlkId::iterate() const { return MultiBlkId::iterator{*this}; }
 

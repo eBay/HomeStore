@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.20.14"
+    version = "5.3.1"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -25,6 +25,7 @@ class HomestoreConan(ConanFile):
                 "coverage": ['True', 'False'],
                 "sanitize": ['True', 'False'],
                 "testing" : ['full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
+                "replication" : ['off', 'on'],
             }
     default_options = {
                 'shared':       False,
@@ -32,6 +33,7 @@ class HomestoreConan(ConanFile):
                 'coverage':     False,
                 'sanitize':     False,
                 'testing':      'epoll_mode',
+                'replication':  'off',
             }
 
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh", "LICENSE"
@@ -43,18 +45,19 @@ class HomestoreConan(ConanFile):
         if self.settings.build_type == "Debug":
             if self.options.coverage and self.options.sanitize:
                 raise ConanInvalidConfiguration("Sanitizer does not work with Code Coverage!")
-            if self.conf.get("tools.build:skip_test", default=False):
-                if self.options.coverage or self.options.sanitize:
-                    raise ConanInvalidConfiguration("Coverage/Sanitizer requires Testing!")
+            #if self.conf.get("tools.build:skip_test", default=False):
+                #if self.options.coverage or self.options.sanitize:
+                #    raise ConanInvalidConfiguration("Coverage/Sanitizer requires Testing!")
 
     def build_requirements(self):
         self.test_requires("benchmark/1.8.2")
         self.test_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[^11.3]@oss/master", transitive_headers=True)
-        self.requires("sisl/[^12.2]@oss/master", transitive_headers=True)
-        self.requires("nuraft_mesg/[~3.8.5]@oss/main", transitive_headers=True)
+        self.requires("iomgr/[^12.1]@oss/master", transitive_headers=True)
+        self.requires("sisl/[^13.3]@oss/master", transitive_headers=True)
+        if str(self.options.replication) == "on":
+            self.requires("nuraft_mesg/[^4.1]@oss/main", transitive_headers=True)
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
@@ -104,6 +107,10 @@ class HomestoreConan(ConanFile):
                 tc.variables['MEMORY_SANITIZER_ON'] = 'ON'
         tc.variables["CONAN_PACKAGE_NAME"] = self.name
         tc.variables["CONAN_PACKAGE_VERSION"] = self.version
+        if str(self.options.replication) == "on":
+            tc.variables["REPLICATION"] = "ON"
+        else:
+            tc.variables["REPLICATION"] = "OFF"
         tc.generate()
 
         # This generates "boost-config.cmake" and "grpc-config.cmake" etc in self.generators_folder

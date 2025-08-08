@@ -12,7 +12,7 @@ class TestFailedError(Exception):
 
 def run_test(options, type):
     cmd_opts = f"--gtest_filter=BtreeConcurrentTest/{type}.ConcurrentAllOps --gtest_break_on_failure --cleanup_after_shutdown={options['cleanup_after_shutdown']} --init_device={options['init_device']}  --preload_size={options['preload_size']} {options['log_mods']} --run_time={options['run_time']} --num_iters={options['num_iters']} --num_entries={options['num_entries']} --num_threads={options['threads']} --num_fibers={options['fibers']} {options['dev_list']} {options['op_list']}"
-    print(f"Running test with options: {cmd_opts}")
+    # print(f"Running test with options: {cmd_opts}")
     try:
         subprocess.check_call(f"{options['dirpath']}test_index_btree {cmd_opts}", stderr=subprocess.STDOUT, shell=True)
     except subprocess.CalledProcessError as e:
@@ -21,9 +21,9 @@ def run_test(options, type):
     print("Test completed")
 
 
-def run_crash_test(options, crash_type='put', type=0):
-    cmd_opts = f"--gtest_filter=IndexCrashTest/{type}.long_running_{crash_type}_crash --gtest_break_on_failure --min_keys_in_node={options['min_keys_in_node']} --max_keys_in_node={options['max_keys_in_node']} --num_entries_per_rounds={options['num_entries_per_rounds']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} --num_rounds={options['num_rounds']} {options['dev_list']} "
-    print(f"Running test with options: {cmd_opts}")
+def run_crash_test(options):
+    cmd_opts = f"--gtest_filter=IndexCrashTest/0.long_running_put_crash --gtest_break_on_failure --log_mods=wbcache:trace --max_keys_in_node={options['max_keys_in_node']} --num_entries_per_rounds={options['num_entries_per_rounds']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} --num_rounds={options['num_rounds']} {options['dev_list']} "
+    # print(f"Running test with options: {cmd_opts}")
     try:
         subprocess.check_call(f"{options['dirpath']}test_index_crash_recovery {cmd_opts}", stderr=subprocess.STDOUT,
                               shell=True)
@@ -96,7 +96,7 @@ def long_running_crash_put(options):
     print("Long running crash put started")
     options['num_entries'] = 1310720  # 1280K
     options['init_device'] = True
-    options['run_time'] = 7200  # 2 hours
+    options['run_time'] = 14400  # 4 hours
     options['preload_size'] = 1024
     print(f"options: {options}")
     run_crash_test(options, 'put', 0)
@@ -104,9 +104,9 @@ def long_running_crash_put(options):
 
 def long_running_crash_remove(options):
     print("Long running crash remove started")
-    options['num_entries'] = 102400 # 100K
+    options['num_entries'] = 1000
     options['init_device'] = True
-    options['run_time'] = 7200  # 2 hours
+    options['run_time'] = 14400  # 4 hours
     options['num_entries_per_rounds'] = 100
     options['min_keys_in_node'] = 2
     options['max_keys_in_node'] = 10
@@ -116,9 +116,9 @@ def long_running_crash_remove(options):
 
 def long_running_crash_put_remove(options):
     print("Long running crash put_remove started")
-    options['num_entries'] = 102400 # 100K
+    options['num_entries'] = 2000  # 1280K
     options['init_device'] = True
-    options['run_time'] = 7200  # 2 hours
+    options['run_time'] = 14400  # 4 hours
     options['preload_size'] = 1024
     options['min_keys_in_node'] = 3
     options['max_keys_in_node'] = 10
@@ -146,12 +146,12 @@ def long_running(*args):
     options = parse_arguments()
     long_runnig_index(options, 0)
     long_running_clean_shutdown(options, 0)
-    # long_runnig_index(options, 1)
-    # long_running_clean_shutdown(options, 1)
-    for i in range(5):
+    long_runnig_index(options, 1)
+    long_running_clean_shutdown(options, 1)
+    for i in range(20):
         print(f"Iteration {i + 1}")
         long_running_crash_put_remove(options)
-    for i in range(5):
+    for i in range(50):
         print(f"Iteration {i + 1}")
         long_running_crash_remove(options)
     for i in range(5):
@@ -159,6 +159,7 @@ def long_running(*args):
         long_running_crash_put(options)
     long_runnig_index(options)
     long_running_clean_shutdown(options)
+    long_running_crash_put(options)
 
 
 if __name__ == "__main__":

@@ -10,10 +10,6 @@
 #include <homestore/blk.h>
 #include <sisl/fds/buffer.hpp>
 
-SISL_LOGGING_DECL(replication)
-
-#define REPL_LOG_MODS grpc_server, HOMESTORE_LOG_MODS, nuraft_mesg, nuraft, replication
-
 namespace homestore {
 // clang-format off
 VENUM(ReplServiceError, int32_t,
@@ -30,7 +26,6 @@ VENUM(ReplServiceError, int32_t,
       SERVER_IS_LEAVING = -10,
       TERM_MISMATCH = -11,
       RETRY_REQUEST = -12,
-      STOPPING = -13,
       RESULT_NOT_EXIST_YET = -10000,
       NOT_IMPLEMENTED = -10001,
       NO_SPACE_LEFT = -20000,
@@ -38,17 +33,7 @@ VENUM(ReplServiceError, int32_t,
       DATA_DUPLICATED = -20002,
       QUIENCE_STATE = -20003,
       QUORUM_NOT_MET = -20004,
-      REPLACE_MEMBER_TASK_MISMATCH = -20005,
-      UNREADY_STATE = -20006,
       FAILED = -32768);
-
-VENUM(ReplaceMemberStatus, int32_t,
-      COMPLETED = 0,
-      IN_PROGRESS = 1,
-      NOT_LEADER = 2,
-      TASK_ID_MISMATCH = 3,
-      TASK_NOT_FOUND = 4,
-      UNKNOWN = 5);
 // clang-format on
 
 template < typename V, typename E >

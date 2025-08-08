@@ -41,7 +41,7 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 SISL_OPTIONS_ENABLE(logging, test_journal_vdev, iomgr, test_common_setup)
 
@@ -57,7 +57,7 @@ struct Param {
     uint32_t max_wrt_sz;
     uint32_t truncate_watermark_percentage;
 };
-SISL_LOGGING_DECL(test_journal_vdev)
+
 static Param gp;
 
 // trigger truncate when used space ratio reaches more than 80%

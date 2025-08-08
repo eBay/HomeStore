@@ -18,6 +18,80 @@
 
 namespace homestore {
 
+template < typename K, typename V >
+template < typename ReqT >
+btree_status_t Btree< K, V >::put(ReqT& put_req) {
+    static_assert(std::is_same_v< ReqT, BtreeSinglePutRequest > || std::is_same_v< ReqT, BtreeRangePutRequest< K > >,
+                  "put api is called with non put request type");
+    COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
+    auto acq_lock = locktype_t::READ;
+    bool is_leaf = false;
+
+    m_btree_lock.lock_shared();
+    btree_status_t ret = btree_status_t::success;
+
+retry:
+    auto cpg = bt_cp_guard();
+    put_req.m_op_context = cpg.context(cp_consumer_t::INDEX_SVC);
+
+#ifdef _DEBUG
+    check_lock_debug();
+    BT_LOG_ASSERT_EQ(BtreeBase::thread_vars()->rd_locked_nodes.size(), 0);
+    BT_LOG_ASSERT_EQ(BtreeBase::thread_vars()->wr_locked_nodes.size(), 0);
+#endif
+
+    BtreeNodePtr root;
+    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, put_req.m_op_context);
+    if (ret != btree_status_t::success) { goto out; }
+    is_leaf = root->is_leaf();
+
+    if (is_split_needed(root, put_req)) {
+        // Time to do the split of root.
+        unlock_node(root, acq_lock);
+        m_btree_lock.unlock_shared();
+        ret = check_split_root(put_req);
+        BT_DBG_ASSERT_EQ(BtreeBase::thread_vars()->rd_locked_nodes.size(), 0);
+        BT_DBG_ASSERT_EQ(BtreeBase::thread_vars()->wr_locked_nodes.size(), 0);
+
+        // We must have gotten a new root, need to start from scratch.
+        m_btree_lock.lock_shared();
+        if (ret != btree_status_t::success) {
+            LOGERROR("root split failed btree name {}", m_bt_cfg.name());
+            goto out;
+        }
+
+        goto retry;
+    } else if ((is_leaf) && (acq_lock != locktype_t::WRITE)) {
+        // Root is a leaf, need to take write lock, instead of read, retry
+        unlock_node(root, acq_lock);
+        acq_lock = locktype_t::WRITE;
+        goto retry;
+    } else {
+        ret = do_put(root, acq_lock, put_req);
+        if ((ret == btree_status_t::retry) || (ret == btree_status_t::has_more) ||
+            (ret == btree_status_t::cp_mismatch)) {
+            // Need to start from top down again, since there was a split or we have more to insert in case of range put
+            acq_lock = locktype_t::READ;
+            BT_LOG(TRACE, "retrying put operation because btree reported retriable status {}", ret);
+            BT_DBG_ASSERT_EQ(BtreeBase::thread_vars()->rd_locked_nodes.size(), 0);
+            BT_DBG_ASSERT_EQ(BtreeBase::thread_vars()->wr_locked_nodes.size(), 0);
+            goto retry;
+        }
+    }
+
+out:
+    m_btree_lock.unlock_shared();
+#ifndef NDEBUG
+    check_lock_debug();
+#endif
+    if (ret != btree_status_t::success) {
+        BT_LOG(ERROR, "btree put failed {}", ret);
+        COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
+    }
+
+    return ret;
+}
+
 /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
  * down the tree.
  *
@@ -56,7 +130,7 @@ retry:
         const auto matched = my_node->match_range(req.working_range(), start_idx, end_idx);
         if (!matched) {
             BT_NODE_LOG_ASSERT(false, my_node, "match_range returns 0 entries for interior node is not valid pattern");
-            ret = btree_status_t::not_found;
+            ret = btree_status_t::put_failed;
             goto out;
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
@@ -68,7 +142,7 @@ retry:
     BT_NODE_DBG_ASSERT((curlock == locktype_t::READ || curlock == locktype_t::WRITE), my_node, "unexpected locktype {}",
                        curlock);
 
-    if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
+    if (req.m_route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
 
     curr_idx = start_idx;
     while (curr_idx <= end_idx) { // iterate all matched childrens
@@ -105,7 +179,7 @@ retry:
             unlock_lambda(child_node, child_cur_lock);
             if (ret != btree_status_t::success) { goto out; }
 
-            if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
+            if (req.m_route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
             COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
             goto retry; // After split, retry search and walk down.
         }
@@ -175,20 +249,22 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
     if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
         K last_failed_key;
         ret = to_variant_node(my_node)->multi_put(req.working_range(), req.input_range().start_key(), *req.m_newval,
-                                                  req.m_put_type, &last_failed_key, req.m_filter_cb, req.m_app_context);
+                                                  req.m_put_type, &last_failed_key, req.m_filter_cb);
         if (ret == btree_status_t::has_more) {
             req.shift_working_range(std::move(last_failed_key), true /* make it including last_failed_key */);
         } else if (ret == btree_status_t::success) {
             req.shift_working_range();
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-        ret =
-            to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val, req.m_filter_cb);
+        if (!to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val,
+                                           req.m_filter_cb)) {
+            ret = btree_status_t::put_failed;
+        }
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
     }
 
     if ((ret == btree_status_t::success) || (ret == btree_status_t::has_more)) {
-        if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::MUTATE); }
+        if (req.m_route_tracing) { append_route_trace(req, my_node, btree_event_t::MUTATE); }
         write_node(my_node, req.m_op_context);
     }
     return ret;
@@ -212,7 +288,7 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
         goto done;
     }
 
-    new_root = alloc_interior_node();
+    new_root = create_interior_node(req.m_op_context);
     if (new_root == nullptr) {
         ret = btree_status_t::space_not_avail;
         unlock_node(root, locktype_t::WRITE);
@@ -225,23 +301,22 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     root = std::move(new_root);
 
     // We need to notify about the root change, before splitting the node, so that correct dependencies are set
-    ret = on_root_changed(root, req.m_op_context);
+    ret = m_bt_private->on_root_changed(root, req.m_op_context);
     if (ret != btree_status_t::success) {
-        free_node(root, locktype_t::WRITE, req.m_op_context);
+        remove_node(root, locktype_t::WRITE, req.m_op_context);
         unlock_node(child_node, locktype_t::WRITE);
         goto done;
     }
 
     ret = split_node(root, child_node, root->total_entries(), &split_key, req.m_op_context);
     if (ret != btree_status_t::success) {
-        free_node(root, locktype_t::WRITE, req.m_op_context);
+        remove_node(root, locktype_t::WRITE, req.m_op_context);
         root = std::move(child_node);
-        on_root_changed(root, req.m_op_context); // Revert it back
+        m_bt_private->on_root_changed(root, req.m_op_context); // Revert it back
         unlock_node(root, locktype_t::WRITE);
     } else {
-        if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
+        if (req.m_route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
-        this->m_btree_depth = root->level();
         unlock_node(child_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
     }
@@ -253,10 +328,10 @@ done:
 
 template < typename K, typename V >
 btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                         uint32_t parent_ind, K* out_split_key, void* context) {
+                                         uint32_t parent_ind, K* out_split_key, CPContext* context) {
     BtreeNodePtr child_node1 = child_node;
     BtreeNodePtr child_node2;
-    child_node2.reset(child_node1->is_leaf() ? alloc_leaf_node().get() : alloc_interior_node().get());
+    child_node2.reset(child_node1->is_leaf() ? create_leaf_node(context).get() : create_interior_node(context).get());
 
     if (child_node2 == nullptr) { return (btree_status_t::space_not_avail); }
 
@@ -268,7 +343,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     uint32_t child1_filled_size = child_node1->node_data_size() - child_node1->available_size();
 
     auto split_size = m_bt_cfg.split_size(child1_filled_size);
-    uint32_t res = child_node1->move_out_to_right_by_size(m_bt_cfg, *child_node2, split_size);
+    uint32_t res = child_node1->move_out_to_right_by_size(*child_node2, split_size);
 
     BT_NODE_REL_ASSERT_GT(res, 0, child_node1,
                           "Unable to split entries in the child node"); // means cannot split entries
@@ -296,7 +371,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     BT_NODE_LOG(DEBUG, child_node1, "Left child");
     BT_NODE_LOG(DEBUG, child_node2, "Right child");
 
-    ret = transact_nodes({child_node2}, {}, child_node1, parent_node, context);
+    ret = m_bt_private->transact_nodes({child_node2}, {}, child_node1, parent_node, context);
 
     // NOTE: Do not access parentInd after insert, since insert would have
     // shifted parentNode to the right.

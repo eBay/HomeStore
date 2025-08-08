@@ -25,8 +25,7 @@
 
 using namespace homestore;
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-SISL_OPTIONS_ENABLE(logging, test_blk_read_tracker, nuraft_mesg)
+SISL_OPTIONS_ENABLE(logging, test_blk_read_tracker)
 
 VENUM(op_type_t, uint8_t, insert = 0, remove = 1, wait_on = 2, max_op = 3);
 class BlkReadTrackerTest : public testing::Test {

@@ -1,6 +1,6 @@
 # HomeStore
-[![Conan Build](https://github.com/eBay/HomeStore/actions/workflows/merge_build.yml/badge.svg?branch=master)](https://github.com/eBay/HomeStore/actions/workflows/merge_build.yml)
-[![CodeCov](https://codecov.io/gh/eBay/homestore/branch/master/graph/badge.svg)](https://codecov.io/gh/eBay/homestore)
+[![Conan Build](https://github.com/hkadayam/HomeStore/actions/workflows/merge_build.yml/badge.svg?branch=master)](https://github.com/hkadayam/HomeStore/actions/workflows/merge_build.yml)
+[![CodeCov](https://codecov.io/gh/hkadayam/homestore/branch/master/graph/badge.svg)](https://codecov.io/gh/hkadayam/homestore)
 
 Homestore is a generic *StorageEngine* upon which different *StorageSolution*s can be built. These Solutions can model
 Block, K/V, Object or Database *StorageInterface*s.
@@ -31,7 +31,7 @@ Free flat-allocation space. Hooks are provided if a particular allocation patter
 ### LogSvc (std::list)
 Random Access circular buffer. Typically not used directly but levaraged by other Services to provide crash-resiliency.
 
-## Application Diagram
+## Architecture Diagram
 
 ![HomeObject Overview](docs/imgs/HomeStore.png)
 

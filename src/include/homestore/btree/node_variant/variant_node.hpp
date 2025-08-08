@@ -15,7 +15,7 @@
 #pragma once
 
 #include <homestore/btree/detail/btree_node.hpp>
-#include <homestore/btree/btree_req.hpp>
+#include <homestore/btree/btree_kv.hpp>
 
 namespace homestore {
 template < typename K >
@@ -25,13 +25,17 @@ template < typename V >
 static V dummy_value;
 
 template < typename K, typename V >
-class VariantNode : public StoreSpecificBtreeNode {
+class VariantNode : public BtreeNode {
 public:
     using BtreeNode::get_nth_key_size;
     using BtreeNode::get_nth_value;
 
-    VariantNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf, BtreeConfig const& cfg) :
-            StoreSpecificBtreeNode(node_buf, id, init_buf, is_leaf, cfg) {}
+    VariantNode(bnodeid_t id, bool is_leaf, uint32_t node_size, BtreeNode::Allocator::Token token) :
+            BtreeNode(id, is_leaf, node_size, token) {}
+
+    VariantNode(uint8_t* node_buf, bnodeid_t id, BtreeNode::Allocator::Token token) : BtreeNode(node_buf, id, token) {}
+
+    virtual ~VariantNode() = default;
 
     ///////////////////////////////////////// Get related APIs of the node /////////////////////////////////////////
 
@@ -192,14 +196,14 @@ public:
     /// translates into one of "Insert", "Update" or "Upsert".
     /// @param existing_val [optional] A pointer to a value to store the value of the existing entry if it was updated.
     /// @param filter_cb [optional] A callback function to be called for each entry found in the node that has a key. It
-    /// is used as a filter to remove anything that needn't be updated.
-    /// @return A status code indicating whether the operation was successful.
+    /// is used as an filter to remove anything that needn't be updated.
+    /// @return A boolean indicating whether the operation was successful.
     ///
-    virtual btree_status_t put(BtreeKey const& key, BtreeValue const& val, btree_put_type put_type,
-                               BtreeValue* existing_val, put_filter_cb_t const& filter_cb = nullptr) {
+    virtual bool put(BtreeKey const& key, BtreeValue const& val, btree_put_type put_type, BtreeValue* existing_val,
+                     put_filter_cb_t const& filter_cb = nullptr) {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
                          get_persistent_header_const()->to_string());
-        auto ret = btree_status_t::success;
+        bool ret = true;
 
         DEBUG_ASSERT_EQ(
             this->is_leaf(), true,
@@ -211,25 +215,21 @@ public:
             if (filter_cb &&
                 filter_cb(get_nth_key< K >(idx, false), get_nth_value(idx, false), val) !=
                     put_filter_decision::replace) {
-                LOGINFO("Filter callback rejected the update for key {}", key.to_string());
-                return btree_status_t::filtered_out;
+                return false;
             }
         }
 
         if (put_type == btree_put_type::INSERT) {
             if (found) {
-                LOGINFO("Attempt to insert duplicate entry {}", key.to_string());
-                return btree_status_t::already_exists;
+                LOGDEBUG("Attempt to insert duplicate entry {}", key.to_string());
+                return false;
             }
-            ret = insert(idx, key, val);
+            ret = (insert(idx, key, val) == btree_status_t::success);
         } else if (put_type == btree_put_type::UPDATE) {
-            if (!found) {
-                LOGINFO("Attempt to update non-existent entry {}", key.to_string());
-                return btree_status_t::not_found;
-            }
+            if (!found) return false;
             update(idx, key, val);
         } else if (put_type == btree_put_type::UPSERT) {
-            found ? update(idx, key, val) : (void)insert(idx, key, val);
+            (found) ? update(idx, key, val) : (void)insert(idx, key, val);
         } else {
             DEBUG_ASSERT(false, "Wrong put_type {}", put_type);
         }
@@ -251,14 +251,13 @@ public:
     ///     put_filter_decision::replace, the entry is upserted with the new value.
     ///     put_filter_decision::remove, the entry is removed from the node.
     ///     put_filter_decision::keep, the entry is not modified and the method moves on to the next entry.
-    /// @param app_ctx User supplied private context data.
     /// @return Btree status typically .
     ///         If all keys were upserted successfully, the method returns btree_status_t::success.
     ///         If the method ran out of space in the node, the method returns the key that was last put and the status
     ///         as btree_status_t::has_more
     virtual btree_status_t multi_put(BtreeKeyRange< K > const& keys, BtreeKey const&, BtreeValue const& val,
                                      btree_put_type put_type, K* last_failed_key,
-                                     put_filter_cb_t const& filter_cb = nullptr, void* app_ctx = nullptr) {
+                                     put_filter_cb_t const& filter_cb = nullptr) {
         if (put_type != btree_put_type::UPDATE) {
             DEBUG_ASSERT(false, "For non-interval keys multi-put should be really update and cannot insert");
             return btree_status_t::not_supported;
@@ -292,8 +291,7 @@ public:
     }
 
     ///////////////////////////////////////// Remove related APIs of the node /////////////////////////////////////////
-    virtual uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr,
-                                  void* usr_ctx = nullptr) {
+    virtual uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr) {
         DEBUG_ASSERT_EQ(this->is_leaf(), true, "Multi put entries on node are supported only for leaf nodes");
 
         // Match the key range to get start and end idx. If none of the ranges here matches, we have to return not_found
@@ -313,6 +311,5 @@ public:
         }
         return ret;
     }
-    virtual void on_update_phys_buf() override {};
 };
 } // namespace homestore

@@ -12,8 +12,6 @@
 #include "common/homestore_config.hpp"
 #include "common/crash_simulator.hpp"
 
-SISL_LOGGING_DECL(replication)
-
 namespace homestore {
 
 RaftStateMachine::RaftStateMachine(RaftReplDev& rd) : m_rd{rd} {
@@ -135,17 +133,13 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
     // If we are able to locate that req in the map for this entry, it could be one of
     //  a) This is an inline data and don't need any localization
     //  b) This is a proposer and thus don't need any localization
-    //  c) This is a proposer but term has changed. This can happen if the leader re-election happen between
-    //     saving req and proposing it to raft.
-    //  d) This is an indirect data and we received raft entry append from leader and localized the journal entry.
-    //  e) This is an indirect data and we received only on data channel, but no raft entry append from leader. This
+    //  c) This is an indirect data and we received raft entry append from leader and localized the journal entry.
+    //  d) This is an indirect data and we received only on data channel, but no raft entry append from leader. This
     //     would mean _prepare is never called but directly finish is called. This can happen if that the leader is not
     //     the original proposer (perhaps unsupported scenario at this time)
     //
-    // On case a), b), we return the rreq as is.
-    // For case c), we localize the actual term and then finish them as proposer.
-    // For case d), we just need to localize the actual server_id as well (as finishing step).
-    // For case e), we prepare the localization of journal entry and then finish them
+    // On case a), b), we return the rreq as is. For case c), we just need to localize the actual server_id as well (as
+    // finishing step). For case d), we prepare the localization of journal entry and then finish them
     //
     //
     // If we are not able to locate that req in the map for this entry, it means that no entry from raft leader is
@@ -401,9 +395,6 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
 
     m_rd.m_listener->write_snapshot_obj(snp_ctx, snp_data);
     if (is_last_obj) {
-        // Nuraft will compact and truncate all logs when processeing the last obj.
-        // Update the truncation upper limit here to ensure all stale logs are truncated.
-        m_rd.m_truncation_upper_limit.exchange(s_cast< repl_lsn_t >(s.get_last_log_idx()));
         hs()->cp_mgr().trigger_cp_flush(true).wait(); // ensure DSN is flushed to disk
     }
 
@@ -413,7 +404,7 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("baseline_resync_restart_new_follower")) {
         LOGINFO("Hit flip baseline_resync_restart_new_follower crashing");
-        hs()->crash_simulator().crash();
+        hs()->crash_simulator().crash_now();
     }
 #endif
 }

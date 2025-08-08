@@ -21,7 +21,6 @@
 #include "device/journal_vdev.hpp"
 
 namespace homestore {
-SISL_LOGGING_DECL(logstore)
 
 log_stream_reader::log_stream_reader(off_t device_cursor, shared< JournalVirtualDev > vdev,
                                      shared< JournalVirtualDev::Descriptor > vdev_jd, uint64_t read_size_multiple) :

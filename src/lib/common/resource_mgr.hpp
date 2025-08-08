@@ -22,7 +22,7 @@ namespace homestore {
 class RsrcMgrMetrics : public sisl::MetricsGroup {
 public:
     explicit RsrcMgrMetrics() : sisl::MetricsGroup("resource_mgr", "resource_mgr") {
-        REGISTER_COUNTER(dirty_buf_cnt, "Total wb cache dirty buffer cnt", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(index_dirty_size, "Total Index cache dirty buffer size", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(free_blk_size_in_cp, "Total free blks size accumulated in a cp",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(free_blk_cnt_in_cp, "Total free blks cnt accumulated in a cp",
@@ -46,24 +46,6 @@ class ResourceMgr {
 public:
     void start(uint64_t total_cap);
     void stop();
-
-    /* monitor dirty buffer count */
-    void inc_dirty_buf_size(const uint32_t size);
-    void dec_dirty_buf_size(const uint32_t size);
-    void register_dirty_buf_exceed_cb(exceed_limit_cb_t cb);
-
-    /* monitor free blk cnt */
-    void inc_free_blk(int size);
-
-    void dec_free_blk(int size);
-    void register_free_blks_exceed_cb(exceed_limit_cb_t cb);
-
-    bool can_add_free_blk(int cnt) const;
-
-    int64_t cur_free_blk_cnt() const;
-    int64_t get_free_blk_cnt_limit() const;
-    int64_t cur_free_blk_size() const;
-    int64_t get_free_blk_size_limit() const;
 
     /* monitor memory used to store seqid --> data mapping during recovery */
     void inc_mem_used_in_recovery(int size);
@@ -129,26 +111,19 @@ public:
     void trigger_truncate();
 
 private:
-    int64_t get_dirty_buf_limit() const;
-
     /**
      * Starts resource manager resource audit timer.
      */
     void start_timer();
 
 private:
-    std::atomic< int64_t > m_hs_dirty_buf_cnt;
-    std::atomic< int64_t > m_hs_fb_cnt;  // free count
     std::atomic< int64_t > m_hs_fb_size; // free size
     std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     std::atomic< int64_t > m_memory_used_in_recovery;
     std::atomic< uint32_t > m_flush_dirty_buf_q_depth{64};
-    std::atomic< bool > m_is_stopped_{false};
     uint64_t m_total_cap;
 
     // TODO: make it event_cb
-    exceed_limit_cb_t m_dirty_buf_exceed_cb;
-    exceed_limit_cb_t m_free_blks_exceed_cb;
     exceed_limit_cb_t m_journal_vdev_exceed_cb;
     RsrcMgrMetrics m_metrics;
 

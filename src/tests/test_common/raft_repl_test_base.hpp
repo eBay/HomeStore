@@ -183,8 +183,9 @@ public:
     void on_config_rollback(int64_t lsn) override {
         LOGINFOMOD(replication, "[Replica={}] Received config rollback at lsn={}", g_helper->replica_num(), lsn);
     }
-    void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {
-        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}", g_helper->replica_num(), lsn);
+    void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {
+        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}, chunk_id={}", g_helper->replica_num(),
+                   lsn, chunk_id);
     }
 
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
@@ -335,22 +336,20 @@ public:
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = jheader->key_id};
         auto iter = inmem_db_.find(k);
-        auto hints = blk_alloc_hints{};
         if (iter != inmem_db_.end()) {
             LOGDEBUG("data already exists in mem db, key={}", k.id_);
+            auto hints = blk_alloc_hints{};
             hints.committed_blk_id = iter->second.blkid_;
+            return hints;
         }
-        return hints;
+        return blk_alloc_hints{};
     }
-
-    void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                 const replica_member_info& member_in, trace_id_t tid) override {
+    void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
-    void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                    const replica_member_info& member_in, trace_id_t tid) override {
+    void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {
         LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
@@ -442,13 +441,6 @@ public:
         auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
         // raft_repl_dev->truncate(num_reserved_entries);
         LOGINFO("Manually truncated");
-    }
-
-    repl_lsn_t get_truncation_upper_limit() {
-        auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
-        auto limit = raft_repl_dev->get_truncation_upper_limit();
-        LOGINFO("Truncation upper limit is {}", limit);
-        return limit;
     }
 
     void set_zombie() { zombie_ = true; }
@@ -749,19 +741,16 @@ public:
 
     void create_snapshot() { dbs_[0]->create_snapshot(); }
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
-    repl_lsn_t get_truncation_upper_limit() { return dbs_[0]->get_truncation_upper_limit(); }
 
-    void replace_member(std::shared_ptr< TestReplicatedDB > db, std::string& task_id, replica_id_t member_out,
-                        replica_id_t member_in, uint32_t commit_quorum = 0,
-                        ReplServiceError error = ReplServiceError::OK) {
-        this->run_on_leader(db, [this, error, db, &task_id, member_out, member_in, commit_quorum]() {
-            LOGINFO("Start replace member task_id={}, out={}, in={}", task_id, boost::uuids::to_string(member_out),
+    void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in,
+                        uint32_t commit_quorum = 0, ReplServiceError error = ReplServiceError::OK) {
+        this->run_on_leader(db, [this, error, db, member_out, member_in, commit_quorum]() {
+            LOGINFO("Start replace member out={} in={}", boost::uuids::to_string(member_out),
                     boost::uuids::to_string(member_in));
 
             replica_member_info out{member_out, ""};
             replica_member_info in{member_in, ""};
-            auto result =
-                hs()->repl_service().replace_member(db->repl_dev()->group_id(), task_id, out, in, commit_quorum).get();
+            auto result = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
             if (error == ReplServiceError::OK) {
                 ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
             } else {
@@ -769,22 +758,6 @@ public:
                 ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
             }
         });
-    }
-
-    ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
-                                                    replica_id_t member_out, replica_id_t member_in) {
-        LOGINFO("check replace member status, task_id={}, out={} in={}", task_id, boost::uuids::to_string(member_out),
-                boost::uuids::to_string(member_in));
-
-        replica_member_info out{member_out, ""};
-        replica_member_info in{member_in, ""};
-        std::vector< replica_member_info > others;
-        for (auto m : g_helper->members_) {
-            if (m.first != member_out && m.first != member_in) {
-                others.emplace_back(replica_member_info{.id = m.first, .name = ""});
-            }
-        }
-        return hs()->repl_service().get_replace_member_status(db->repl_dev()->group_id(), task_id, out, in, others);
     }
 
 protected:

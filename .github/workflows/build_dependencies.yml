@@ -81,10 +81,18 @@ on:
         default: 'True'
 
 jobs:
-  BuildHomestoreDeps:
+  BuildHomestore:
     runs-on: ${{ inputs.platform }}
     timeout-minutes: 1440
     steps:
+    - name: Recover space
+      run: |
+        df -h
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        sudo docker builder prune -a
+        df -h
+
     - name: Retrieve Code
       uses: actions/checkout@main
       with:
@@ -94,160 +102,130 @@ jobs:
     - name: Retrieve Recipe
       uses: actions/checkout@main
       with:
-        repository: eBay/Homestore
+        repository: hkadayam/Homestore
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'False' }}
 
-    - name: Load Homestore Cache
+    - name: Restore Dependency Cache
       id: restore-cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: actions/cache/restore@v4
       with:
-        testing: ${{ inputs.testing }}
-        key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        path: |
+          ~/.conan2/p
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        fail-on-cache-miss: ${{ inputs.fail_on_cache_miss }}
 
-    - name: Load Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
-      with:
-        load_any: 'True'
-        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - name: Retrieve Dependencies
+    - name: Retrieve IOManager code
       uses: actions/checkout@main
       with:
-        repository: eBay/iomanager
+        repository: hkadayam/iomanager
         path: import/iomgr
         ref: master
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Retrieve Dependencies
+    - name: Retrieve NuraftMesg code
       uses: actions/checkout@main
       with:
-        repository: eBay/nuraft_mesg
+        repository: hkadayam/nuraft_mesg
         path: import/nuraft_mesg
         ref: main
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Load IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+    - name: Retrieve Sisl code
+      uses: actions/checkout@main
       with:
-        testing: 'False'
-        path: import/iomgr
-        key_prefix: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-        fail_on_cache_miss: true
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - name: Load NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
-      with:
-        testing: 'False'
-        path: import/nuraft_mesg
-        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-        fail_on_cache_miss: true
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+        repository: hkadayam/sisl
+        path: import/sisl
+        ref: master
 
     - name: Setup Conan
-      uses: eBay/sisl/.github/actions/setup_conan@master
+      uses: hkadayam/sisl/.github/actions/setup_conan@master
       with:
         platform: ${{ inputs.platform }}
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Export Recipes
+    - name: Export Recipes and DepsBuild Env
       run: |
-        sudo apt-get install -y python3-pyelftools libaio-dev
-        sudo rm -rf $ANDROID_HOME
-        python -m pip install pyelftools
-        conan export import/iomgr oss/master
-        conan export import/nuraft_mesg oss/main
-        cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
-        echo "::info:: Pre-cached: ${cached_pkgs}"
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+        conan export import/sisl --user oss --channel master
+        cd import/sisl && ./prepare.sh && cd ../..
+        conan export import/iomgr --user oss --channel master
+        cd import/iomgr && ./prepare.sh && cd ../..
+        conan export import/nuraft_mesg --user oss --channel main
+        cd import/nuraft_mesg/ && ./prepare.sh && cd ../..
 
-    - name: Build Cache
+    - name: Build Homestore Dependencies
+      id : build-deps
       run: |
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        du -sh ~/.conan2/p | awk '{printf("size=%d\n", $1)}' > $GITHUB_OUTPUT
         conan install \
+            -o "sisl/*:prerelease=${{ inputs.prerelease }}" \
+            -o "sisl/*:malloc_impl=${{ inputs.malloc-impl }}" \
             -c tools.build:skip_test=True \
-            ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
-            -o testing=off \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             .
-      if: ${{ steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Save Conan Cache
-      uses: eBay/sisl/.github/actions/store_conan@master
+    - name: Remove Prior Dependencies
+      id : remove-prior-deps
+      run: |
+        conan remove -c -p "build_type=${{ inputs.build-type }}" '*:*#!latest'
+        rm -rf ~/.conan2/p/b/*/b
+        rm -rf ~/.conan2/p/*/b ~/.conan2/p/*/s
+        du -sh ~/.conan2/p | awk '{printf("size=%d\n", $1)}' > $GITHUB_OUTPUT
+        df -h
+
+    - name: Delete Previous Cache
+      continue-on-error: true
+      run: |
+        gh extension install actions/gh-actions-cache
+        gh actions-cache delete "HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}" --confirm
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      if: ${{ github.event_name != 'pull_request' && steps.build-deps.outputs.size != steps.remove-prior-deps.outputs.size }}
+
+    - name: Save Dependency Cache
+      uses: actions/cache/save@v4
       with:
-        key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-      if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+        path: |
+          ~/.conan2/p
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ github.event_name != 'pull_request' && steps.build-deps.outputs.size != steps.remove-prior-deps.outputs.size }}
 
-    - name: Reload Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
-      with:
-        load_any: 'True'
-        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - name: Reload IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
-      with:
-        testing: 'False'
-        path: import/iomgr
-        key_prefix: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-        fail_on_cache_miss: true
-      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - name: Reload NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
-      with:
-        testing: 'False'
-        path: import/nuraft_mesg
-        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-        fail_on_cache_miss: true
-      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - uses: actions/checkout@main
     - name: Setup tmate session
       uses: mxschmitt/action-tmate@v3
       with:
         limit-access-to-actor: true
         detached: true
-        connect-timeout-seconds: 60
-      if: ${{ inputs.testing == 'True' }}
+      if: ${{ inputs.testing == 'True' || inputs.tooling == 'Coverage' }}
 
     - name: Create and Test Package
       run: |
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        skip_test=$([[ "${{ inputs.testing }}" == "True" ]] && echo "False" || echo "True") 
         conan create \
-            ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
-            -o homestore:sanitize=${sanitize} \
+            -o "sisl/*:prerelease=${{ inputs.prerelease }}" \
+            -o "sisl/*:malloc_impl=${{ inputs.malloc-impl }}" \
+            -o "homestore/*:sanitize=${sanitize}" \
+            -c tools.build:skip_test=${skip_test} \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             .
-      if: ${{ inputs.testing == 'True' && inputs.tooling != 'Coverage' }}
+      if: ${{ inputs.tooling != 'Coverage' }}
 
     - name: Code Coverage Run
       run: |
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
-        conan install \
-            ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
+        du -sh ~/.conan2/p/*
+        df -h
+        conan build \
+            -o "sisl/*:prerelease=${{ inputs.prerelease }}" \
+            -o "sisl/*:malloc_impl=${{ inputs.malloc-impl }}" \
             -o coverage=True \
+            -c tools.build:skip_test=False \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             .
-        conan build .
-      if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
+      if: ${{ inputs.tooling == 'Coverage' }}
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         gcov: true
-      if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
+      if: ${{ inputs.tooling == 'Coverage' }}

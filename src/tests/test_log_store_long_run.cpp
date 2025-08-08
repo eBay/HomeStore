@@ -53,7 +53,7 @@
 
 using namespace homestore;
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 struct test_log_data {
     test_log_data() = default;

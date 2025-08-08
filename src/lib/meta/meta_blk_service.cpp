@@ -39,8 +39,6 @@
 #include "blkalloc/blk_allocator.h"
 #include "meta_sb.hpp"
 
-SISL_LOGGING_DECL(metablk)
-
 namespace homestore {
 
 MetaBlkService& meta_service() { return hs()->meta_service(); }
@@ -608,8 +606,6 @@ meta_blk* MetaBlkService::init_meta_blk(BlkId& bid, meta_sub_type type, const ui
 //
 void MetaBlkService::write_meta_blk_ovf(BlkId& out_obid, const uint8_t* context_data, uint64_t sz,
                                         const std::string& type) {
-    HS_DBG_ASSERT(m_meta_mtx.try_lock() == false, "mutex should be already be locked");
-
     // allocate data blocks
     static thread_local std::vector< BlkId > context_data_blkids{};
     context_data_blkids.clear();

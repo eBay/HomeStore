@@ -41,9 +41,8 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 SISL_OPTIONS_ENABLE(logging, test_log_dev, iomgr, test_common_setup)
-SISL_LOGGING_DECL(test_log_dev)
 
 struct test_log_data {
     test_log_data() = default;

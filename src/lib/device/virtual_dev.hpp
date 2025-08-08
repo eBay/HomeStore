@@ -54,7 +54,6 @@ public:
         REGISTER_COUNTER(default_chunk_allocation_cnt, "default chunk allocation count");
         REGISTER_COUNTER(random_chunk_allocation_cnt,
                          "random chunk allocation count"); // ideally it should be zero for hdd
-        REGISTER_HISTOGRAM(blk_alloc_latency, "Blk allocation latency", "blk_alloc_latency");
         register_me_to_farm();
     }
 
@@ -138,13 +137,6 @@ public:
     /// @param out_blkid : Reference to where allocated BlkId to be placed
     /// @return BlkAllocStatus : Status about the allocation
     virtual BlkAllocStatus alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
-
-    /// @brief This method allocates multiple contiguous blocks in the vdev
-    /// @param nblks : Number of blocks to allocate
-    /// @param hints : Hints about block allocation, (specific device to allocate, stream etc)
-    /// @param out_blkid : Reference to where allocated MultiBlkId to be placed
-    /// @return BlkAllocStatus : Status about the allocation
-    virtual BlkAllocStatus alloc_n_contiguous_blks(blk_count_t nblks, blk_alloc_hints hints, MultiBlkId& out_blkid);
 
     /// @brief This method allocates blocks in the vdev and it could be non-contiguous, hence multiple BlkIds are
     /// returned
@@ -252,6 +244,8 @@ public:
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     std::error_code sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
+
+    std::pair< std::error_code, sisl::io_blob_safe > sync_read(BlkId const& bid);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
     /// @param iov : Vector of buffer to write read to

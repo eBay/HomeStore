@@ -54,6 +54,7 @@ public:
                                  std::vector< std::string >& ordered_entries);
 };
 
-static bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
+static bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms,
+                           uint32_t interval_ms = 100);
 
 } // namespace homestore

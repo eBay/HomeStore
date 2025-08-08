@@ -26,7 +26,6 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-SISL_LOGGING_DECL(logstore)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "log_store", m_fq_name, msg, __VA_ARGS__)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
@@ -44,9 +43,7 @@ HomeLogStore::HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, b
         m_fq_name{fmt::format("{} log_dev={}", id, logdev->get_id())},
         m_metrics{logstore_service().metrics()} {}
 
-logstore_seq_num_t HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
-    if (is_stopping()) return 0;
-    incr_pending_request_num();
+void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
@@ -60,59 +57,43 @@ logstore_seq_num_t HomeLogStore::write_async(logstore_req* req, const log_req_co
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size());
-    auto ret = m_logdev->append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
-    decr_pending_request_num();
-    return ret;
+    m_logdev->append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
-logstore_seq_num_t HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
-                                             const log_write_comp_cb_t& cb) {
-    if (is_stopping()) return 0;
-    incr_pending_request_num();
+void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
+                               const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
     auto* req = logstore_req::make(this, seq_num, b);
     req->cookie = cookie;
 
-    auto ret = write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
+    write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
         if (cb) { cb(req->seq_num, req->data, written_lkey, req->cookie); }
         logstore_req::free(req);
     });
-    decr_pending_request_num();
-    return ret;
 }
 
 logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
-    if (is_stopping()) return 0;
-    incr_pending_request_num();
     HS_DBG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
     const auto seq_num = m_next_lsn.fetch_add(1, std::memory_order_acq_rel);
     write_async(seq_num, b, cookie, cb);
-    decr_pending_request_num();
     return seq_num;
 }
 
-logstore_seq_num_t HomeLogStore::write_and_flush(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
-    if (is_stopping()) return 0;
-    incr_pending_request_num();
+void HomeLogStore::write_and_flush(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
     HS_LOG_ASSERT(iomanager.am_i_sync_io_capable(),
                   "Write and flush is a blocking IO, which can't run in this thread, please reschedule to a fiber");
     if (seq_num > m_next_lsn.load(std::memory_order_relaxed)) m_next_lsn.store(seq_num + 1, std::memory_order_relaxed);
-    auto ret = write_async(seq_num, b, nullptr /* cookie */, nullptr /* cb */);
+    write_async(seq_num, b, nullptr /* cookie */, nullptr /* cb */);
     m_logdev->flush_under_guard();
-    decr_pending_request_num();
-    return ret;
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
-    if (is_stopping()) return log_buffer{};
-    incr_pending_request_num();
     HS_LOG_ASSERT(iomanager.am_i_sync_io_capable(),
                   "Read sync is a blocking IO, which can't run in this thread, reschedule to a fiber");
 
     // If seq_num has not been flushed yet, but issued, then we flush them before reading
     auto const s = m_records.status(seq_num);
     if (s.is_out_of_range || s.is_hole) {
-        decr_pending_request_num();
         throw std::out_of_range("key not valid since it has been truncated");
     } else if (!s.is_completed) {
         THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
@@ -123,7 +104,6 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     const logdev_key ld_key = record.m_dev_key;
     if (!ld_key.is_valid()) {
         THIS_LOGSTORE_LOG(ERROR, "ld_key not valid {}", seq_num);
-        decr_pending_request_num();
         throw std::out_of_range("key not valid");
     }
 
@@ -131,7 +111,6 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     const auto b = m_logdev->read(ld_key);
     HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
-    decr_pending_request_num();
     return b;
 }
 
@@ -195,15 +174,8 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld
     if (m_found_cb != nullptr) { m_found_cb(seq_num, buf, nullptr); }
 }
 
-bool HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate_only) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
-    if (upto_lsn < m_start_lsn) {
-        decr_pending_request_num();
-        THIS_LOGSTORE_LOG(WARN, "Truncating logstore upto lsn={} , start_lsn={}, upto_lsn < m_start_lsn", upto_lsn,
-                          m_start_lsn.load(std::memory_order_relaxed));
-        return false;
-    }
+void HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate_only) {
+    if (upto_lsn < m_start_lsn) { return; }
     flush();
 #ifndef NDEBUG
     auto cs = get_contiguous_completed_seq_num(0);
@@ -221,8 +193,9 @@ bool HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate
     // In baseline resync path, we truncate all entries up to upto_lsn, and update m_tail_lsn and m_next_lsn
     // to make sure logstore's idx is always = raft's idx - 1.
     if (upto_lsn > m_tail_lsn) {
-        THIS_LOGSTORE_LOG(WARN, "Truncating issued on lsn={} which is greater than tail_lsn={}", upto_lsn,
-                          m_tail_lsn.load(std::memory_order_relaxed));
+        THIS_LOGSTORE_LOG(WARN,
+                          "Truncating issued on lsn={} which is greater than tail_lsn={}",
+                          upto_lsn, m_tail_lsn.load(std::memory_order_relaxed));
         // update m_tail_lsn if it is less than upto_lsn
         auto current_tail_lsn = m_tail_lsn.load(std::memory_order_relaxed);
         while (current_tail_lsn < upto_lsn &&
@@ -244,8 +217,6 @@ bool HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate
     m_records.truncate(upto_lsn);
     m_start_lsn.store(upto_lsn + 1);
     if (!in_memory_truncate_only) { m_logdev->truncate(); }
-    decr_pending_request_num();
-    return true;
 }
 
 std::tuple< logstore_seq_num_t, logdev_key, logstore_seq_num_t > HomeLogStore::truncate_info() const {
@@ -258,30 +229,16 @@ std::tuple< logstore_seq_num_t, logdev_key, logstore_seq_num_t > HomeLogStore::t
                                    : std::make_tuple(trunc_lsn, m_trunc_ld_key, tail_lsn);
 }
 
-bool HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
+void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
     HS_DBG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
                      seq_num);
 
     logdev_key empty_ld_key;
     m_records.create_and_complete(seq_num, logstore_record(empty_ld_key, empty_ld_key));
-    decr_pending_request_num();
-    return true;
-}
-
-void HomeLogStore::stop() {
-    start_stopping();
-    while (true) {
-        if (!get_pending_request_num()) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
 }
 
 nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
-    if (is_stopping()) return json_dump;
-    incr_pending_request_num();
     json_dump["store_id"] = this->m_store_id;
 
     int64_t start_idx = std::max(dump_req.start_seq_num, start_lsn());
@@ -314,19 +271,14 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
         });
 
     json_dump["log_records"] = std::move(json_records);
-    decr_pending_request_num();
     return json_dump;
 }
 
-bool HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
+void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
     m_records.foreach_all_completed(start_idx, [&](int64_t cur_idx, homestore::logstore_record& record) -> bool {
         auto log_buf = m_logdev->read(record.m_dev_key);
         return cb(cur_idx, log_buf);
     });
-    decr_pending_request_num();
-    return true;
 }
 
 logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) const {
@@ -337,27 +289,24 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_n
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
 }
 
-bool HomeLogStore::flush(logstore_seq_num_t upto_lsn) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
+void HomeLogStore::flush(logstore_seq_num_t upto_lsn) {
+    if (!m_logdev->allow_explicit_flush()) {
+        HS_LOG_ASSERT(false,
+                      "Explicit flush is turned off or calling flush on wrong thread for this logdev, ignoring flush");
+        return;
+    }
+
     m_logdev->flush_under_guard();
-    decr_pending_request_num();
-    return true;
 }
 
 bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
-    // Fast path
+    //Fast path
     if (to_lsn == m_tail_lsn.load()) {
-        decr_pending_request_num();
-        return true;
+	return true;
     }
 
     if (to_lsn > m_tail_lsn.load() || to_lsn < m_start_lsn.load()) {
-        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is not in the range of [{}, {}]", to_lsn,
-                      m_start_lsn.load(), m_tail_lsn.load());
-        decr_pending_request_num();
+        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is not in the range of [{}, {}]", to_lsn, m_start_lsn.load(), m_tail_lsn.load());
         return false;
     }
 
@@ -393,21 +342,17 @@ bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {
         if (do_flush) m_logdev->flush_under_guard();
     } while (do_flush);
 
-    decr_pending_request_num();
     return true;
 }
 
 nlohmann::json HomeLogStore::get_status(int verbosity) const {
     nlohmann::json js;
-    if (is_stopping()) return js;
-    incr_pending_request_num();
     js["append_mode"] = m_append_mode;
     js["start_lsn"] = m_start_lsn.load(std::memory_order_relaxed);
     js["next_lsn"] = m_next_lsn.load(std::memory_order_relaxed);
     js["tail_lsn"] = m_tail_lsn.load(std::memory_order_relaxed);
     js["logstore_records"] = m_records.get_status(verbosity);
     js["logstore_sb_first_lsn"] = m_logdev->log_dev_meta().store_superblk(m_store_id).m_first_seq_num;
-    decr_pending_request_num();
     return js;
 }
 

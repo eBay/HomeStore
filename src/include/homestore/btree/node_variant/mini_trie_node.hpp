@@ -17,63 +17,276 @@
 #pragma once
 
 #include <sisl/logging/logging.h>
-#include <homestore/btree/detail/variant_node.hpp>
+#include <homestore/btree/node_variant/variant_node.hpp>
 #include <homestore/btree/btree_kv.hpp>
-#include "homestore/index/index_internal.hpp"
-
-SISL_LOGGING_DECL(btree)
 
 namespace homestore {
-#pragma pack(1)
-struct btree_obj_record {
-    uint16_t m_obj_offset : 14;
-    uint16_t reserved : 2;
-};
-
-struct var_node_header {
-    uint16_t m_tail_arena_offset; // Tail side of the arena where new keys are inserted
-    uint16_t m_available_space;
-    uint16_t m_init_available_space; // remember initial node area size to later use for compaction
-    // TODO:
-    // We really dont require storing m_init_available_space in each node.
-    // Instead add method in variant node to fetch config
-
-    uint16_t tail_offset() const { return m_tail_arena_offset; }
-    uint16_t available_space() const { return m_available_space; }
-};
-#pragma pack()
-
 // Internal format of variable node:
-// [Persistent Header][var node header][Record][Record].. ...  ... [key][value][key][value]
+// [Persistent Header][MiniTrieNodeheader][ArenaBitset][Entry1].. ...  [Prefix1][Value][Suffix1][value][Suffix2][value]
 //
 template < typename K, typename V >
-class VariableNode : public VariantNode< K, V > {
+class MiniTrieNode : public VariantNode< K, V > {
 public:
     using BtreeNode::get_nth_key_internal;
     using BtreeNode::get_nth_key_size;
     using BtreeNode::get_nth_obj_size;
     using BtreeNode::get_nth_value;
     using BtreeNode::get_nth_value_size;
+    using BtreeNode::node_data_area;
+    using BtreeNode::node_data_area_size;
+    using BtreeNode::node_data_size;
+    using BtreeNode::node_gen;
     using BtreeNode::to_string;
+    using BtreeNode::total_entries;
     using VariantNode< K, V >::get_nth_value;
 
-    VariableNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
-            VariantNode< K, V >(node_buf, id, init, is_leaf, cfg) {
-        if (init) {
-            // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
-            // except for the header itself
-            get_var_node_header()->m_init_available_space = this->node_data_size();
-            get_var_node_header()->m_tail_arena_offset = this->node_data_size();
-            get_var_node_header()->m_available_space =
-                get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
+private:
+#pragma pack(1)
+    struct Header {
+        uint16_t tail_offset;  // Offset where kv can be inserted
+        uint16_t hole_size{0}; // How much space are holes
+
+        Header(uint16_t node_data_size) : tail_offset{node_data_size} {}
+        std::string to_string() const { return fmt::format("tail_offset={} hole_size={}", tail_offset, hole_size); }
+    };
+
+    struct Entry {
+        uint16_t prefix_offset; // Where prefix key starts
+        uint16_t prefix_size;   // Size of the prefix key
+        uint16_t suffix_size;   // Size of the suffix key
+        uint16_t value_size;    // Size of the value
+        uint16_t kv_offset;     // Offset of where both suffix key and value is present
+    };
+
+    struct PrefixInfo {
+        uint16_t refcount{1}; // Number of entries pointing to this prefix
+        uint8_t key[1];       // Prefix key
+
+        static uint16_t size(uint16_t key_size) { return key_size + sizeof(PrefixInfo) - 1; }
+
+        PrefixInfo(sisl::blob const& k) { std::memcpy(&key[0], k.cbytes(), k.size()); }
+        std::string to_string() const { return fmt::format("refcount={} key={}", refcount, key); }
+    };
+#pragma pack()
+
+    MiniTrieNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, uint32_t node_size,
+                 bool is_temp_node = false) :
+            VariantNode< K, V >(node_buf, id, init, is_leaf, node_size, is_temp_node) {
+        if (init) { new (this->node_data_area()) Header(this->node_data_size()); }
+    }
+
+    virtual ~MiniTrieNode() = default;
+
+    ////////////////////////////////////// All overrides of BtreeNode ///////////////////////////////////
+    btree_status_t insert(uint32_t idx, const BtreeKey& key, const BtreeValue& val) override {
+        uint32_t prev_match_size{0};
+        uint32_t next_match_size{0};
+
+        auto kblob = key.serialize();
+        auto vblob = val.serialize();
+        if (idx > 0) { prev_match_size = check_prefix_match(kblob, nth_entry(idx - 1)); }
+        if ((idx + 1) < total_entries()) { next_match_size = check_prefix_match(kblob, nth_entry(idx + 1)); }
+
+        if (prev_match_size == 0 && next_match_size == 0) {
+            insert_standalone(idx, kblob, vblob);
+        } else if (prev_match_size >= next_match_size) {
+            insert_dependent(idx, idx - 1, prev_match_size, extract_suffix_blob(klob, prev_match_size), vblob);
+        } else {
+            insert_dependent(idx, idx + 1, next_match_size, extract_suffix_blob(kblob, next_match_size), vblob);
+        }
+        inc_gen();
+        return btree_status_t::success;
+    }
+
+    void update(uint32_t idx, const BtreeValue& val) override {
+        if (update_if_edge(idx, val)) { return; }
+
+        auto new_val_blob = val.serialize();
+        auto const gen{node_gen() + 1};
+
+        Entry const* e = nth_entry(idx);
+        auto cur_val_blob = value(e);
+        if (new_val_blob.size() <= cur_val_blob.size()) {
+            // Same or smaller size value update, we can just update in-place and free up anything remaining
+            std::memcpy(offset_to_ptr(e->kv_offset + e->suffix_size), new_val_blob.cbytes(), new_val_blob.size());
+            e->value_size = new_val_blob.size();
+            free_space(e->kv_offset + e->suffix_size + e->value_size, cur_val_blob.size() - new_val_blob.size());
+        } else if (new_val_blob.size() <= immediate_available_space()) {
+            // We have enough room at the tail, so we can update them in the additional space and free up the
+            // existing one.
+            auto kv_offset = alloc_space(new_val_blob.size() + e->suffix_key_size);
+            std::memcpy(offset_to_ptr(kv_offset), offset_to_ptr(e->kv_offset), e->suffix_key_size);
+            std::memcpy(offset_to_ptr(kv_offset + e->suffix_key_size), new_val_blob.cbytes(), new_val_blob.size());
+            free_space(e->kv_offset, e->suffix_key_size + e->value_size);
+            e->kv_offset = kv_offset;
+            e->value_size = new_val_blob.size();
+        } else {
+            // We could possibly compact and try above step, but it is no guarantee that compact will be able to
+            // generate enough space to first insert an additional value and then remove. So we instead do a get with
+            // copy, remove and insert to make sure enough room.
+            K k = get_nth_key(idx, true /* copy */);
+            remove(idx);
+            insert(idx, k, val);
+        }
+        set_gen(gen);
+    }
+
+    void update(uint32_t idx, BtreeKey const& key, BtreeValue const& val) override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "Using wrong update method to update edge?");
+        auto const gen{this->node_gen() + 1};
+        remove(idx);
+        insert(idx, key, val);
+        set_gen(gen);
+    }
+
+    void remove(uint32_t idx) override { remove(idx, idx); }
+
+    void remove(uint32_t idx_s, uint32_t idx_e) override {
+        auto const gen{this->node_gen() + 1};
+        if (idx_e == total_entries()) {
+            remove_if_edge(idx_e);
+            if (idx_e-- == 0) { goto done; }
+        }
+
+        for (uint32_t idx{idx_s}; idx <= idx_e; ++idx) {
+            auto e = nth_entry(idx);
+            if (--get_prefix_info(e).refcount == 0) { free_space(e->prefix_offset, PrefixInfo::size(e->prefix_size)); }
+            free_space(e->kv_offset, e->suffix_size + e->value_size);
+        }
+
+        std::memmove(uintptr_cast(nth_entry(idx_s), uintptr_cast(nth_entry(idx_e + 1)),
+                                  (total_entries() - idx_e - 1) * sizeof(Entry)));
+        sub_entries(idx_e - idx_s + 1);
+    done:
+        set_gen(gen);
+    }
+
+    void remove_all() override {
+        new (node_data_area()) Header(this->node_data_size()); // Reset the header
+        sub_entries(this->total_entries());
+        invalidate_edge();
+        inc_gen();
+    }
+
+    uint32_t available_size() const override { return immediate_available_space() + header()->hole_size; }
+
+    bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
+        if (put_type == btree_put_type::UPDATE) {
+            needed_size = value_size;
+        } else {
+            needed_size = sizeof(Entry) + PrefixInfo::size(key_size) + value_size;
+        }
+        return (available_size() >= needed_size);
+    }
+
+    void get_nth_key_internal(uint32_t idx, BtreeKey& out_key, bool copy) const override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
+        auto prefix_blob = nth_prefix(idx);
+        auto suffix_blob = nth_suffix(idx);
+
+        if (suffix.size() == 0) {
+            out_key.deserialize(prefix_blob, copy);
+        } else {
+            out_key.deserialize(prefix_blob, suffix_blob, copy);
         }
     }
 
-    virtual ~VariableNode() = default;
-
-    uint32_t occupied_size() const override {
-        return (get_var_node_header_const()->m_init_available_space - sizeof(var_node_header) - available_size());
+    void get_nth_key_size(uint32_t idx) const override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
+        auto e = nth_entry(idx);
+        return e->prefix_size + e->suffix_size;
     }
+
+    void get_nth_value(uint32_t idx, BtreeValue* out_val, bool copy) const override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
+        out_val->deserialize(nth_value(idx), copy);
+    }
+
+    uint32_t get_nth_value_size(uint32_t idx) const override {
+        DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
+        return nth_entry(idx)->value_size;
+    }
+
+    uint32_t move_out_to_right_by_entries(BtreeNode& o, uint32_t nentries) override {
+        auto& other = static_cast< MiniTrieNode& >(o);
+        auto const this_gen{this->node_gen() + 1};
+        auto const other_gen{other.node_gen() + 1};
+
+        if (nentries == 0) { return 0; /* Nothing to move */ }
+
+        uint32_t nmoved{0};
+        if (!this->is_leaf() && this->has_valid_edge()) {
+            other.set_edge_info(this->edge_info());
+            this->invalidate_edge();
+            ++nmoved;
+        }
+
+        while ((nmoved < nentries) && (this->total_entries() > 0)) {
+            auto const idx = this->total_entries() - 1;
+            other.insert(0, get_nth_key(idx, false), get_nth_value(idx, false));
+            remove(idx);
+            ++nmoved;
+        }
+
+        this->set_gen(this_gen);
+        other.set_gen(other_gen);
+        return nmoved;
+    }
+
+    uint32_t move_out_to_right_by_size(BtreeNode& o, uint32_t size) override {
+        auto& other = static_cast< MiniTrieNode& >(o);
+        auto const this_gen{this->node_gen() + 1};
+        auto const other_gen{other.node_gen() + 1};
+
+        uint32_t nmoved{0};
+        if (!this->is_leaf() && this->has_valid_edge()) {
+            other.set_edge_info(this->edge_info());
+            this->invalidate_edge();
+            ++nmoved;
+        }
+
+        if (total_entries() == 0) { goto done; }
+        uint32_t idx = this->total_entries() - 1;
+        while (idx > 0) {
+            if (available_size() >= size) {
+                // We have enough space on current node after moving some entries
+                break;
+            }
+            other.insert(0, get_nth_key(idx, false), get_nth_value(idx, false));
+            remove(idx--);
+            ++nmoved;
+        }
+
+    done:
+        set_gen(this_gen);
+        other.set_gen(other_gen);
+        return nmoved;
+    }
+
+    uint32_t copy_by_size(BtreeNode const& o, uint32_t start_idx, uint32_t size) override {
+        auto& other = static_cast< const MiniTrieNode& >(o);
+        auto const other_gen{other.node_gen() + 1};
+
+        uint32_t idx = start_idx;
+        uint32_t n = 0;
+        while (idx < total_entries()) {
+            auto kblob = get_nth_key(idx, false);
+            auto vblob = get_nth_value(idx, false);
+
+            // We reached threshold of how much we could move
+            if ((kblob.size() + vblob.size() + sizeof(Entry)) > size) { break; }
+
+            insert(this->total_entries(), kblob, vblob);
+            ++n;
+            ++idx;
+        }
+        set_gen(this_gen + 1);
+        return n;
+    }
+};
+} // namespace homestore
+
+#if 0
 
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
@@ -190,7 +403,7 @@ public:
         this->inc_gen();
     }
 
-    void remove_all(const BtreeConfig&) override {
+    void remove_all() override {
         this->sub_entries(this->total_entries());
         this->invalidate_edge();
         this->inc_gen();
@@ -556,7 +769,7 @@ protected:
         memcpy(raw_data_ptr, val_blob.cbytes(), val_blob.size());
 
         // Increment the entries and generation number
-        this->inc_entries();
+        this->add_entries(1);
         this->inc_gen();
 
 #ifndef NDEBUG
@@ -772,3 +985,4 @@ private:
 #pragma pack()
 };
 } // namespace homestore
+#endif

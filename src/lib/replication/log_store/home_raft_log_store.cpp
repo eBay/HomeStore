@@ -22,8 +22,6 @@
 
 using namespace homestore;
 
-SISL_LOGGING_DECL(replication)
-
 #define REPL_STORE_LOG(level, msg, ...)                                                                                \
     LOG##level##MOD_FMT(replication, ([&](fmt::memory_buffer& buf, const char* msgcb, auto&&... args) -> bool {        \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                          \

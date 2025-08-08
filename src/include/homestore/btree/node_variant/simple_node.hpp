@@ -16,33 +16,41 @@
 #pragma once
 
 #include <homestore/btree/btree_kv.hpp>
-#include <homestore/btree/detail/variant_node.hpp>
+#include <homestore/btree/node_variant/variant_node.hpp>
 #include <homestore/btree/detail/btree_internal.hpp>
-#include "homestore/index/index_internal.hpp"
 
 using namespace std;
 using namespace boost;
-
-SISL_LOGGING_DECL(btree)
 
 namespace homestore {
 
 template < typename K, typename V >
 class SimpleNode : public VariantNode< K, V > {
 public:
-    SimpleNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
-            VariantNode< K, V >(node_buf, id, init, is_leaf, cfg) {
+    SimpleNode(bnodeid_t id, bool is_leaf, uint32_t node_size, BtreeNode::Allocator::Token token) :
+            VariantNode< K, V >(id, is_leaf, node_size, token) {
         this->set_node_type(btree_node_type::FIXED);
     }
 
+    SimpleNode(uint8_t* node_buf, bnodeid_t id, BtreeNode::Allocator::Token token) :
+            VariantNode< K, V >(node_buf, id, token) {
+        DEBUG_ASSERT_EQ(this->get_node_type(), btree_node_type::FIXED);
+    }
+
+    virtual ~SimpleNode() = default;
+
+    using BtreeNode::add_entries;
     using BtreeNode::get_nth_key_internal;
     using BtreeNode::get_nth_key_size;
     using BtreeNode::get_nth_obj_size;
     using BtreeNode::get_nth_value;
     using BtreeNode::get_nth_value_size;
+    using BtreeNode::inc_gen;
+    using BtreeNode::occupied_size;
+    using BtreeNode::sub_entries;
     using BtreeNode::to_string;
+    using BtreeNode::total_entries;
     using VariantNode< K, V >::get_nth_value;
-    using VariantNode< K, V >::max_keys_in_node;
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
@@ -50,9 +58,9 @@ public:
         uint32_t sz = (this->total_entries() - (ind + 1) + 1) * get_nth_obj_size(0);
 
         if (sz != 0) { std::memmove(get_nth_obj(ind + 1), get_nth_obj(ind), sz); }
-        this->set_nth_obj(ind, key, val);
-        this->inc_entries();
-        this->inc_gen();
+        set_nth_obj(ind, key, val);
+        add_entries(1);
+        inc_gen();
 
 #ifndef NDEBUG
         validate_sanity();
@@ -92,14 +100,14 @@ public:
             // Set the last key/value as edge entry and by decrementing entry count automatically removed the last
             // entry.
             BtreeLinkInfo new_edge;
-            this->get_nth_value(ind_s - 1, &new_edge, false);
-            this->set_nth_value(total_entries, new_edge);
-            this->sub_entries(total_entries - ind_s + 1);
+            get_nth_value(ind_s - 1, &new_edge, false);
+            set_nth_value(total_entries, new_edge);
+            sub_entries(total_entries - ind_s + 1);
         } else {
             uint32_t sz = (total_entries - ind_e - 1) * get_nth_obj_size(0);
 
             if (sz != 0) { std::memmove(get_nth_obj(ind_s), get_nth_obj(ind_e + 1), sz); }
-            this->sub_entries(ind_e - ind_s + 1);
+            sub_entries(ind_e - ind_s + 1);
         }
         this->inc_gen();
 #ifndef NDEBUG
@@ -107,8 +115,8 @@ public:
 #endif
     }
 
-    void remove_all(const BtreeConfig&) override {
-        this->sub_entries(this->total_entries());
+    void remove_all() override {
+        sub_entries(this->total_entries());
         this->invalidate_edge();
         this->inc_gen();
 #ifndef NDEBUG
@@ -116,7 +124,7 @@ public:
 #endif
     }
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode& o, uint32_t nentries) override {
+    uint32_t move_out_to_right_by_entries(BtreeNode& o, uint32_t nentries) override {
         auto& other_node = s_cast< SimpleNode< K, V >& >(o);
 
         // Minimum of whats to be moved out and how many slots available in other node
@@ -130,7 +138,7 @@ public:
         }
 
         other_node.add_entries(nentries);
-        this->sub_entries(nentries);
+        sub_entries(nentries);
 
         // If there is an edgeEntry in this node, it needs to move to move out as well.
         if (!this->is_leaf() && this->has_valid_edge()) {
@@ -147,31 +155,60 @@ public:
         return nentries;
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size) override {
-        return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, o, size / get_nth_obj_size(0)));
+    uint32_t move_out_to_right_by_size(BtreeNode& o, uint32_t size) override {
+        return move_out_to_right_by_entries(o, size / get_nth_obj_size(0));
     }
 
-    uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
-        return std::min(size / get_nth_obj_size(0), this->total_entries() - start_idx);
+    uint32_t get_entries_size(uint32_t start_idx, uint32_t end_idx) const override {
+        return get_nth_obj_size(0) * (end_idx - start_idx);
     }
 
-    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx, uint32_t size) override {
+    bool append_copy_in_upto_size(const BtreeNode& o, uint32_t& other_cursor, uint32_t upto_size,
+                                  bool copy_only_if_fits) override {
         auto& other = s_cast< const SimpleNode< K, V >& >(o);
-        return copy_by_entries(cfg, o, start_idx, other.num_entries_by_size(start_idx, size));
+        if (occupied_size() >= upto_size) { return false; }
+        if (other.total_entries() == 0) { return true; }
+        auto const room = upto_size - occupied_size();
+
+        if (copy_only_if_fits) {
+            // Whats going to come in is more than what we are supposed to accept or what has been available. std::min
+            // check here is to ensure that even though we have available space, but if it exceeds requested upto_size,
+            // then bail out.
+            if (other.get_entries_size(other_cursor, other.total_entries()) > room) { return false; }
+        }
+
+        DEBUG_ASSERT_LT(other_cursor, other.total_entries(), "Invalid cursor pointed in src node={}",
+                        other.to_string());
+        auto const nentries = std::min(room / get_nth_obj_size(0), other.total_entries() - other_cursor);
+        std::memcpy(get_nth_obj(total_entries()), other.get_nth_obj_const(other_cursor),
+                    nentries * get_nth_obj_size(0));
+        other_cursor += nentries;
+        add_entries(nentries);
+        inc_gen();
+
+        // If we copied everything from start_idx till end and if its an edge node, need to copy the edge id as well.
+        if (other.has_valid_edge() && (other_cursor == other.total_entries())) {
+            this->set_edge_info(other.edge_info());
+        }
+
+        if (copy_only_if_fits) {
+            DEBUG_ASSERT_EQ(other_cursor, other.total_entries(),
+                            "We proceeded to copy after it checking size, but end up not copying all");
+        }
+        return true;
     }
 
-    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx,
-                             uint32_t nentries) override {
+#if 0
+    uint32_t copy_by_size(const BtreeNode& o, uint32_t start_idx, uint32_t size) override {
+        auto& other = s_cast< const SimpleNode< K, V >& >(o);
+        return copy_by_entries(o, start_idx, other.num_entries_by_size(start_idx, size));
+    }
+
+    uint32_t copy_by_entries(const BtreeNode& o, uint32_t start_idx, uint32_t nentries) override {
         auto& other = s_cast< const SimpleNode< K, V >& >(o);
 
         nentries = std::min(nentries, other.total_entries() - start_idx);
         nentries = std::min(nentries, this->get_available_entries());
-#ifdef _PRERELEASE
-        const uint64_t max_keys = this->max_keys_in_node();
-        if (max_keys) {
-            if (this->total_entries() + nentries > max_keys) { nentries = max_keys - this->total_entries(); }
-        }
-#endif
         uint32_t sz = nentries * get_nth_obj_size(0);
         if (sz != 0) { std::memcpy(get_nth_obj(this->total_entries()), other.get_nth_obj_const(start_idx), sz); }
         this->add_entries(nentries);
@@ -183,6 +220,12 @@ public:
         }
         return nentries;
     }
+
+    uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
+        return std::min(size / get_nth_obj_size(0), this->total_entries() - start_idx);
+    }
+
+#endif
 
     uint32_t available_size() const override {
         return (this->node_data_size() - (this->total_entries() * get_nth_obj_size(0)));
@@ -208,10 +251,6 @@ public:
     }
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
-#ifdef _PRERELEASE
-        auto max_keys = max_keys_in_node();
-        if (max_keys) { return (this->total_entries() < max_keys); }
-#endif
         return ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT))
             ? (get_available_entries() > 0)
             : true;
@@ -219,11 +258,10 @@ public:
 
     std::string to_string(bool print_friendly = false) const override {
         auto snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
-        auto str =
-            fmt::format("{}id={} level={} nEntries={} {} {} {}",
-                        (print_friendly ? "------------------------------------------------------------\n" : ""),
-                        this->node_id(), this->level(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
-                        snext, this->is_node_deleted() ? "  Deleted" : " LIVE");
+        auto str = fmt::format("{}id={} level={} nEntries={} {} {} ",
+                               (print_friendly ? "------------------------------------------------------------\n" : ""),
+                               this->node_id(), this->level(), this->total_entries(),
+                               (this->is_leaf() ? "LEAF" : "INTERIOR"), snext);
         if (this->has_valid_edge()) {
             fmt::format_to(std::back_inserter(str), " edge={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -231,14 +269,11 @@ public:
 
         for (uint32_t i{0}; i < this->total_entries(); ++i) {
             fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={}]", (print_friendly ? "\n\t" : " "), i + 1,
-                           BtreeNode::get_nth_key< K >(i, false).to_string(),
-                           this->get_nth_value(i, false).to_string());
+                           BtreeNode::get_nth_key< K >(i, false).to_string(), get_nth_value(i, false).to_string());
         }
         return str;
     }
-    std::string to_dot_keys() const override {
-        return to_dot_keys_impl(std::is_same< decltype(std::declval< K& >().key()), uint64_t >{});
-    }
+    std::string to_dot_keys() const override { return to_dot_keys_impl(std::is_same< K, uint64_t >{}); }
 
     std::string to_dot_keys_impl(std::false_type) const { return ""; }
 
@@ -384,9 +419,9 @@ public:
         return (this->node_data_area_const() + (get_nth_obj_size(ind) * ind));
     }
 
-    void set_nth_key(uint32_t ind, const BtreeKey& key) {
+    void set_nth_key(uint32_t ind, BtreeKey* key) {
         uint8_t* entry = this->node_data_area() + (get_nth_obj_size(ind) * ind);
-        sisl::blob const b = key.serialize();
+        sisl::blob const b = key->serialize();
         memcpy(entry, b.cbytes(), b.size());
     }
 

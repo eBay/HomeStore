@@ -58,7 +58,6 @@ private:
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
-    ~RaftReplService() override;
 
     static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
     int32_t compute_raft_follower_priority();
@@ -79,19 +78,13 @@ protected:
                                                          std::set< replica_id_t > const& members) override;
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
-    AsyncReplResult<> replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                     uint64_t trace_id = 0) const override;
+    AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                           uint64_t trace_id = 0) const override;
 
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
                                         uint64_t trace_id = 0) const override;
-
-    ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
-                                                  const replica_member_info& member_out,
-                                                  const replica_member_info& member_in,
-                                                  const std::vector< replica_member_info >& others,
-                                                  uint64_t trace_id = 0) const override;
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
@@ -101,7 +94,7 @@ private:
     void gc_repl_devs();
     void gc_repl_reqs();
     void flush_durable_commit_lsn();
-    void monitor_replace_member_replication_status();
+    void check_replace_member_status();
     void monitor_cert_changes();
     void restart_raft_svc(const std::string filepath, const bool deleted);
     bool wait_for_cert(const std::string& filepath);

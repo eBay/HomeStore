@@ -17,9 +17,34 @@
 #include <homestore/btree/btree.hpp>
 
 namespace homestore {
+
 template < typename K, typename V >
 template < typename ReqT >
-btree_status_t Btree< K, V >::do_get(const BtreeNodePtr& my_node, ReqT& greq) const {
+btree_status_t Btree< K, V >::get(ReqT& greq) {
+    static_assert(std::is_same_v< BtreeSingleGetRequest, ReqT > || std::is_same_v< BtreeGetAnyRequest< K >, ReqT >,
+                  "get api is called with non get request type");
+
+    btree_status_t ret = btree_status_t::success;
+
+    m_btree_lock.lock_shared();
+    BtreeNodePtr root;
+
+    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, greq.m_op_context);
+    if (ret != btree_status_t::success) { goto out; }
+
+    ret = do_get(root, greq);
+out:
+    m_btree_lock.unlock_shared();
+
+#ifndef NDEBUG
+    check_lock_debug();
+#endif
+    return ret;
+}
+
+template < typename K, typename V >
+template < typename ReqT >
+btree_status_t Btree< K, V >::do_get(const BtreeNodePtr& my_node, ReqT& greq) {
     btree_status_t ret{btree_status_t::success};
     bool found{false};
     uint32_t idx;
@@ -34,7 +59,7 @@ btree_status_t Btree< K, V >::do_get(const BtreeNodePtr& my_node, ReqT& greq) co
         if (!found) {
             ret = btree_status_t::not_found;
         } else {
-            if (greq.route_tracing) { append_route_trace(greq, my_node, btree_event_t::READ, idx, idx); }
+            if (greq.m_route_tracing) { append_route_trace(greq, my_node, btree_event_t::READ, idx, idx); }
         }
         unlock_node(my_node, locktype_t::READ);
         return ret;
@@ -47,7 +72,7 @@ btree_status_t Btree< K, V >::do_get(const BtreeNodePtr& my_node, ReqT& greq) co
         std::tie(found, idx) = my_node->find(greq.key(), &child_info, true);
     }
 
-    if (greq.route_tracing) { append_route_trace(greq, my_node, btree_event_t::READ, idx, idx); }
+    if (greq.m_route_tracing) { append_route_trace(greq, my_node, btree_event_t::READ, idx, idx); }
 
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(found, idx, my_node);
     BtreeNodePtr child_node;

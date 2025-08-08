@@ -24,8 +24,6 @@
 #include <homestore/btree/detail/btree_node.hpp>
 #include "device/virtual_dev.hpp"
 
-SISL_LOGGING_DECL(wbcache)
-
 namespace homestore {
 class BtreeNode;
 struct IndexCPContext : public VDevCPContext {
@@ -37,8 +35,7 @@ public:
         uint8_t has_inplace_parent : 1; // Do we have parent_id in the list of ids. It will be first
         uint8_t has_inplace_child : 1;  // Do we have child_id in the list of ids. It will be second
         uint8_t is_parent_meta : 1;     // Is the parent buffer a meta buffer
-        uint8_t free_node_level : 4;    // Free/created node level
-        uint8_t reserved1 : 1;
+        uint8_t reserved1 : 5;
         uint8_t num_new_ids;
         uint8_t num_freed_ids;
         uint8_t reserved{0};
@@ -49,7 +46,6 @@ public:
                 has_inplace_parent{0x0},
                 has_inplace_child{0x0},
                 is_parent_meta{0x0},
-                free_node_level{0x0},
                 num_new_ids{0},
                 num_freed_ids{0},
                 index_ordinal{ordinal} {}
@@ -101,7 +97,8 @@ public:
 
         std::string child_id_string() const {
             auto const idx = (has_inplace_parent == 0x1) ? 1 : 0;
-            return (has_inplace_child == 0x1) ? fmt::format("{}", blk_id(idx).to_integer()) : "empty";
+            return (has_inplace_child == 0x1) ? fmt::format("{}", blk_id(idx).to_integer())
+                                              : "empty";
         }
 
         std::string to_string() const;
@@ -162,8 +159,6 @@ public:
     void prepare_flush_iteration();
     std::optional< IndexBufferPtr > next_dirty();
     std::string to_string();
-    std::string to_string_small();
-    std::string to_string_free_list();
     std::string to_string_with_dags();
     uint16_t num_dags();
     void to_string_dot(const std::string& filename);

@@ -133,6 +133,7 @@ private:
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_all_pdevs;
     std::map< HSDevType, std::vector< PhysicalDev* > > m_pdevs_by_type;
+    uint32_t m_cur_pdev_id{0};
 
     std::map< uint16_t, shared< Chunk > > m_chunks;                 // Chunks organized as array (indexed on chunk id)
     sisl::Bitset m_chunk_id_bm{hs_super_blk::MAX_CHUNKS_IN_SYSTEM}; // Bitmap to keep track of chunk ids available
@@ -154,7 +155,6 @@ public:
 
     bool is_first_time_boot() const { return m_first_time_boot; }
     void format_devices();
-    uint32_t format_single_device(dev_info& dinfo);
     void commit_formatting();
     void load_devices();
     void close_devices();
@@ -165,11 +165,7 @@ public:
     /// @param event_cb Event handler in case of
     /// @return
     shared< VirtualDev > create_vdev(vdev_parameters&& vdev_param);
-    void compose_vparam(uint64_t vdev_id, vdev_parameters& vparam, std::vector< PhysicalDev* > pdevs);
-    std::map< PhysicalDev*, uint32_t > calculate_vdev_chunk_num_on_new_pdevs(shared< VirtualDev > vdev,
-                                                                             std::vector< PhysicalDev* > pdevs,
-                                                                             uint64_t total_chunk_num);
-    void add_pdev_to_vdev(shared< VirtualDev > vdev, PhysicalDev* pdev, uint32_t total_chunk_num_in_pdev);
+
     const Chunk* get_chunk(uint16_t chunk_id) { return get_chunk_mutable(chunk_id); }
 
     Chunk* get_chunk_mutable(uint16_t chunk_id) {

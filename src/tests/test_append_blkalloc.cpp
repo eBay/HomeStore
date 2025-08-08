@@ -44,9 +44,8 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 SISL_OPTIONS_ENABLE(logging, test_append_blkalloc, iomgr, test_common_setup)
-SISL_LOGGING_DECL(test_append_blkalloc)
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};

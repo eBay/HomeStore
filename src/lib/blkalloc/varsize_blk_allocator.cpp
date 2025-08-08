@@ -28,8 +28,6 @@
 
 #include "varsize_blk_allocator.h"
 
-SISL_LOGGING_DECL(blkalloc)
-
 template <>
 struct fmt::formatter< std::thread::id > {
     constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
@@ -586,9 +584,7 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
     auto start_portion_num = m_start_portion_num;
     auto const max_pieces = hints.is_contiguous ? 1u : MultiBlkId::max_pieces;
 
-    blk_count_t const min_blks = hints.is_contiguous && !hints.partial_alloc_ok
-        ? nblks
-        : std::min< blk_count_t >(nblks, hints.min_blks_per_piece);
+    blk_count_t const min_blks = hints.is_contiguous ? nblks : std::min< blk_count_t >(nblks, hints.min_blks_per_piece);
     blk_count_t nblks_remain = nblks;
     do {
         BlkAllocPortion& portion = get_blk_portion(portion_num);
@@ -621,11 +617,9 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
         if (nblks_remain) {
             auto curr_portion = portion_num;
             if (++portion_num == get_num_portions()) { portion_num = 0; }
-            BLKALLOC_LOG(TRACE,
-                         "alloc direct unable to find in curr portion {}, will searching in portion={}, "
-                         "start_portion={},continue={}, out_blkid num_pieces={} , max_pieces={}",
-                         curr_portion, portion_num, start_portion_num, hints.is_contiguous, out_blkid.num_pieces(),
-                         max_pieces);
+            BLKALLOC_LOG(
+                TRACE, "alloc direct unable to find in curr portion {}, will searching in portion={}, start_portion={},continue={}, out_blkid num_pieces={} , max_pieces={}",
+                curr_portion, portion_num, start_portion_num, hints.is_contiguous, out_blkid.num_pieces(), max_pieces);
         }
     } while (nblks_remain && (portion_num != start_portion_num) && (out_blkid.num_pieces() < max_pieces));
 
@@ -779,8 +773,8 @@ void VarsizeBlkAllocator::alloc_sanity_check(blk_count_t nblks, blk_alloc_hints 
         }
         BLKALLOC_REL_ASSERT((nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
                             alloced_nblks, out_blkid.num_pieces());
-        // BLKALLOC_REL_ASSERT((!hints.is_contiguous || (out_blkid.num_pieces() == 1)),
-        //                     "Multiple blkids allocated for contiguous request");
+        BLKALLOC_REL_ASSERT((!hints.is_contiguous || (out_blkid.num_pieces() == 1)),
+                            "Multiple blkids allocated for contiguous request");
     }
 }
 #endif

@@ -28,13 +28,13 @@
 #include <homestore/checkpoint/cp.hpp>
 
 namespace homestore {
-static constexpr size_t MAX_CP_COUNT{2};
-
 class CPMgrMetrics : public sisl::MetricsGroup {
 public:
     explicit CPMgrMetrics() : sisl::MetricsGroup("CPMgr") {
         REGISTER_COUNTER(back_to_back_cps, "back to back cp");
         REGISTER_COUNTER(cp_cnt, "cp cnt");
+        REGISTER_COUNTER(cp_by_timer, "Cp taken because of timer");
+        REGISTER_COUNTER(cp_by_index_full, "Cp taken because of index dirty buffer/free blks fulls");
         REGISTER_HISTOGRAM(cp_latency, "cp latency (in us)");
         register_me_to_farm();
     }
@@ -53,19 +53,13 @@ protected:
 
 public:
     CPContext(CP* cp) : m_cp{cp} {}
+    virtual ~CPContext() = default;
+
     CP* cp() { return m_cp; }
     cp_id_t id() const;
-    void complete(bool status) { m_flush_comp.setValue(status); }
-#ifdef _PRERELEASE
-    void abrupt() {
-        m_cp->m_abrupt_cp.store(true);
-        complete(true);
-    }
-    bool is_abrupt() { return m_cp->m_abrupt_cp.load(); }
-#endif
-    folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 
-    virtual ~CPContext() = default;
+    void complete(bool status);
+    folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 };
 
 class CPCallbacks {
@@ -129,26 +123,38 @@ private:
     // and passes the cp1 to thread2. However, before accessing cp1, thread2 already takes cp2 critical section and then
     // access cp1, then it needs to wind up with cp1 and once cp1 is done, has to go back to cp2. This nesting can
     // potentially happen recursively (although such pattern is not great, it can exist). That is why we use stack here
-    static thread_local std::stack< CP* > t_cp_stack;
+    static iomgr::FiberManagerLib::FiberLocal< std::stack< CP* > > t_cp_stack;
 
 public:
     CPGuard(CPManager* mgr);
-    ~CPGuard();
+    virtual ~CPGuard();
 
     CPGuard(const CPGuard& other);
-    CPGuard operator=(const CPGuard& other);
+    virtual CPGuard operator=(const CPGuard& other);
 
     CPContext* context(cp_consumer_t consumer);
-    CP& operator*();
-    CP* operator->();
-    CP* get();
+    virtual CP* operator->();
+    virtual CP* get();
 };
+
+VENUM(CPTriggerReason, uint8_t,
+      Unknown = 0,               // Caller has not given a reason for it
+      Timer = 1,                 // Time was up
+      IndexBufferFull = 2,       // Index Dirty buffer was full
+      IndexFreeBlksExceeded = 3, // Index blocks freed has hit a limit
+      LogStoreFull = 4,          // Log store has gotten really full
+      DataFreeBlksExceeded = 5,  // Number of free blks in data service exceeded
+      UserDriven = 6,            // User explicitly requested for
+);
 
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
  * @ cp_type :- It is a consumer checkpoint with a base class of cp
  */
 class CPManager {
     friend class CPGuard;
+
+public:
+    static constexpr size_t max_concurent_cps{2};
 
 private:
     CP* m_cur_cp{nullptr}; // Current CP information
@@ -163,7 +169,7 @@ private:
     bool m_in_flush_phase{false};
     bool m_pending_trigger_cp{false}; // Is there is a waiter for a cp flush to start
     folly::SharedPromise< bool > m_pending_trigger_cp_comp;
-    iomgr::io_fiber_t m_timer_fiber;
+    // std::vector< uint64_t > m_trigger_reasons;
 
 public:
     CPManager();
@@ -187,6 +193,8 @@ public:
     /// consumer registeration
     /// @param callbacks : Callbacks denoted by the consumers. Details are provided in CPCallbacks class
     void register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks);
+
+    CPCallbacks* get_consumer(cp_consumer_t consumer_id);
 
     /// @brief Call this method before every IO that needs to be checkpointed. It marks the entrance of critical section
     /// of the returned CP and ensures that until it is exited, flush of the CP will not happen.
@@ -214,13 +222,18 @@ public:
     /// @brief Trigger a checkpoint flush on all subsystems registered. There is only 1 checkpoint per checkpoint
     /// manager. Checkpoint flush will wait for cp to exited all critical io sections.
     /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is being flushed
-    folly::Future< bool > trigger_cp_flush(bool force = false);
+    folly::Future< bool > trigger_cp_flush(bool force = false, CPTriggerReason reason = CPTriggerReason::Unknown);
 
     const std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL >& consumer_list() const {
         return m_cp_cb_table;
     }
 
     iomgr::io_fiber_t pick_blocking_io_fiber() const;
+
+    /// @brief Is the given cp has already finished flushing
+    /// @param cp_id
+    /// @return True or False if cp has flushed or not
+    bool has_cp_flushed(cp_id_t cp_id) const;
 
 private:
     void cp_ref(CP* cp);
@@ -230,10 +243,8 @@ private:
     void cleanup_cp(CP* cp);
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_cp_thread();
-    folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown);
-    uint64_t cp_timer_us();
-    void start_timer_thread();
-    void stop_timer_thread();
+    folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown,
+                                              CPTriggerReason reason = CPTriggerReason::Unknown);
 };
 
 extern CPManager& cp_mgr();

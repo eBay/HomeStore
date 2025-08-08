@@ -16,44 +16,55 @@
  *********************************************************************************/
 #pragma once
 
-#include <homestore/index/index_table.hpp>
+#include <homestore/index_service.hpp>
+#include <homestore/btree/detail/btree_internal.hpp>
 
+template < IndexStore::Type StoreType >
 struct FixedLenBtree {
-    using BtreeType = IndexTable< TestFixedKey, TestFixedValue >;
+    using BtreeType = Btree< TestFixedKey, TestFixedValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = StoreType;
 };
 
+template < IndexStore::Type StoreType >
 struct VarKeySizeBtree {
-    using BtreeType = IndexTable< TestVarLenKey, TestFixedValue >;
+    using BtreeType = Btree< TestVarLenKey, TestFixedValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_KEY;
     static constexpr btree_node_type interior_node_type = btree_node_type::VAR_KEY;
+    static constexpr IndexStore::Type store_type = StoreType;
 };
 
+template < IndexStore::Type StoreType >
 struct VarValueSizeBtree {
-    using BtreeType = IndexTable< TestFixedKey, TestVarLenValue >;
+    using BtreeType = Btree< TestFixedKey, TestVarLenValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = StoreType;
 };
 
+template < IndexStore::Type StoreType >
 struct VarObjSizeBtree {
-    using BtreeType = IndexTable< TestVarLenKey, TestVarLenValue >;
+    using BtreeType = Btree< TestVarLenKey, TestVarLenValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
-    static constexpr btree_node_type interior_node_type = btree_node_type::VAR_OBJECT;
+    static constexpr btree_node_type interior_node_type = btree_node_type::VAR_KEY;
+    static constexpr IndexStore::Type store_type = StoreType;
 };
 
+template < IndexStore::Type StoreType >
 struct PrefixIntervalBtree {
-    using BtreeType = IndexTable< TestIntervalKey, TestIntervalValue >;
+    using BtreeType = Btree< TestIntervalKey, TestIntervalValue >;
     using KeyType = TestIntervalKey;
     using ValueType = TestIntervalValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::PREFIX;
+    static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED_PREFIX;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = StoreType;
 };

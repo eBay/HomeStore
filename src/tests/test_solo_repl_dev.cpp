@@ -21,7 +21,6 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
-#include <iomgr/iomgr_flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/fds/buffer.hpp>
@@ -37,7 +36,6 @@
 #include "common/homestore_utils.hpp"
 #include "test_common/homestore_test_common.hpp"
 #include "replication/service/generic_repl_svc.h"
-#define private public
 #include "replication/repl_dev/solo_repl_dev.h"
 
 ////////////////////////////////////////////////////////////////////////////
@@ -49,9 +47,8 @@
 using namespace homestore;
 using namespace test_common;
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 SISL_OPTIONS_ENABLE(logging, test_solo_repl_dev, iomgr, test_common_setup)
-SISL_LOGGING_DECL(test_solo_repl_dev)
 
 static thread_local std::random_device g_rd{};
 static thread_local std::default_random_engine g_re{g_rd()};
@@ -133,14 +130,12 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, trace_id_t tid) override {}
-        void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                        const replica_member_info& member_in, trace_id_t tid) override {}
+        void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {}
+        void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in, trace_id_t tid) override {}
         void on_destroy(const group_id_t& group_id) override {}
         void notify_committed_lsn(int64_t lsn) override {}
         void on_config_rollback(int64_t lsn) override {}
-        void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {}
+        void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) override {}
     };
 
     class Application : public ReplApplication {
@@ -187,9 +182,6 @@ public:
         m_repl_dev2 = hs()->repl_service().create_repl_dev(m_uuid2, {}).get().value();
     }
 
-    shared< ReplDev > repl_dev1() { return m_repl_dev1; }
-    shared< ReplDev > repl_dev2() { return m_repl_dev2; }
-
     virtual void TearDown() override {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
@@ -231,8 +223,7 @@ public:
         rdev->async_alloc_write(*req->header, req->key ? *req->key : sisl::blob{}, req->write_sgs, req);
     }
 
-    intrusive< test_repl_req > async_write_data_and_journal(uint32_t key_size, uint64_t data_size,
-                                                            uint32_t max_size_per_iov, bool rand_dev = true) {
+    void async_write_data_and_journal(uint32_t key_size, uint64_t data_size, uint32_t max_size_per_iov) {
         data_size = data_size == 0 ? g_block_size : data_size;
         auto req = intrusive< test_repl_req >(new test_repl_req());
         req->header = sisl::make_byte_array(sizeof(test_repl_req::journal_header));
@@ -249,8 +240,7 @@ public:
 
         req->write_sgs = HSTestHelper::create_sgs(data_size, max_size_per_iov, hdr->data_pattern);
 
-        auto rdev = m_repl_dev1;
-        if (rand_dev) { rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2; }
+        auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
 
         auto const cap = hs()->repl_service().get_cap_stats();
         LOGDEBUG("Before write, cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
@@ -265,7 +255,6 @@ public:
             RELEASE_ASSERT(!err, "Error during async_write");
             rdev->async_write_journal(blkids, *req->header, req->key ? *req->key : sisl::blob{}, data_size, req);
         });
-        return req;
     }
 
     void validate_replay(ReplDev& rdev, int64_t lsn, sisl::blob const& header, sisl::blob const& key,
@@ -304,22 +293,6 @@ public:
             } else {
                 m_task_waiter.one_complete();
             }
-        }
-    }
-
-    void validate_sync(shared< ReplDev > rdev, intrusive< test_repl_req > req) {
-        auto const hdr = r_cast< test_repl_req::journal_header const* >(req->header->cbytes());
-        for (const auto& blkid : req->written_blkids) {
-            uint32_t size = blkid.blk_count() * g_block_size;
-            auto read_sgs = HSTestHelper::create_sgs(size, size);
-            auto err = rdev->async_read(blkid, read_sgs, size).get();
-            RELEASE_ASSERT(!err, "Error during async_read");
-            for (auto const& iov : read_sgs.iovs) {
-                HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr->data_pattern);
-                iomanager.iobuf_free(uintptr_cast(iov.iov_base));
-            }
-            LOGDEBUG("[{}] Validating of blkid={} validated successfully", boost::uuids::to_string(rdev->group_id()),
-                     blkid.to_string());
         }
     }
 
@@ -362,36 +335,6 @@ public:
             }
         }
     }
-
-    void trigger_cp_flush() { homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */).get(); }
-    void truncate_and_verify(shared< ReplDev > repl_dev) {
-        auto solo_dev = std::dynamic_pointer_cast< SoloReplDev >(repl_dev);
-        // Truncate and verify the CP LSN's
-        solo_dev->truncate();
-
-        auto& sb = solo_dev->m_rd_sb;
-        RELEASE_ASSERT(sb->last_checkpoint_lsn_2 <= sb->last_checkpoint_lsn_1, "invalid cp lsn");
-        RELEASE_ASSERT(sb->last_checkpoint_lsn_1 <= sb->checkpoint_lsn, "invalid cp lsn");
-
-        auto [last_trunc_lsn, trunc_ld_key, tail_lsn] = solo_dev->m_data_journal->truncate_info();
-        RELEASE_ASSERT(sb->last_checkpoint_lsn_2 == last_trunc_lsn, "invalid trunc lsn");
-    }
-
-#ifdef _PRERELEASE
-    void set_flip_point(const std::string flip_name) {
-        flip::FlipCondition null_cond;
-        flip::FlipFrequency freq;
-        freq.set_count(2);
-        freq.set_percent(100);
-        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
-        LOGINFO("Flip {} set", flip_name);
-    }
-#endif
-
-private:
-#ifdef _PRERELEASE
-    flip::FlipClient m_fc{iomgr_flip::instance()};
-#endif
 };
 
 TEST_F(SoloReplDevTest, TestSingleDataBlock) {
@@ -437,23 +380,6 @@ TEST_F(SoloReplDevTest, TestAsyncWriteJournal) {
     this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 
-#ifdef _PRERELEASE
-TEST_F(SoloReplDevTest, TestTruncate) {
-    // Write and truncate on repl dev.
-    LOGINFO("Step 1: run on worker threads to schedule write and truncate");
-
-    set_flip_point("solo_repl_dev_manual_truncate");
-
-    m_io_runner.set_task([this]() mutable {
-        this->async_write_data_and_journal(0u, g_block_size, g_block_size, false /* rand_dev */);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        truncate_and_verify(repl_dev1());
-    });
-    m_io_runner.execute().get();
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-}
-#endif
-
 SISL_OPTION_GROUP(test_solo_repl_dev,
                   (block_size, "", "block_size", "block size to io",
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"));
@@ -464,13 +390,6 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_solo_repl_dev, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_solo_repl_dev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
-
-    // TODO make it part of the test case.
-    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-        // Checkpoint taken every 1s
-        s.generic.cp_timer_us = 1000000;
-    });
-    HS_SETTINGS_FACTORY().save();
 
     g_block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
     return RUN_ALL_TESTS();

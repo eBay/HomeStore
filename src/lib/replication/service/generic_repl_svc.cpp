@@ -46,9 +46,11 @@ GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) : m
         nullptr);
 }
 
-GenericReplService::~GenericReplService() {
-    std::unique_lock lg{m_rd_map_mtx};
-    m_rd_map.clear();
+void GenericReplService::stop() {
+    {
+        std::unique_lock lg{m_rd_map_mtx};
+        m_rd_map.clear();
+    }
 }
 
 ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
@@ -79,7 +81,6 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -98,12 +99,12 @@ void SoloReplService::start() {
 }
 
 void SoloReplService::stop() {
-    start_stopping();
+    /*start_stopping();
     while (true) {
         auto pending_request_num = get_pending_request_num();
         if (!pending_request_num) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
+    }*/
 
     // stop all repl_devs
     {
@@ -119,7 +120,7 @@ void SoloReplService::stop() {
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
                                                                       std::set< replica_id_t > const& members) {
-    superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
+    superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
     auto rdev = std::make_shared< SoloReplDev >(std::move(rd_sb), false /* load_existing */);
@@ -127,7 +128,7 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
     listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
-    incr_pending_request_num();
+    // incr_pending_request_num();
 
     {
         std::unique_lock lg(m_rd_map_mtx);
@@ -135,12 +136,12 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
         if (!happened) {
             // We should never reach here, as we have failed to emplace in map, but couldn't find entry
             DEBUG_ASSERT(false, "Unable to put the repl_dev in rd map");
-            decr_pending_request_num();
+            // decr_pending_request_num();
             return make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_ALREADY_EXISTS);
         }
     }
 
-    decr_pending_request_num();
+    // decr_pending_request_num();
     return make_async_success< shared< ReplDev > >(rdev);
 }
 
@@ -174,7 +175,7 @@ folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_
 }
 
 void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) {
-    superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
+    superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.load(buf, meta_cookie);
     HS_DBG_ASSERT_EQ(rd_sb->get_magic(), repl_dev_superblk::REPL_DEV_SB_MAGIC, "Invalid rdev metablk, magic mismatch");
     HS_DBG_ASSERT_EQ(rd_sb->get_version(), repl_dev_superblk::REPL_DEV_SB_VERSION, "Invalid version of rdev metablk");
@@ -193,25 +194,15 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     }
 }
 
-AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, std::string& task_id,
-                                                  const replica_member_info& member_out,
-                                                  const replica_member_info& member_in, uint32_t commit_quorum,
-                                                  uint64_t trace_id) const {
+AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                        const replica_member_info& member_in, uint32_t commit_quorum,
+                                                        uint64_t trace_id) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 
-AsyncReplResult<> SoloReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member,
-                                                     bool target, uint32_t commit_quorum, bool wait_and_verify,
-                                                     uint64_t trace_id) const {
+AsyncReplResult<> SoloReplService::flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
+                                    uint32_t commit_quorum, bool wait_and_verify, uint64_t trace_id) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
-}
-
-ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_id, std::string& task_id,
-                                                               const replica_member_info& member_out,
-                                                               const replica_member_info& member_in,
-                                                               const std::vector< replica_member_info >& others,
-                                                               uint64_t trace_id) const {
-    return ReplaceMemberStatus::UNKNOWN;
 }
 
 std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {

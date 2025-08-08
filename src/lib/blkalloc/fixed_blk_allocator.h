@@ -41,7 +41,7 @@ public:
     blk_num_t available_blks() const override;
     blk_num_t get_used_blks() const override;
     blk_num_t get_defrag_nblks() const override;
-    void reset() override {};
+    void reset() override{};
     bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
 

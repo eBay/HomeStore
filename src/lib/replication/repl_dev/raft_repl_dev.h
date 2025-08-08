@@ -15,11 +15,7 @@
 #include "replication/log_store/repl_log_store.h"
 
 namespace homestore {
-
-static constexpr uint64_t max_replace_member_task_id_len = 64;
-
-struct replace_member_task_superblk {
-    char task_id[max_replace_member_task_id_len];
+struct replace_member_ctx_superblk {
     replica_id_t replica_out;
     replica_id_t replica_in;
 };
@@ -34,7 +30,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint64_t last_applied_dsn;      // Last applied data sequence number
     uint8_t destroy_pending;        // Flag to indicate whether the group is in destroy pending state
     repl_lsn_t last_snapshot_lsn;   // Last snapshot LSN follower received from leader
-    replace_member_task_superblk replace_member_task; // Replace members task, used to track the replace member status
+    replace_member_ctx_superblk replace_member_ctx; // Replace members context, used to track the replace member status
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
@@ -43,26 +39,11 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
+ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
+
 struct replace_member_ctx {
-    char task_id[max_replace_member_task_id_len];
     replica_member_info replica_out;
     replica_member_info replica_in;
-
-    replace_member_ctx() = default;
-    replace_member_ctx(const std::string& id, const replica_member_info& out, const replica_member_info& in) {
-        auto len = std::min(id.length(), max_replace_member_task_id_len - 1);
-        std::strncpy(task_id, id.c_str(), len);
-        task_id[len] = '\0';
-        replica_out = out;
-        replica_in = in;
-    }
-};
-
-struct truncate_ctx {
-    repl_lsn_t truncation_upper_limit = 0;
-
-    truncate_ctx() = default;
-    explicit truncate_ctx(repl_lsn_t limit) : truncation_upper_limit(limit) {}
 };
 
 class RaftReplDevMetrics : public sisl::MetricsGroup {
@@ -219,7 +200,6 @@ private:
     // the state machine should committed to before accepting traffic. This threshold ensures that
     // all potential committed log be committed before handling incoming requests.
     std::atomic< repl_lsn_t > m_traffic_ready_lsn{0};
-    std::atomic< repl_lsn_t > m_truncation_upper_limit{0}; // LSN upto which it can truncate the logs in log store
 
     std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
 
@@ -249,16 +229,11 @@ public:
 
     bool bind_data_service();
     bool join_group();
-    AsyncReplResult<> start_replace_member(std::string& task_id, const replica_member_info& member_out,
-                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                           uint64_t trace_id = 0);
-    AsyncReplResult<> complete_replace_member(std::string& task_id, const replica_member_info& member_out,
+    AsyncReplResult<> start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                           uint32_t commit_quorum = 0, uint64_t trace_id = 0);
+    AsyncReplResult<> complete_replace_member(const replica_member_info& member_out,
                                               const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                               uint64_t trace_id = 0);
-    ReplaceMemberStatus get_replace_member_status(std::string& task_id, const replica_member_info& member_out,
-                                                  const replica_member_info& member_in,
-                                                  const std::vector< replica_member_info >& others,
-                                                  uint64_t trace_id = 0);
     AsyncReplResult<> flip_learner_flag(const replica_member_info& member, bool target, uint32_t commit_quorum,
                                         bool wait_and_verify = true, uint64_t trace_id = 0);
     ReplServiceError do_add_member(const replica_member_info& member, uint64_t trace_id = 0);
@@ -267,10 +242,8 @@ public:
                                      uint64_t trace_id = 0);
     ReplServiceError set_priority(const replica_id_t& member, int32_t priority, uint64_t trace_id = 0);
     nuraft::cmd_result_code retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
-                                                       uint64_t trace_id = 0);
+                                                     uint64_t trace_id = 0);
     bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
-
-    std::string get_replace_member_task_id() const { return {m_rd_sb->replace_member_task.task_id}; }
 
     folly::SemiFuture< ReplServiceError > destroy_group();
 
@@ -318,20 +291,13 @@ public:
     repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     repl_lsn_t get_last_append_lsn() override { return raft_server()->get_last_log_idx(); }
-    repl_lsn_t get_truncation_upper_limit() const { return m_truncation_upper_limit.load(); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
-    void set_stage(repl_dev_stage_t stage);
-    repl_dev_stage_t get_stage() const;
-    uint32_t get_quorum_for_commit() const;
 
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
     bool is_ready_for_traffic() const override;
     // purge all resources (e.g., logs in logstore) is a very dangerous operation, it is not supported yet.
     void purge() override { RD_REL_ASSERT(false, "NOT SUPPORTED YET"); }
-    void pause_state_machine(size_t timeout) override;
-    void resume_state_machine() override;
-    bool is_state_machine_paused() override;
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
@@ -406,10 +372,9 @@ public:
     void flush_durable_commit_lsn();
 
     /**
-     * Monitor the replace_member replication status, if the new member is fully synced up and ready to take over,
-     * remove the old member.
+     * Check the replace_member status, if the new member is fully synced up and ready to take over, remove the old member.
      */
-    void monitor_replace_member_replication_status();
+    void check_replace_member_status();
 
     /**
      * \brief This method is called during restart to notify the upper layer
@@ -483,9 +448,6 @@ private:
     void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
-
-    void update_truncation_boundary(repl_req_ptr_t rreq);
-    void propose_truncate_boundary();
 
     void report_blk_metrics_if_needed(repl_req_ptr_t rreq);
     ReplServiceError init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,

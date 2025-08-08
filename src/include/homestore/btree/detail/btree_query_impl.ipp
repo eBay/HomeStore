@@ -19,8 +19,58 @@
 namespace homestore {
 
 template < typename K, typename V >
+btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< std::pair< K, V > >& out_values) {
+    COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
+
+    btree_status_t ret = btree_status_t::success;
+    if (qreq.batch_size() == 0) { return ret; }
+
+    m_btree_lock.lock_shared();
+    BtreeNodePtr root = nullptr;
+    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, qreq.m_op_context);
+    if (ret != btree_status_t::success) { goto out; }
+
+    switch (qreq.query_type()) {
+    case BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY:
+        ret = do_sweep_query(root, qreq, out_values);
+        break;
+
+    case BtreeQueryType::TREE_TRAVERSAL_QUERY:
+        ret = do_traversal_query(root, qreq, out_values);
+        break;
+
+    default:
+        unlock_node(root, locktype_t::READ);
+        LOGERROR("Query type {} is not supported yet", qreq.query_type());
+        break;
+    }
+
+    if ((qreq.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
+         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
+        if (out_values.size()) {
+            K out_last_key = out_values.back().first;
+            if (out_last_key.compare(qreq.input_range().end_key()) >= 0) { ret = btree_status_t::success; }
+            qreq.shift_working_range(std::move(out_last_key), false /* non inclusive*/);
+        } else {
+            DEBUG_ASSERT_NE(ret, btree_status_t::has_more, "Query returned has_more, but no values added")
+        }
+    }
+
+out:
+    m_btree_lock.unlock_shared();
+#ifndef NDEBUG
+    check_lock_debug();
+#endif
+    if ((ret != btree_status_t::success) && (ret != btree_status_t::has_more)) {
+        BT_LOG(ERROR, "btree query failed {}", ret);
+        COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
+    }
+    return ret;
+}
+
+template < typename K, typename V >
 btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRequest< K >& qreq,
-                                             std::vector< std::pair< K, V > >& out_values) const {
+                                             std::vector< std::pair< K, V > >& out_values) {
     btree_status_t ret = btree_status_t::success;
     if (my_node->is_leaf()) {
         BT_NODE_DBG_ASSERT_GT(qreq.batch_size(), 0, my_node);
@@ -40,7 +90,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
                                                                  start_ind, end_ind, &out_values, qreq.filter());
             count += cur_count;
 
-            if (qreq.route_tracing) {
+            if (qreq.m_route_tracing) {
                 append_route_trace(qreq, my_node, btree_event_t::READ, start_ind, start_ind + cur_count);
             }
 
@@ -69,7 +119,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
     BtreeLinkInfo start_child_info;
     [[maybe_unused]] const auto [isfound, idx] = my_node->find(qreq.first_key(), &start_child_info, false);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(isfound, idx, my_node);
-    if (qreq.route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, idx, idx); }
+    if (qreq.m_route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, idx, idx); }
 
     BtreeNodePtr child_node;
     ret = read_and_lock_node(start_child_info.bnode_id(), child_node, locktype_t::READ, locktype_t::READ,
@@ -81,7 +131,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
 
 template < typename K, typename V >
 btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, BtreeQueryRequest< K >& qreq,
-                                                 std::vector< std::pair< K, V > >& out_values) const {
+                                                 std::vector< std::pair< K, V > >& out_values) {
     btree_status_t ret = btree_status_t::success;
     uint32_t idx;
 
@@ -93,7 +143,7 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
         auto cur_count = to_variant_node(my_node)->multi_get(qreq.working_range(),
                                                              qreq.batch_size() - uint32_cast(out_values.size()),
                                                              start_ind, end_ind, &out_values, qreq.filter());
-        if (qreq.route_tracing) {
+        if (qreq.m_route_tracing) {
             append_route_trace(qreq, my_node, btree_event_t::READ, start_ind, start_ind + cur_count);
         }
         unlock_node(my_node, locktype_t::READ);
@@ -117,7 +167,7 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
     BT_NODE_LOG_ASSERT_LE(start_idx, end_idx, my_node);
     idx = start_idx;
 
-    if (qreq.route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, start_idx, end_idx); }
+    if (qreq.m_route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, start_idx, end_idx); }
     while (idx <= end_idx) {
         BtreeLinkInfo child_info;
         my_node->get_nth_value(idx, &child_info, false);

@@ -7,8 +7,7 @@
 
 #include <homestore/blk.h>
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-SISL_OPTIONS_ENABLE(logging, test_blkid, nuraft_mesg)
+SISL_OPTIONS_ENABLE(logging, test_blkid)
 
 SISL_OPTION_GROUP(test_blkid,
                   (num_iterations, "", "num_iterations", "number of iterations",

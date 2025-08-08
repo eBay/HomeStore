@@ -18,9 +18,12 @@
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/facilities/empty.hpp>
 #include <boost/preprocessor/facilities/identity.hpp>
+#include <folly/small_vector.h>
+#include <boost/intrusive_ptr.hpp>
 #include <boost/vmd/is_empty.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/metrics/metrics.hpp>
+#include <homestore/index/index_common.h>
 
 namespace homestore {
 
@@ -51,6 +54,8 @@ namespace homestore {
 #define BT_NODE_LOG(level, node, msg, ...)                                                                             \
     { LOG##level##MOD_FMT(btree, (_BT_LOG_METHOD_IMPL(, this->m_bt_cfg, node)), msg, ##__VA_ARGS__); }
 
+#define SPECIFIC_BT_LOG(level, bt, msg, ...)                                                                           \
+    { LOG##level##MOD_FMT(btree, (_BT_LOG_METHOD_IMPL(, bt.bt_config(), )), msg, ##__VA_ARGS__); }
 #if 0
 #define THIS_BT_LOG(level, req, msg, ...)                                                                              \
     {                                                                                                                  \
@@ -195,28 +200,16 @@ using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 static constexpr uint16_t bt_init_crc_16 = 0x8005;
 
-VENUM(btree_node_type, uint32_t, FIXED = 0, VAR_VALUE = 1, VAR_KEY = 2, VAR_OBJECT = 3, PREFIX = 4, COMPACT = 5)
+VENUM(btree_node_type, uint32_t, FIXED = 0, VAR_VALUE = 1, VAR_KEY = 2, VAR_OBJECT = 3, FIXED_PREFIX = 4, COMPACT = 5)
 
-#ifdef USE_STORE_TYPE
-VENUM(btree_store_type, uint8_t, MEM = 0, SSD = 1)
-#endif
-
-ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, node_read_failed, already_exists, filtered_out,
-     space_not_avail, cp_mismatch, merge_not_required, merge_failed, crc_mismatch, not_supported, node_freed, stopping)
-
-/*ENUM(btree_node_write_type, uint8_t,
-     new_node,     // Node write whenever a new node is created.
-     inplace_leaf, // Node write after an entry is updated/added in leaf without changing btree structure, most common
-     inplace_interior, // Node write after a structure change, but this interior node is changed in-place only.
-     after_shift       // Node write after a structure change, but this node has its keys shifted to other node.
-);*/
+ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, node_read_failed, put_failed, space_not_avail,
+     cp_mismatch, merge_not_required, merge_failed, crc_mismatch, not_supported, node_freed)
 
 class BtreeNode;
+using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
+using BtreeNodeList = folly::small_vector< BtreeNodePtr, 3 >;
 void intrusive_ptr_add_ref(BtreeNode* node);
 void intrusive_ptr_release(BtreeNode* node);
-
-template < typename K, typename V >
-using to_string_cb_t = std::function< std::string(std::vector< std::pair< K, V > > const&) >;
 
 ENUM(btree_event_t, uint8_t, READ, MUTATE, REMOVE, SPLIT, REPAIR, MERGE);
 
@@ -238,62 +231,38 @@ struct trace_route_entry {
 };
 
 struct BtreeConfig {
-    uint32_t m_node_size;
-    uint32_t m_node_data_size;
+    uint32_t m_node_size{0};
     uint8_t m_ideal_fill_pct{90};
     uint8_t m_suggested_min_pct{30};
     uint8_t m_split_pct{50};
     uint32_t m_max_merge_nodes{3};
-#ifdef _PRERELEASE
-    // These are for testing purpose only
-    uint64_t m_max_keys_in_node{0};
-    uint64_t m_min_keys_in_node{0};
-#endif
     bool m_rebalance_turned_on{false};
+    bool m_merge_turned_on{true};
 
     btree_node_type m_leaf_node_type{btree_node_type::VAR_OBJECT};
     btree_node_type m_int_node_type{btree_node_type::VAR_KEY};
-    std::string m_btree_name; // Unique name for the btree
-    bool m_merge_turned_on{true};
-    uint8_t m_max_merge_level{1};
+    IndexStore::Type m_store_type{IndexStore::Type::COPY_ON_WRITE_BTREE};
+    std::string m_btree_name{""}; // Unique name for the btree
 
 private:
     uint32_t m_suggested_min_size; // Precomputed values
     uint32_t m_ideal_fill_size;
 
 public:
-    BtreeConfig(uint32_t node_size, const std::string& btree_name = "") :
-            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name} {
-        set_node_data_size(node_size - 512); // Just put estimate at this point of time.
+    void finalize(uint32_t node_header_size) {
+        m_ideal_fill_size = (uint32_t)((m_node_size - node_header_size) * m_ideal_fill_pct) / 100;
+        m_suggested_min_size = (uint32_t)((m_node_size - node_header_size) * m_suggested_min_pct) / 100;
     }
 
-    virtual ~BtreeConfig() = default;
     uint32_t node_size() const { return m_node_size; };
-
-    void set_node_data_size(uint32_t data_size) {
-        m_node_data_size = data_size;
-        m_ideal_fill_size = (uint32_t)(m_node_data_size * m_ideal_fill_pct) / 100; // Recompute the values
-        m_suggested_min_size = (uint32_t)(m_node_data_size * m_suggested_min_pct) / 100;
-    }
-
     uint32_t split_size(uint32_t filled_size) const { return uint32_cast(filled_size * m_split_pct) / 100; }
     uint32_t ideal_fill_size() const { return m_ideal_fill_size; }
     uint32_t suggested_min_size() const { return m_suggested_min_size; }
-    uint32_t node_data_size() const { return m_node_data_size; }
-
-    void set_ideal_fill_pct(uint8_t pct) {
-        m_ideal_fill_pct = pct;
-        m_ideal_fill_size = (uint32_t)(node_data_size() * m_ideal_fill_pct) / 100;
-    }
-
-    void set_suggested_min_size(uint8_t pct) {
-        m_suggested_min_pct = pct;
-        m_suggested_min_size = (uint32_t)(node_data_size() * m_suggested_min_pct) / 100;
-    }
 
     const std::string& name() const { return m_btree_name; }
     btree_node_type leaf_node_type() const { return m_leaf_node_type; }
     btree_node_type interior_node_type() const { return m_int_node_type; }
+    IndexStore::Type store_type() const { return m_store_type; }
 };
 
 class BtreeMetrics : public sisl::MetricsGroup {
@@ -321,6 +290,8 @@ public:
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
+        REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
+        REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");
         REGISTER_COUNTER(btree_write_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_query_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");

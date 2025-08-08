@@ -28,7 +28,7 @@
 #include "blkalloc/varsize_blk_allocator.h"
 #include "blkalloc/blk_cache_queue.h"
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 using namespace homestore;
 
@@ -50,8 +50,8 @@ public:
     virtual ~BlkCacheQueueTest() override = default;
 
 protected:
-    virtual void SetUp() override {};
-    virtual void TearDown() override {};
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
 
     void SetUp(const uint32_t nslabs, const uint32_t count_per_slab) {
         m_nslabs = nslabs;

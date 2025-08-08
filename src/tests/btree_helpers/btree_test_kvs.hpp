@@ -22,9 +22,9 @@
 #include <array>
 
 #include <homestore/btree/btree_kv.hpp>
-#include <homestore/btree/detail/simple_node.hpp>
-#include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/detail/prefix_node.hpp>
+#include <homestore/btree/node_variant/simple_node.hpp>
+#include <homestore/btree/node_variant/varlen_node.hpp>
+#include <homestore/btree/node_variant/prefix_node.hpp>
 
 static constexpr uint32_t g_max_keysize{100}; // for  node size = 512 : free space : 442 => 100+100+6(record size) = 46%
 static constexpr uint32_t g_max_valsize{100};
@@ -330,10 +330,7 @@ public:
     static uint32_t get_fixed_size() { return sizeof(TestIntervalKey); }
 
     /////////////////// Overriding methods of BtreeIntervalKey /////////////////
-    void shift(int n, void* app_ctx) override {
-        if (willAdditionOverflow< uint32_t >(m_offset, n)) { m_base++; }
-        m_offset += n;
-    }
+    void shift(int n) override { m_offset += n; }
 
     int distance(BtreeKey const& f) const override {
         TestIntervalKey const& from = s_cast< TestIntervalKey const& >(f);
@@ -406,7 +403,6 @@ public:
     virtual ~TestFixedValue() = default;
 
     static TestFixedValue generate_rand() { return TestFixedValue{g_randval_generator(g_re)}; }
-    static TestFixedValue zero() { return TestFixedValue{uint32_t(0)}; }
 
     TestFixedValue& operator=(const TestFixedValue& other) {
         m_val = other.m_val;
@@ -466,7 +462,6 @@ public:
     }
 
     static TestVarLenValue generate_rand() { return TestVarLenValue{gen_random_string(rand_val_size())}; }
-    static TestVarLenValue zero() { return TestVarLenValue{""}; }
 
     sisl::blob serialize() const override {
         sisl::blob b{r_cast< const uint8_t* >(m_val.c_str()), uint32_cast(m_val.size())};
@@ -520,7 +515,6 @@ public:
     static TestIntervalValue generate_rand() {
         return TestIntervalValue{g_randval_generator(g_re), s_cast< uint16_t >(0)};
     }
-    static TestIntervalValue zero() { return TestIntervalValue{0, 0}; }
 
     ///////////////////////////// Overriding methods of BtreeValue //////////////////////////
     TestIntervalValue& operator=(const TestIntervalValue& other) = default;
@@ -555,10 +549,7 @@ public:
     }
 
     ///////////////////////////// Overriding methods of BtreeIntervalValue //////////////////////////
-    void shift(int n, void* app_ctx) override {
-        if (willAdditionOverflow< uint32_t >(m_offset, n)) { m_base_val++; }
-        m_offset += n;
-    }
+    void shift(int n) override { m_offset += n; }
 
     sisl::blob serialize_prefix() const override {
         return sisl::blob{uintptr_cast(const_cast< uint32_t* >(&m_base_val)), uint32_cast(sizeof(uint32_t))};

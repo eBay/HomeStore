@@ -47,8 +47,8 @@ public:
     static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
 
     GenericReplService(cshared< ReplApplication >& repl_app);
-    virtual ~GenericReplService();
     virtual void start() = 0;
+    virtual void stop();
     meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
 
     ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const override;
@@ -57,33 +57,15 @@ public:
     hs_stats get_cap_stats() const override;
     replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
     // void resource_audit() override;
-    virtual void stop() = 0;
-
-    repl_impl_type get_impl_type() const { return m_repl_app->get_impl_type(); }
 
 protected:
     virtual void add_repl_dev(group_id_t group_id, shared< ReplDev > rdev);
     virtual void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) = 0;
-
-    // graceful shutdown related
-protected:
-    std::atomic_bool m_stopping{false};
-    mutable std::atomic_uint64_t pending_request_num{0};
-
-    bool is_stopping() const { return m_stopping.load(); }
-    void start_stopping() { m_stopping = true; }
-
-    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
-
-    void incr_pending_request_num() const { pending_request_num++; }
-    void decr_pending_request_num() const { pending_request_num--; }
 };
 
-// TODO: implement graceful shutdown for soloReplService
 class SoloReplService : public GenericReplService {
 public:
     SoloReplService(cshared< ReplApplication >& repl_app);
-    ~SoloReplService() override;
     void start() override;
     void stop() override;
 
@@ -91,17 +73,12 @@ public:
                                                          std::set< replica_id_t > const& members) override;
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
-    AsyncReplResult<> replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                     uint64_t trace_id = 0) const override;
+    AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                           uint64_t trace_id = 0) const override;
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
                                         uint64_t trace_id = 0) const override;
-    ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
-                                                  const replica_member_info& member_out,
-                                                  const replica_member_info& member_in,
-                                                  const std::vector< replica_member_info >& others,
-                                                  uint64_t trace_id = 0) const override;
 };
 
 class SoloReplServiceCPHandler : public CPCallbacks {

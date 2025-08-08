@@ -24,10 +24,12 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <queue>
 #include <optional>
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
+#include <iomgr/fiber_lib.hpp>
 #include <nlohmann/json.hpp>
 #include <homestore/homestore_decl.hpp>
 
@@ -80,8 +82,8 @@ class MetaBlkService {
 private:
     static bool s_self_recover;
     std::shared_ptr< VirtualDev > m_sb_vdev; // super block vdev
-    std::mutex m_meta_mtx;                   // mutex to access to meta_map;
-    std::mutex m_shutdown_mtx;               // protects concurrent operations between recover and shutdown;
+    iomgr::FiberManagerLib::mutex m_meta_mtx;     // mutex to access to meta_map;
+    iomgr::FiberManagerLib::mutex m_shutdown_mtx; // protects concurrent operations between recover and shutdown;
     meta_blk_map_t m_meta_blks;              // subsystem type to meta blk map;
     ovf_hdr_map_t m_ovf_blk_hdrs;            // ovf blk map;
     client_info_map_t m_sub_info;            // map of callbacks

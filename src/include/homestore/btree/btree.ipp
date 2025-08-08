@@ -36,252 +36,117 @@
 
 namespace homestore {
 template < typename K, typename V >
-Btree< K, V >::Btree(const BtreeConfig& cfg) :
-        m_metrics{cfg.name().c_str()}, m_node_size{cfg.node_size()}, m_bt_cfg{cfg} {
-    m_bt_cfg.set_node_data_size(cfg.node_size() - sizeof(persistent_hdr_t));
+Btree< K, V >::Btree(BtreeConfig const& cfg, uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size) :
+        BtreeBase::BtreeBase(cfg, uuid, parent_uuid, user_sb_size) {
+    create_root_node();
 }
 
 template < typename K, typename V >
-Btree< K, V >::~Btree() = default;
+Btree< K, V >::Btree(BtreeConfig const& cfg, superblk< IndexSuperBlock >&& sb) :
+        BtreeBase::BtreeBase(cfg, std::move(sb)) {
+    if (m_root_node_info.bnode_id() == empty_bnodeid) {
+        BT_LOG(INFO, "Loaded an empty btree, we are creating a new root node");
+        create_root_node();
+    }
+}
 
+template < typename K, typename V >
+Btree< K, V >::~Btree() {
+    if (is_ephemeral()) { destroy(); }
+}
+
+#if 0
 template < typename K, typename V >
 void Btree< K, V >::set_root_node_info(const BtreeLinkInfo& info) {
     m_root_node_info = info;
 }
+#endif
 
 template < typename K, typename V >
-uint16_t Btree< K, V >::get_btree_depth() const {return m_btree_depth;}
-
-template < typename K, typename V >
-std::pair<uint64_t,uint64_t> Btree< K, V >::get_num_nodes() const {
-    return {m_total_interior_nodes, m_total_leaf_nodes};
-}
-
-
-template < typename K, typename V >
-std::pair< btree_status_t, uint64_t > Btree< K, V >::destroy_btree(void* context) {
-    btree_status_t ret{btree_status_t::success};
-    uint64_t n_freed_nodes{0};
-
-    bool expected = false;
-    if (!m_destroyed.compare_exchange_strong(expected, true)) {
-        BT_LOG(DEBUG, "Btree is already being destroyed, ignorining this request");
-        return std::make_pair(btree_status_t::not_found, 0);
-    }
-    ret = do_destroy(n_freed_nodes, context);
-    if (ret == btree_status_t::success) {
-        BT_LOG(DEBUG, "btree(root: {}) {} nodes destroyed successfully", m_root_node_info.bnode_id(), n_freed_nodes);
-    } else {
-        m_destroyed = false;
-        BT_LOG(ERROR, "btree(root: {}) nodes destroyed failed, ret: {}", m_root_node_info.bnode_id(), ret);
-    }
-
-    return std::make_pair(ret, n_freed_nodes);
+btree_status_t Btree< K, V >::put_one(BtreeKey const& key, BtreeValue const& value, btree_put_type put_type,
+                                      BtreeValue* existing_val, put_filter_cb_t filter_cb) {
+    BtreeSinglePutRequest req{*this, &key, &value, put_type, existing_val, std::move(filter_cb)};
+    auto const status = put(req);
+    return status;
 }
 
 template < typename K, typename V >
-template < typename ReqT >
-btree_status_t Btree< K, V >::put(ReqT& put_req) {
-    static_assert(std::is_same_v< ReqT, BtreeSinglePutRequest > || std::is_same_v< ReqT, BtreeRangePutRequest< K > >,
-                  "put api is called with non put request type");
-    COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
-    auto acq_lock = locktype_t::READ;
-    bool is_leaf = false;
-
-    m_btree_lock.lock_shared();
-    btree_status_t ret = btree_status_t::success;
-
-retry:
-#ifndef NDEBUG
-    check_lock_debug();
-#endif
-    BT_LOG_ASSERT_EQ(bt_thread_vars()->rd_locked_nodes.size(), 0);
-    BT_LOG_ASSERT_EQ(bt_thread_vars()->wr_locked_nodes.size(), 0);
-
-    BtreeNodePtr root;
-    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, put_req.m_op_context);
-    if (ret != btree_status_t::success) { goto out; }
-    is_leaf = root->is_leaf();
-
-    if (is_split_needed(root, put_req)) {
-        // Time to do the split of root.
-        unlock_node(root, acq_lock);
-        m_btree_lock.unlock_shared();
-        ret = check_split_root(put_req);
-        BT_LOG_ASSERT_EQ(bt_thread_vars()->rd_locked_nodes.size(), 0);
-        BT_LOG_ASSERT_EQ(bt_thread_vars()->wr_locked_nodes.size(), 0);
-
-        // We must have gotten a new root, need to start from scratch.
-        m_btree_lock.lock_shared();
-        if (ret != btree_status_t::success) {
-            LOGERROR("root split failed btree name {}", m_bt_cfg.name());
-            goto out;
-        }
-
-        goto retry;
-    } else if ((is_leaf) && (acq_lock != locktype_t::WRITE)) {
-        // Root is a leaf, need to take write lock, instead of read, retry
-        unlock_node(root, acq_lock);
-        acq_lock = locktype_t::WRITE;
-        goto retry;
-    } else {
-        ret = do_put(root, acq_lock, put_req);
-        if ((ret == btree_status_t::retry) || (ret == btree_status_t::has_more)) {
-            // Need to start from top down again, since there was a split or we have more to insert in case of range put
-            acq_lock = locktype_t::READ;
-            BT_LOG(TRACE, "retrying put operation");
-            BT_LOG_ASSERT_EQ(bt_thread_vars()->rd_locked_nodes.size(), 0);
-            BT_LOG_ASSERT_EQ(bt_thread_vars()->wr_locked_nodes.size(), 0);
-            goto retry;
-        }
-    }
-
-out:
-    m_btree_lock.unlock_shared();
-#ifndef NDEBUG
-    check_lock_debug();
-#endif
-    if (ret != btree_status_t::success && ret != btree_status_t::cp_mismatch) {
-        BT_LOG(ERROR, "btree put failed {}", ret);
-        COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
-    }
-
-    return ret;
+std::pair< btree_status_t, PutPaginateCookie< K > >
+Btree< K, V >::put_range(BtreeKeyRange< K >&& inp_range, btree_put_type put_type, BtreeValue const& value,
+                         uint32_t batch_size, put_filter_cb_t filter_cb) {
+    auto req_ptr = std::make_unique< BtreeRangePutRequest< K > >(*this, std::move(inp_range), put_type, &value,
+                                                                 batch_size, std::move(filter_cb));
+    auto const status = put(*req_ptr);
+    return std::pair(status, std::move(req_ptr));
 }
 
 template < typename K, typename V >
-template < typename ReqT >
-btree_status_t Btree< K, V >::get(ReqT& greq) const {
-    static_assert(std::is_same_v< BtreeSingleGetRequest, ReqT > || std::is_same_v< BtreeGetAnyRequest< K >, ReqT >,
-                  "get api is called with non get request type");
-    COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
-    btree_status_t ret = btree_status_t::success;
-
-    m_btree_lock.lock_shared();
-    BtreeNodePtr root;
-
-    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, greq.m_op_context);
-    if (ret != btree_status_t::success) { goto out; }
-
-    ret = do_get(root, greq);
-out:
-    m_btree_lock.unlock_shared();
-
-#ifndef NDEBUG
-    check_lock_debug();
-#endif
-    return ret;
+btree_status_t Btree< K, V >::put_range_next(PutPaginateCookie< K >& cookie) {
+    auto const status = put(*cookie);
+    if (status != btree_status_t::has_more) { cookie.reset(); }
+    return status;
 }
 
 template < typename K, typename V >
-template < typename ReqT >
-btree_status_t Btree< K, V >::remove(ReqT& req) {
-    static_assert(std::is_same_v< ReqT, BtreeSingleRemoveRequest > ||
-                      std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > > ||
-                      std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >,
-                  "remove api is called with non remove request type");
-    COUNTER_INCREMENT(m_metrics, btree_remove_ops_count, 1);
-    locktype_t acq_lock = locktype_t::READ;
-    m_btree_lock.lock_shared();
-
-retry:
-    btree_status_t ret = btree_status_t::success;
-    BtreeNodePtr root;
-    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, req.m_op_context);
-    if (ret != btree_status_t::success) { goto out; }
-
-    if (root->total_entries() == 0) {
-        if (root->is_leaf()) {
-            // There are no entries in btree.
-            unlock_node(root, acq_lock);
-            m_btree_lock.unlock_shared();
-            ret = btree_status_t::not_found;
-            goto out;
-        }
-
-        BT_NODE_LOG_ASSERT_EQ(root->has_valid_edge(), true, root, "Orphaned root with no entries and no edge");
-        unlock_node(root, acq_lock);
-        m_btree_lock.unlock_shared();
-
-        ret = check_collapse_root(req);
-        if (ret != btree_status_t::success && ret != btree_status_t::merge_not_required) {
-            LOGERROR("check collapse read failed btree name {}", m_bt_cfg.name());
-            goto out;
-        }
-
-        // We must have gotten a new root, need to start from scratch.
-        m_btree_lock.lock_shared();
-        goto retry;
-    } else if (root->is_leaf() && (acq_lock != locktype_t::WRITE)) {
-        // Root is a leaf, need to take write lock, instead of read, retry
-        unlock_node(root, acq_lock);
-        acq_lock = locktype_t::WRITE;
-        goto retry;
-    } else {
-        ret = do_remove(root, acq_lock, req);
-        if (ret == btree_status_t::retry) {
-            // Need to start from top down again, since there was a merge nodes in-between
-            acq_lock = locktype_t::READ;
-            goto retry;
-        }
-    }
-    m_btree_lock.unlock_shared();
-
-out:
-#ifndef NDEBUG
-    check_lock_debug();
-#endif
-    return ret;
+btree_status_t Btree< K, V >::get_one(BtreeKey const& key, BtreeValue* out_val) {
+    BtreeSingleGetRequest req{*this, &key, out_val};
+    return get(req);
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< std::pair< K, V > >& out_values) const {
-    COUNTER_INCREMENT(m_metrics, btree_query_ops_count, 1);
+btree_status_t Btree< K, V >::get_any(BtreeKeyRange< K >&& inp_range, BtreeKey* out_key, BtreeValue* out_val) {
+    BtreeGetAnyRequest< K > req{*this, std::move(inp_range), out_key, out_val};
+    return get(req);
+}
 
-    btree_status_t ret = btree_status_t::success;
-    if (qreq.batch_size() == 0) { return ret; }
+template < typename K, typename V >
+btree_status_t Btree< K, V >::remove_one(BtreeKey const& key, BtreeValue* out_val) {
+    BtreeSingleRemoveRequest req{*this, &key, out_val};
+    return remove(req);
+}
 
-    m_btree_lock.lock_shared();
-    BtreeNodePtr root = nullptr;
-    ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, qreq.m_op_context);
-    if (ret != btree_status_t::success) { goto out; }
+template < typename K, typename V >
+btree_status_t Btree< K, V >::remove_any(BtreeKeyRange< K >&& inp_range, BtreeKey* out_key, BtreeValue* out_val) {
+    BtreeRemoveAnyRequest< K > req{*this, std::move(inp_range), out_key, out_val};
+    return remove(req);
+}
 
-    switch (qreq.query_type()) {
-    case BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY:
-        ret = do_sweep_query(root, qreq, out_values);
-        break;
+template < typename K, typename V >
+std::pair< btree_status_t, RemovePaginateCookie< K > >
+Btree< K, V >::remove_range(BtreeKeyRange< K >&& inp_range, uint32_t batch_size, remove_filter_cb_t filter_cb) {
+    auto req_ptr =
+        std::make_unique< BtreeRangeRemoveRequest< K > >(*this, std::move(inp_range), batch_size, std::move(filter_cb));
+    auto status = remove(*req_ptr);
+    return std::pair(status, std::move(req_ptr));
+}
 
-    case BtreeQueryType::TREE_TRAVERSAL_QUERY:
-        ret = do_traversal_query(root, qreq, out_values);
-        break;
+template < typename K, typename V >
+btree_status_t Btree< K, V >::remove_range_next(RemovePaginateCookie< K >& cookie) {
+    auto const status = remove(*cookie);
+    if (status != btree_status_t::has_more) { cookie.reset(); }
+    return status;
+}
 
-    default:
-        unlock_node(root, locktype_t::READ);
-        LOGERROR("Query type {} is not supported yet", qreq.query_type());
-        break;
-    }
+template < typename K, typename V >
+std::pair< btree_status_t, QueryPaginateCookie< K > >
+Btree< K, V >::query(BtreeKeyRange< K >&& inp_range,            // Input range to query for
+                     std::vector< std::pair< K, V > >& out_kvs, // Results will be appended
+                     uint32_t batch_size,                       // Batch size, default the whole set
+                     BtreeQueryType query_type,                 // See query_impl for more details
+                     get_filter_cb_t filter_cb                  // Any filtering condition while picking the result set
+) {
+    auto req_ptr = std::make_unique< BtreeQueryRequest< K > >(*this, std::move(inp_range), query_type, batch_size,
+                                                              std::move(filter_cb));
+    auto status = query(*req_ptr, out_kvs);
+    return std::pair(status, std::move(req_ptr));
+}
 
-    if ((qreq.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
-         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
-        if (out_values.size()) {
-            K out_last_key = out_values.back().first;
-            if (out_last_key.compare(qreq.input_range().end_key()) >= 0) { ret = btree_status_t::success; }
-            qreq.shift_working_range(std::move(out_last_key), false /* non inclusive*/);
-        } else {
-            DEBUG_ASSERT_NE(ret, btree_status_t::has_more, "Query returned has_more, but no values added")
-        }
-    }
-
-out:
-    m_btree_lock.unlock_shared();
-#ifndef NDEBUG
-    check_lock_debug();
-#endif
-    if ((ret != btree_status_t::success) && (ret != btree_status_t::has_more)) {
-        BT_LOG(ERROR, "btree query failed {}", ret);
-        COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
-    }
-    return ret;
+template < typename K, typename V >
+btree_status_t Btree< K, V >::query_next(QueryPaginateCookie< K >& cookie, std::vector< std::pair< K, V > >& out_kvs) {
+    if (cookie == nullptr) { return btree_status_t::success; }
+    auto const status = query(*cookie, out_kvs);
+    if (status != btree_status_t::has_more) { cookie.reset(); }
+    return status;
 }
 
 #if 0
@@ -317,39 +182,40 @@ nlohmann::json Btree< K, V >::get_status(int log_level) const {
 }
 
 template < typename K, typename V >
-void Btree< K, V >::dump_tree_to_file(const std::string& file) const {
-    std::string buf;
-    m_btree_lock.lock_shared();
-    to_string(m_root_node_info.bnode_id(), buf);
-    m_btree_lock.unlock_shared();
-
-    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
-    if (!file.empty()) {
-        std::ofstream o(file);
-        o.write(buf.c_str(), buf.size());
-        o.flush();
-    }
+nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
+    return m_metrics.get_result_in_json(updated);
 }
 
 template < typename K, typename V >
-std::string Btree< K, V >::to_custom_string(to_string_cb_t< K, V > const& cb) const {
+std::string Btree< K, V >::to_string() const {
     std::string buf;
     m_btree_lock.lock_shared();
-    to_custom_string_internal(m_root_node_info.bnode_id(), buf, cb);
+    to_string_internal(m_root_node_info.bnode_id(), buf);
+    m_btree_lock.unlock_shared();
+    BT_LOG(DEBUG, "Pre order traversal of tree:\n<{}>", buf);
+
+    return buf;
+}
+
+template < typename K, typename V >
+std::string Btree< K, V >::to_custom_string(BtreeNode::ToStringCallback< K, V > cb) const {
+    std::string buf;
+    m_btree_lock.lock_shared();
+    to_custom_string_internal(m_root_node_info.bnode_id(), buf, std::move(cb));
     m_btree_lock.unlock_shared();
 
     return buf;
 }
 
 template < typename K, typename V >
-std::string Btree< K, V >::visualize_tree_keys(const std::string& file) const {
+std::string Btree< K, V >::to_digraph_visualize_format() const {
     std::map< uint32_t, std::vector< uint64_t > > level_map;
     std::map< uint64_t, BtreeVisualizeVariables > info_map;
     std::string buf = "digraph G\n"
                       "{ \n"
                       "ranksep = 3.0;\n"
                       R"(graph [splines="polyline"];
-)";
+                    )";
 
     m_btree_lock.lock_shared();
     to_dot_keys(m_root_node_info.bnode_id(), buf, level_map, info_map);
@@ -373,17 +239,38 @@ std::string Btree< K, V >::visualize_tree_keys(const std::string& file) const {
     }
 
     buf += "\n" + result + " }\n";
-    if (!file.empty()) {
-        std::ofstream o(file);
-        o.write(buf.c_str(), buf.size());
-        o.flush();
-    }
     return buf;
 }
 
 template < typename K, typename V >
-nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
-    return m_metrics.get_result_in_json(updated);
+void Btree< K, V >::dump(const std::string& file, std::string format, BtreeNode::ToStringCallback< K, V > cb) const {
+    if (file.empty()) {
+        BT_LOG(ERROR, "Wrong file name to dump btree");
+        return;
+    }
+
+    std::string buf;
+    if (format == "string") {
+        BT_LOG(DEBUG, "Dumping btree in string format");
+        buf = to_string();
+    } else if (format == "dot") {
+        BT_LOG(DEBUG, "Dumping btree to dot format");
+        buf = to_digraph_visualize_format();
+    } else if (format == "custom") {
+        if (cb == nullptr) {
+            BT_LOG(WARN, "Custom format requested but no callback provided, dumping as string");
+            buf = to_string();
+        } else {
+            buf = to_custom_string(std::move(cb));
+        }
+    } else {
+        BT_LOG(ERROR, "Invalid format={} to dump btree", format);
+        return;
+    }
+
+    std::ofstream o(file);
+    o.write(buf.c_str(), buf.size());
+    o.flush();
 }
 
 template < typename K, typename V >
@@ -392,8 +279,25 @@ bnodeid_t Btree< K, V >::root_node_id() const {
 }
 
 template < typename K, typename V >
-uint64_t Btree< K, V >::root_link_version() const {
-    return m_root_node_info.link_version();
+uint64_t Btree< K, V >::count_keys(bnodeid_t bnodeid) const {
+    BtreeNodePtr node;
+    locktype_t acq_lock = locktype_t::READ;
+    if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return 0; }
+    uint64_t result = 0;
+    if (!node->is_leaf()) {
+        uint32_t i = 0;
+        while (i < node->total_entries()) {
+            BtreeLinkInfo p;
+            node->get_nth_value(i, &p, false);
+            result += count_keys(p.bnode_id());
+            ++i;
+        }
+        if (node->has_valid_edge()) { result += count_keys(node->edge_id()); }
+    } else {
+        result = node->total_entries();
+    }
+    unlock_node(node, acq_lock);
+    return result;
 }
 
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.

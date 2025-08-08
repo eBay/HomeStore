@@ -31,7 +31,6 @@
 #include <homestore/homestore_decl.hpp>
 
 #include "hs_super_blk.h"
-SISL_LOGGING_DECL(device)
 
 namespace homestore {
 class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {

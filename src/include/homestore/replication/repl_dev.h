@@ -38,20 +38,17 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
-      ERRORED = 1 << 5,       // Error has happened and cleaned up
-      DATA_COMMITTED = 1 << 6 // Data has already been committed, used in duplication handling, will skip commit_blk
+      ERRORED = 1 << 5,        // Error has happened and cleaned up
+      DATA_COMMITTED = 1 << 6  // Data has already been committed, used in duplication handling, will skip commit_blk
 )
 
 VENUM(journal_type_t, uint16_t,
-      HS_DATA_LINKED = 0,           // Linked data where each entry will store physical blkid where data reside
-      HS_DATA_INLINED = 1,          // Data is inlined in the header of journal entry
-      HS_CTRL_DESTROY = 2,          // Control message to destroy the repl_dev
-      HS_CTRL_START_REPLACE = 3,    // Control message to start replace a member
-      HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member,
-      HS_CTRL_UPDATE_TRUNCATION_BOUNDARY = 5, // Control message to update truncation boundary
+      HS_DATA_LINKED = 0,  // Linked data where each entry will store physical blkid where data reside
+      HS_DATA_INLINED = 1, // Data is inlined in the header of journal entry
+      HS_CTRL_DESTROY = 2, // Control message to destroy the repl_dev
+      HS_CTRL_START_REPLACE = 3, // Control message to start replace a member
+      HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member
 )
-
-ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, UNREADY, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
 // magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
 static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
@@ -120,7 +117,7 @@ public:
     repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
     ReplServiceError init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-                          sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
+              sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener);
 
     /////////////////////// All getters ///////////////////////
     repl_key const& rkey() const { return m_rkey; }
@@ -372,12 +369,12 @@ public:
     virtual void on_destroy(const group_id_t& group_id) = 0;
 
     /// @brief Called when start replace member.
-    virtual void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                         const replica_member_info& member_in, trace_id_t tid) = 0;
+    virtual void on_start_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                         trace_id_t tid) = 0;
 
     /// @brief Called when complete replace member.
-    virtual void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                            const replica_member_info& member_in, trace_id_t tid) = 0;
+    virtual void on_complete_replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                            trace_id_t tid) = 0;
 
     /// @brief Called when the snapshot is being created by nuraft
     virtual AsyncReplResult<> create_snapshot(shared< snapshot_context > context) = 0;
@@ -417,8 +414,8 @@ public:
 
     /// @brief ask upper layer to handle no_space_left event
     // @param lsn - on which repl_lsn no_space_left happened
-    // @param header - on which header no_space_left happened when trying to allocate blk
-    virtual void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) = 0;
+    // @param chunk_id - on which chunk no_space_left happened
+    virtual void on_no_space_left(repl_lsn_t lsn, chunk_num_t chunk_id) = 0;
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id) {};
@@ -544,25 +541,8 @@ public:
     /// @return true if ready, false otherwise
     virtual bool is_ready_for_traffic() const = 0;
 
-    /// @brief Set the stage of this repl dev, this helps user to set unready state when the condition is not met(e.g.
-    /// disk is unhealthy) and vice versa which supports to run in degrade mode.
-    virtual void set_stage(repl_dev_stage_t stage) = 0;
-
-    /// @brief Get the stage of this repl dev.
-    /// @return current stage of this repl dev.
-    virtual repl_dev_stage_t get_stage() const = 0;
-
     /// @brief Clean up resources on this repl dev.
     virtual void purge() = 0;
-
-    /// @brief Pause repl dev state machine, timeout is in milliseconds.
-    virtual void pause_state_machine(size_t timeout) = 0;
-
-    /// @brief Resume repl dev state machine.
-    virtual void resume_state_machine() = 0;
-
-    /// @brief Check if the state machine is paused.
-    virtual bool is_state_machine_paused() = 0;
 
     virtual std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) = 0;
 
@@ -579,6 +559,7 @@ public:
 
     // we have no shutdown for repl_dev, since shutdown repl_dev is done by repl_service
     void stop() {
+#if 0
         start_stopping();
         while (true) {
             auto pending_request_num = get_pending_request_num();
@@ -586,6 +567,7 @@ public:
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
+#endif
     }
 
     // complete all the requests that are in progress and start refusing new reqs
@@ -599,19 +581,6 @@ public:
 
 protected:
     shared< ReplDevListener > m_listener;
-
-    // graceful shutdown related
-protected:
-    std::atomic_bool m_stopping{false};
-    mutable std::atomic_uint64_t pending_request_num{0};
-
-    bool is_stopping() const { return m_stopping.load(); }
-    void start_stopping() { m_stopping = true; }
-
-    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
-
-    void incr_pending_request_num() const { pending_request_num++; }
-    void decr_pending_request_num() const { pending_request_num--; }
 };
 
 } // namespace homestore

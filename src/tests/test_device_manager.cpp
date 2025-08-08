@@ -35,7 +35,7 @@
 #include "device/virtual_dev.hpp"
 
 using namespace homestore;
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 SISL_OPTIONS_ENABLE(logging, test_device_manager, iomgr)
 
 SISL_OPTION_GROUP(test_device_manager,
@@ -79,11 +79,9 @@ public:
                 return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo_tmp, nullptr /* event_cb */, false);
             });
         if (m_dmgr->is_first_time_boot()) {
-            LOGINFO("First time boot, formatting devices");
             m_dmgr->format_devices();
             m_dmgr->commit_formatting();
         } else {
-            LOGINFO("Not first time boot, loading devices");
             m_dmgr->load_devices();
         }
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
@@ -97,12 +95,6 @@ public:
         setup_device_manager();
     }
 
-    void add_data_file(std::string fname, uint64_t data_dev_size) {
-        init_file(fname, data_dev_size);
-        m_data_dev_names.emplace_back(fname);
-        m_dev_infos.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
-    }
-
     virtual void SetUp() override {
         auto const data_ndevices = SISL_OPTIONS["num_data_devs"].as< uint32_t >();
         auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
@@ -111,7 +103,9 @@ public:
                 homestore::in_bytes(data_dev_size));
         for (uint32_t i{0}; i < data_ndevices; ++i) {
             auto fname = std::string{"/tmp/test_devmgr_data_" + std::to_string(i + 1)};
-            add_data_file(fname, data_dev_size);
+            init_file(fname, data_dev_size);
+            m_data_dev_names.emplace_back(fname);
+            m_dev_infos.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
         }
 
         setup_device_manager();
@@ -124,7 +118,7 @@ public:
         remove_files(m_data_dev_names);
     }
 
-    void validate_striped_vdevs(uint32_t expected_pdev_num = 3) {
+    void validate_striped_vdevs() {
         for (auto& vdev : m_vdevs) {
             auto chunks = vdev->get_chunks();
             ASSERT_EQ(vdev->get_total_chunk_num(), m_pdevs.size() * 2)
@@ -140,8 +134,6 @@ public:
                 if (!inserted) { ++(it->second); }
             }
 
-            ASSERT_TRUE(chunks_in_pdev_count.size() == expected_pdev_num)
-                << "pdev num mismatch, expected " << expected_pdev_num << " but found " << chunks_in_pdev_count.size();
             for (const auto& [pdev, count] : chunks_in_pdev_count) {
                 ASSERT_EQ(count, 2) << "Every pdev should have exactly 2 chunks, that has not happened here";
             }
@@ -188,243 +180,6 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
 
     LOGINFO("Step 4: Post Restart validate if all vdevs are loaded with correct number of chunks");
     this->validate_striped_vdevs();
-}
-
-TEST_F(DeviceMgrTest, ReplaceDeviceWithEmptyDevice) {
-    static constexpr uint32_t num_test_vdevs = 5;
-    uint64_t avail_size{0};
-    for (auto& pdev : m_pdevs) {
-        avail_size += pdev->data_size();
-    }
-
-    uint32_t size_pct = 4;
-    uint64_t remain_size = avail_size;
-
-    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
-    for (uint32_t i = 0; i < num_test_vdevs; ++i) {
-        std::string name = "test_vdev_" + std::to_string(i + 1);
-        uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);
-        remain_size -= size;
-        size_pct *= 2; // Double the next vdev size
-
-        LOGINFO("Step 1a: Creating vdev of name={} with size={}", name, in_bytes(size));
-        auto vdev =
-            m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
-                                                           .vdev_size = size,
-                                                           .num_chunks = uint32_cast(m_pdevs.size() * 2),
-                                                           .blk_size = 4096,
-                                                           .dev_type = HSDevType::Data,
-                                                           .alloc_type = blk_allocator_type_t::none,
-                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
-                                                           .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
-                                                           .context_data = sisl::blob{}});
-        m_vdevs.push_back(std::move(vdev));
-    }
-
-    LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
-    this->validate_striped_vdevs();
-
-    std::set< uint32_t > pdev_ids;
-    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-
-    auto fpath = m_data_dev_names[0];
-    m_data_dev_names.erase(m_data_dev_names.begin());
-    auto dinfo = m_dev_infos[0];
-    m_dev_infos.erase(m_dev_infos.begin());
-    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath);
-    if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
-    LOGINFO("Step 3b: Restart dmgr", fpath);
-    this->restart();
-
-    LOGINFO("Step 4: Validate after one device is removed");
-    this->validate_striped_vdevs(2);
-
-    LOGINFO("Step 5: Recreate file to simulate a new device", fpath);
-    auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-    this->add_data_file(fpath, data_dev_size);
-
-    LOGINFO("Step 6: Restart and validate if new device can be added to vdevs");
-    this->restart();
-    this->validate_striped_vdevs();
-
-    LOGINFO("Step 7: Restart and validate again");
-    this->restart();
-    this->validate_striped_vdevs();
-
-    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 1)
-        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
-}
-
-TEST_F(DeviceMgrTest, ReplaceTwoDevicesAtOnce) {
-    static constexpr uint32_t num_test_vdevs = 5;
-    uint64_t avail_size{0};
-    for (auto& pdev : m_pdevs) {
-        avail_size += pdev->data_size();
-    }
-
-    uint32_t size_pct = 4;
-    uint64_t remain_size = avail_size;
-
-    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
-    for (uint32_t i = 0; i < num_test_vdevs; ++i) {
-        std::string name = "test_vdev_" + std::to_string(i + 1);
-        uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);
-        remain_size -= size;
-        size_pct *= 2; // Double the next vdev size
-
-        LOGINFO("Step 1a: Creating vdev of name={} with size={}", name, in_bytes(size));
-        auto vdev =
-            m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
-                                                           .vdev_size = size,
-                                                           .num_chunks = uint32_cast(m_pdevs.size() * 2),
-                                                           .blk_size = 4096,
-                                                           .dev_type = HSDevType::Data,
-                                                           .alloc_type = blk_allocator_type_t::none,
-                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
-                                                           .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
-                                                           .context_data = sisl::blob{}});
-        m_vdevs.push_back(std::move(vdev));
-    }
-
-    LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
-    this->validate_striped_vdevs();
-
-    std::set< uint32_t > pdev_ids;
-    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-
-    auto fpath1 = m_data_dev_names[0];
-    m_data_dev_names.erase(m_data_dev_names.begin());
-    auto dinfo = m_dev_infos[0];
-    m_dev_infos.erase(m_dev_infos.begin());
-    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath1);
-    if (std::filesystem::exists(fpath1)) { std::filesystem::remove(fpath1); }
-
-    auto fpath2 = m_data_dev_names[1];
-    m_data_dev_names.erase(m_data_dev_names.end());
-    auto dinfo2 = m_dev_infos[1];
-    m_dev_infos.erase(m_dev_infos.end());
-    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath2);
-    if (std::filesystem::exists(fpath2)) { std::filesystem::remove(fpath2); }
-
-    LOGINFO("Step 3b: Restart dmgr");
-    this->restart();
-
-    LOGINFO("Step 4: Validate after one device is removed");
-    this->validate_striped_vdevs(1);
-
-    LOGINFO("Step 5: Recreate files to simulate new devices");
-    auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-    this->add_data_file(fpath1, data_dev_size);
-    this->add_data_file(fpath2, data_dev_size);
-
-    LOGINFO("Step 6: Restart and validate if new device can be added to vdevs");
-    this->restart();
-    this->validate_striped_vdevs();
-
-    LOGINFO("Step 7: Restart and validate again");
-    this->restart();
-    this->validate_striped_vdevs();
-
-    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 2)
-        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
-}
-
-TEST_F(DeviceMgrTest, ReplaceTwoDevicesOneByOne) {
-    static constexpr uint32_t num_test_vdevs = 5;
-    uint64_t avail_size{0};
-    for (auto& pdev : m_pdevs) {
-        avail_size += pdev->data_size();
-    }
-
-    uint32_t size_pct = 4;
-    uint64_t remain_size = avail_size;
-
-    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
-    for (uint32_t i = 0; i < num_test_vdevs; ++i) {
-        std::string name = "test_vdev_" + std::to_string(i + 1);
-        uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);
-        remain_size -= size;
-        size_pct *= 2; // Double the next vdev size
-
-        LOGINFO("Step 1a: Creating vdev of name={} with size={}", name, in_bytes(size));
-        auto vdev =
-            m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
-                                                           .vdev_size = size,
-                                                           .num_chunks = uint32_cast(m_pdevs.size() * 2),
-                                                           .blk_size = 4096,
-                                                           .dev_type = HSDevType::Data,
-                                                           .alloc_type = blk_allocator_type_t::none,
-                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
-                                                           .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
-                                                           .context_data = sisl::blob{}});
-        m_vdevs.push_back(std::move(vdev));
-    }
-
-    LOGINFO("Step 2: Validating all vdevs if they have created with correct number of chunks");
-    this->validate_striped_vdevs();
-
-    std::set< uint32_t > pdev_ids;
-    std::vector< PhysicalDev* > pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-
-    auto fpath1 = m_data_dev_names[0];
-    m_data_dev_names.erase(m_data_dev_names.begin());
-    auto dinfo = m_dev_infos[0];
-    m_dev_infos.erase(m_dev_infos.begin());
-    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath1);
-    if (std::filesystem::exists(fpath1)) { std::filesystem::remove(fpath1); }
-
-    auto fpath2 = m_data_dev_names[1];
-    m_data_dev_names.erase(m_data_dev_names.end());
-    auto dinfo2 = m_dev_infos[1];
-    m_dev_infos.erase(m_dev_infos.end());
-    LOGINFO("Step 3a: Remove device to simulate device failure, file={}", fpath2);
-    if (std::filesystem::exists(fpath2)) { std::filesystem::remove(fpath2); }
-
-    LOGINFO("Step 3b: Restart dmgr after removing devices");
-    this->restart();
-
-    LOGINFO("Step 4: Validate after devices is removed");
-    this->validate_striped_vdevs(1);
-
-    LOGINFO("Step 5: Recreate file to simulate replacement with a new device, file={}", fpath1);
-    auto const data_dev_size = SISL_OPTIONS["data_dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-    this->add_data_file(fpath1, data_dev_size);
-
-    this->restart();
-    this->validate_striped_vdevs(2);
-
-    LOGINFO("Step 6: Recreate file to simulate replacement with a new device, file={}", fpath2);
-    this->add_data_file(fpath2, data_dev_size);
-    this->restart();
-    this->validate_striped_vdevs();
-
-    LOGINFO("Step 7: Restart and validate again");
-    this->restart();
-    this->validate_striped_vdevs();
-
-    pdevs = m_dmgr->get_pdevs_by_dev_type(HSDevType::Data);
-    for (auto d : pdevs) {
-        pdev_ids.insert(d->pdev_id());
-    }
-    ASSERT_EQ(pdev_ids.size(), m_pdevs.size() + 2)
-        << "Pdev ids size mismatch after replacing two devices, duplicate pdev ids found or missing pdev ids";
 }
 
 TEST_F(DeviceMgrTest, SmallStripedVDevCreation) {

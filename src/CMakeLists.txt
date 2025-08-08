@@ -8,15 +8,27 @@ find_package(isa-l QUIET)
 find_package(iomgr QUIET REQUIRED)
 find_package(farmhash QUIET REQUIRED)
 find_package(GTest QUIET REQUIRED)
-find_package(NuraftMesg QUIET REQUIRED)
+if (DEFINED REPLICATION)
+  if (${REPLICATION} STREQUAL "ON")
+    find_package(NuraftMesg QUIET REQUIRED)
+  endif()
+endif()
 
 list(APPEND COMMON_DEPS
     iomgr::iomgr
     farmhash::farmhash
-    nuraft_mesg::proto
-    nuraft::nuraft
     sisl::sisl
 )
+
+if (DEFINED REPLICATION)
+  if (${REPLICATION} STREQUAL "ON")
+    list(APPEND COMMON_DEPS 
+        nuraft_mesg::proto
+        nuraft::nuraft
+    )
+  endif()
+endif()
+
 if (${isa-l_FOUND})
     list(APPEND COMMON_DEPS isa-l::isa-l)
 else ()
@@ -42,9 +54,16 @@ add_subdirectory(lib/logstore)
 add_subdirectory(lib/meta)
 add_subdirectory(lib/index)
 add_subdirectory(lib/blkdata_svc/)
-add_subdirectory(lib/replication/)
+if (DEFINED REPLICATION)
+  if (${REPLICATION} STREQUAL "ON")
+    add_subdirectory(lib/replication/)
+  endif()
+endif()
 
-add_subdirectory(tests)
+if(NOT DEFINED BUILD_TESTING OR BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
 set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_common> 
     $<TARGET_OBJECTS:hs_device> 
@@ -53,17 +72,22 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_metablk>
     $<TARGET_OBJECTS:hs_checkpoint>
     $<TARGET_OBJECTS:hs_index>
+    $<TARGET_OBJECTS:hs_mem_btree>
+    $<TARGET_OBJECTS:hs_cow_btree>
     $<TARGET_OBJECTS:hs_datasvc>
-    $<TARGET_OBJECTS:hs_replication>
     lib/homestore.cpp
     lib/crc.cpp
-    lib/logging.cpp
-    #$<TARGET_OBJECTS:hs_cp>
-    #$<TARGET_OBJECTS:indx_mgr>
 )
+
+if (DEFINED REPLICATION)
+  if (${REPLICATION} STREQUAL "ON")
+    list(APPEND HOMESTORE_OBJECTS $<TARGET_OBJECTS:hs_replication>)
+  endif()
+endif()
 #target_link_libraries(homestore_objs ${COMMON_DEPS})
 
 add_library(homestore STATIC 
     ${HOMESTORE_OBJECTS} 
 )
-target_link_libraries(homestore ${COMMON_DEPS})
+target_compile_definitions (homestore PRIVATE LOG_MODS_V2_SUPPORT)
+target_link_libraries(homestore PRIVATE ${COMMON_DEPS})

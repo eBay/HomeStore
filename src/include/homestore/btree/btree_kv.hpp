@@ -61,7 +61,7 @@ public:
 // integers, but it needs to be able to get next or prev key from a given key in the key range
 class BtreeIntervalKey : public BtreeKey {
 public:
-    virtual void shift(int n, void* app_ctx) = 0;
+    virtual void shift(int n) = 0;
     virtual int distance(BtreeKey const& from) const = 0;
     bool is_interval_key() const override { return true; }
 
@@ -142,7 +142,7 @@ public:
 
 class BtreeIntervalValue : public BtreeValue {
 public:
-    virtual void shift(int n, void* app_ctx) = 0;
+    virtual void shift(int n) = 0;
 
     virtual sisl::blob serialize_prefix() const = 0;
     virtual sisl::blob serialize_suffix() const = 0;
@@ -277,4 +277,8 @@ public:
     }
 };
 
+ENUM(put_filter_decision, uint8_t, keep, replace, remove);
+using put_filter_cb_t = std::function< put_filter_decision(BtreeKey const&, BtreeValue const&, BtreeValue const&) >;
+using remove_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
+using get_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
 } // namespace homestore

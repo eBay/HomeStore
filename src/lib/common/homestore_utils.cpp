@@ -51,7 +51,7 @@ bool hs_utils::mod_aligned_sz(size_t size_to_check, size_t align_sz) {
 
 bool hs_utils::is_ptr_aligned(void* ptr, std::size_t alignment) {
     // Cast the pointer to uintptr_t, which is an integer type capable of holding a pointer
-    auto intptr = reinterpret_cast< std::uintptr_t >(ptr);
+    auto intptr = reinterpret_cast<std::uintptr_t>(ptr);
     // Check if the pointer is a multiple of the alignment
     return (intptr % alignment) == 0;
 }

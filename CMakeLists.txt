@@ -87,6 +87,18 @@ endif ()
 add_flags("-DPACKAGE_NAME=\\\"${PROJECT_NAME}\\\"")
 add_flags("-DPACKAGE_VERSION=\\\"${PACKAGE_REVISION}\\\"")
 
+# add replication flag
+if (DEFINED REPLICATION)
+  if (${REPLICATION} STREQUAL "ON")
+    add_flags("-DREPLICATION_SUPPORT")
+    message(STATUS "Building with REPLICATION enabled")
+  else()
+    message(STATUS "Building with REPLICATION disabled")
+  endif()
+else()
+  message(STATUS "Building with REPLICATION disabled")
+endif()
+
 if(UNIX)
     # enable proper pread/pwrite and large file
     add_flags("-D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE")

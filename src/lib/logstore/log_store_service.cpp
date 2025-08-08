@@ -32,7 +32,6 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-SISL_LOGGING_DECL(logstore)
 
 LogStoreService& logstore_service() { return hs()->logstore_service(); }
 
@@ -120,20 +119,14 @@ void LogStoreService::start(bool format) {
 }
 
 void LogStoreService::stop() {
-    start_stopping();
-    while (true) {
-        if (!get_pending_request_num()) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-
+    // device_truncate(nullptr, true, false);
     for (auto& [id, logdev] : m_id_logdev_map) {
         logdev->stop();
     }
-}
-
-LogStoreService::~LogStoreService() {
-    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
-    m_id_logdev_map.clear();
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+        m_id_logdev_map.clear();
+    }
 }
 
 logdev_id_t LogStoreService::get_next_logdev_id() {
@@ -143,22 +136,18 @@ logdev_id_t LogStoreService::get_next_logdev_id() {
 }
 
 logdev_id_t LogStoreService::create_new_logdev(flush_mode_t flush_mode) {
-    if (is_stopping()) return 0;
-    incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     logdev_id_t logdev_id = get_next_logdev_id();
     auto logdev = create_new_logdev_internal(logdev_id, flush_mode);
     logdev->start(true /* format */, m_logdev_vdev);
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
     HS_LOG(INFO, logstore, "Created log_dev={}", logdev_id);
-    decr_pending_request_num();
     return logdev_id;
 }
 
 void LogStoreService::destroy_log_dev(logdev_id_t logdev_id) {
-    if (is_stopping()) return;
     HS_LOG(INFO, logstore, "Destroying logdev {}", logdev_id);
-    incr_pending_request_num();
+
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
     if (it == m_id_logdev_map.end()) {
@@ -168,18 +157,20 @@ void LogStoreService::destroy_log_dev(logdev_id_t logdev_id) {
 
     // Stop the logdev and release all the chunks from the journal vdev.
     auto& logdev = it->second;
+    // if (!logdev->is_stopped()) {
+    //  Stop the logdev if its started.
     logdev->stop();
+        //}
 
-    // First release all chunks.
-    m_logdev_vdev->destroy(logdev_id);
+        // First release all chunks.
+        m_logdev_vdev->destroy(logdev_id);
 
-    // Destroy the metablks for logdev.
-    logdev->destroy();
+        // Destroy the metablks for logdev.
+        logdev->destroy();
 
-    m_id_logdev_map.erase(it);
-    COUNTER_DECREMENT(m_metrics, logdevs_count, 1);
-    HS_LOG(INFO, logstore, "Removed log_dev={}", logdev_id);
-    decr_pending_request_num();
+        m_id_logdev_map.erase(it);
+        COUNTER_DECREMENT(m_metrics, logdevs_count, 1);
+        HS_LOG(INFO, logstore, "Removed log_dev={}", logdev_id);
 }
 
 void LogStoreService::delete_unopened_logdevs() {
@@ -212,15 +203,11 @@ void LogStoreService::open_logdev(logdev_id_t logdev_id, flush_mode_t flush_mode
 }
 
 std::vector< std::shared_ptr< LogDev > > LogStoreService::get_all_logdevs() {
-    std::vector< std::shared_ptr< LogDev > > res;
-    if (is_stopping()) return res;
-    incr_pending_request_num();
     folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
-
+    std::vector< std::shared_ptr< LogDev > > res;
     for (auto& [id, logdev] : m_id_logdev_map) {
         res.push_back(logdev);
     }
-    decr_pending_request_num();
     return res;
 }
 
@@ -281,15 +268,11 @@ void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void*
 }
 
 std::shared_ptr< HomeLogStore > LogStoreService::create_new_log_store(logdev_id_t logdev_id, bool append_mode) {
-    if (is_stopping()) return nullptr;
-    incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
-    auto ret = it->second->create_new_log_store(append_mode);
-    decr_pending_request_num();
-    return ret;
+    return it->second->create_new_log_store(append_mode);
 }
 
 folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_id_t logdev_id, logstore_id_t store_id,
@@ -303,9 +286,8 @@ folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_i
 }
 
 void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {
-    if (is_stopping()) return;
     HS_LOG(INFO, logstore, "Removing logstore {} from logdev {}", store_id, logdev_id);
-    incr_pending_request_num();
+
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
@@ -315,25 +297,20 @@ void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t stor
     }
     it->second->remove_log_store(store_id);
     HS_LOG(INFO, logstore, "Successfully removed logstore {} from logdev {}", store_id, logdev_id);
-    decr_pending_request_num();
+
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }
 
 void LogStoreService::device_truncate() {
     // TODO: make device_truncate_under_lock return future and do collectAllFutures;
-    if (is_stopping()) return;
-    incr_pending_request_num();
     for (auto& [id, logdev] : m_id_logdev_map)
         logdev->truncate();
-    decr_pending_request_num();
 }
 
 void LogStoreService::flush() {
-    if (is_stopping()) return;
-    incr_pending_request_num();
-    for (auto& [id, logdev] : m_id_logdev_map)
+    for (auto& [id, logdev] : m_id_logdev_map) {
         logdev->flush_under_guard();
-    decr_pending_request_num();
+    }
 }
 
 void LogStoreService::start_threads() {
@@ -364,8 +341,6 @@ void LogStoreService::start_threads() {
 
 nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
-    if (is_stopping()) return json_dump;
-    incr_pending_request_num();
     if (dump_req.log_store == nullptr) {
         for (auto& [id, logdev] : m_id_logdev_map) {
             json_dump[logdev->get_id()] = logdev->dump_log_store(dump_req);
@@ -376,18 +351,14 @@ nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
         nlohmann::json val = logdev->dump_log_store(dump_req);
         json_dump[logdev->get_id()] = std::move(val);
     }
-    decr_pending_request_num();
     return json_dump;
 }
 
 nlohmann::json LogStoreService::get_status(const int verbosity) const {
     nlohmann::json js;
-    if (is_stopping()) return js;
-    incr_pending_request_num();
     for (auto& [id, logdev] : m_id_logdev_map) {
         js[logdev->get_id()] = logdev->get_status(verbosity);
     }
-    decr_pending_request_num();
     return js;
 }
 
@@ -403,10 +374,6 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
     REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
-#ifdef _PRERELEASE
-    REGISTER_HISTOGRAM(logstore_stream_tracker_lock_latency, "Logstore stream tracker lock latency",
-                       "logstore_stream_tracker_lock_latency");
-#endif
     REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));

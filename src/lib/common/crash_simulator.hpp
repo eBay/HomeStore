@@ -12,7 +12,7 @@ public:
     CrashSimulator(std::function< void(void) > cb = nullptr) : m_restart_cb{std::move(cb)} {}
     ~CrashSimulator() = default;
 
-    void crash() {
+    void crash_now() {
         if (m_restart_cb) {
             m_crashed.update([](auto* s) { *s = true; });
 
@@ -27,11 +27,15 @@ public:
         }
     }
 
-    bool is_crashed() const { return *(m_crashed.access().get()); }
+    void start_crash() {
+        m_crashed.update([](auto* s) { *s = true; });
+    }
+
+    bool is_in_crashing_phase() const { return *(m_crashed.access().get()); }
 
     bool crash_if_flip_set(const std::string& flip_name) {
         if (iomgr_flip::instance()->test_flip(flip_name)) {
-            this->crash();
+            this->crash_now();
             return true;
         } else {
             return false;
@@ -43,7 +47,7 @@ public:
 
 private:
     std::function< void(void) > m_restart_cb{nullptr};
-    std::atomic< bool > m_will_crash{false};
+    std::atomic<bool> m_will_crash{false};
     sisl::urcu_scoped_ptr< bool > m_crashed;
 };
 } // namespace homestore

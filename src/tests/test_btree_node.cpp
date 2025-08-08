@@ -15,23 +15,20 @@
  *********************************************************************************/
 #include <gtest/gtest.h>
 
-#define StoreSpecificBtreeNode homestore::BtreeNode
-
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
-#include <homestore/btree/detail/simple_node.hpp>
-#include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/detail/prefix_node.hpp>
+#include <homestore/btree/node_variant/simple_node.hpp>
+#include <homestore/btree/node_variant/varlen_node.hpp>
+#include <homestore/btree/node_variant/prefix_node.hpp>
 #include "btree_helpers/btree_test_kvs.hpp"
 
 static constexpr uint32_t g_node_size{4096};
 static constexpr uint32_t g_max_keys{6000};
 static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys - 1};
+static BtreeNode::Allocator::Token g_token{0};
 
 using namespace homestore;
-SISL_LOGGING_DEF(btree)
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 struct FixedLenNodeTest {
     using NodeType = SimpleNode< TestFixedKey, TestFixedValue >;
@@ -69,35 +66,35 @@ struct NodeTest : public testing::Test {
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
-    std::unique_ptr< uint8_t[] > m_node1_buf;
-    std::unique_ptr< uint8_t[] > m_node2_buf;
     std::unique_ptr< typename T::NodeType > m_node1;
     std::unique_ptr< typename T::NodeType > m_node2;
     std::map< K, V > m_shadow_map;
-    BtreeConfig m_cfg{g_node_size};
+    BtreeConfig m_cfg;
 
     void SetUp() override {
-        m_node1_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
-        m_node2_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
+        g_token = BtreeNode::Allocator::add(BtreeNode::Allocator{
+            [](uint32_t size) { return new uint8_t[size]; }, // alloc_btree_node
+            [](BtreeNode*) {},                               // free_btree_node
+            [](uint32_t size) { return new uint8_t[size]; }, // alloc_node_buf
+            [](uint8_t* buf) { delete[] buf; }               // free_node_buf
+        });
 
-        m_node1 = std::make_unique< typename T::NodeType >(m_node1_buf.get(), 1ul, true, true, m_cfg);
-        m_node2 = std::make_unique< typename T::NodeType >(m_node2_buf.get(), 2ul, true, true, m_cfg);
+        m_cfg.m_node_size = g_node_size;
+        m_node1 = std::make_unique< typename T::NodeType >(1ul, true, g_node_size, g_token);
+        m_node2 = std::make_unique< typename T::NodeType >(2ul, true, g_node_size, g_token);
     }
 
     void put(uint32_t k, btree_put_type put_type) {
         K key{k};
         V value{V::generate_rand()};
         V existing_v;
-        btree_status_t status = m_node1->put(key, value, put_type, &existing_v);
+        bool done = m_node1->put(key, value, put_type, &existing_v);
 
-        auto expected_status = btree_status_t::success;
-        if (m_shadow_map.contains(key)) {
-            expected_status =
-                put_type != btree_put_type::INSERT ? btree_status_t::success : btree_status_t::already_exists;
-        }
-        ASSERT_EQ(status, expected_status)
-            << "Expected put of key " << k << " of put_type " << enum_name(put_type) << " to be " << expected_status;
-        if (expected_status == btree_status_t::success) {
+        bool expected_done{true};
+        if (m_shadow_map.find(key) != m_shadow_map.end()) { expected_done = (put_type != btree_put_type::INSERT); }
+        ASSERT_EQ(done, expected_done) << "Expected put of key " << k << " of put_type " << enum_name(put_type)
+                                       << " to be " << expected_done;
+        if (expected_done) {
             m_shadow_map.insert(std::make_pair(key, value));
         } else {
             const auto r = m_shadow_map.find(key);
@@ -130,7 +127,7 @@ struct NodeTest : public testing::Test {
         for (uint32_t i{0}; i < count; ++i) {
             K key{k + i};
             V range_value{value};
-            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i, nullptr); }
+            if constexpr (std::is_same_v< V, TestIntervalValue >) { range_value.shift(i); }
 
             if (m_shadow_map.find(key) != m_shadow_map.end()) {
                 if (put_type != btree_put_type::INSERT) { m_shadow_map.insert_or_assign(key, range_value); }
@@ -373,14 +370,10 @@ TYPED_TEST(NodeTest, SimpleInsert) {
     for (uint32_t i = 10; i <= 20; ++i) {
         this->remove(i);
     }
-    this->m_node1->move_out_to_right_by_entries(this->m_cfg, *this->m_node2, 20);
-    this->m_node1->copy_by_entries(this->m_cfg, *this->m_node2, 0, std::numeric_limits< uint32_t >::max());
-}
-
-TYPED_TEST(NodeTest, RangeChangeInsert) {
-    if (this->m_node1->get_node_type() != btree_node_type::PREFIX) { return; }
-    this->put_range(0xFFFFFFFF - 10, 20);
-    this->print();
+    this->m_node1->move_out_to_right_by_entries(*this->m_node2, 20);
+    uint32_t copy_idx{0u};
+    this->m_node1->append_copy_in_upto_size(*this->m_node2, copy_idx, std::numeric_limits< uint32_t >::max(),
+                                            /*copy_only_if_fits=*/false);
 }
 
 TYPED_TEST(NodeTest, ReverseInsert) {
@@ -472,31 +465,56 @@ TYPED_TEST(NodeTest, RandomInsertRemoveUpdate) {
 }
 
 TYPED_TEST(NodeTest, Move) {
-    std::vector< uint32_t > list{0, 1, 2, g_max_keys / 2 - 1};
+    std::vector< uint32_t > list{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, g_max_keys / 2 - 1};
     this->put_list(list);
     this->print();
 
-    this->m_node1->move_out_to_right_by_entries(this->m_cfg, *this->m_node2, list.size());
-    this->m_node1->move_out_to_right_by_entries(this->m_cfg, *this->m_node2, list.size()); // Empty move
+    // Full node move to right and validate its correctness.
+    this->m_node1->move_out_to_right_by_entries(*this->m_node2, list.size()); // Full move
+    this->m_node1->move_out_to_right_by_entries(*this->m_node2, list.size()); // Empty move
     ASSERT_EQ(this->m_node1->total_entries(), 0u) << "Move out to right has failed";
     ASSERT_EQ(this->m_node2->total_entries(), list.size()) << "Move out to right has failed";
     this->validate_get_all();
+    auto filled_size = this->m_node2->occupied_size();
 
-    auto first_half = list.size() / 2;
-    auto second_half = list.size() - first_half;
-    this->m_node1->copy_by_entries(this->m_cfg, *this->m_node2, 0, first_half);           // Copy half entries
-    this->m_node1->copy_by_entries(this->m_cfg, *this->m_node2, first_half, second_half); // Copy half entries
-    this->m_node2->remove_all(this->m_cfg);
-    ASSERT_EQ(this->m_node2->total_entries(), 0u) << "Remove all on right has failed";
-    ASSERT_EQ(this->m_node1->total_entries(), list.size()) << "Move in from right has failed";
+    // Full copy in and validate its correctness
+    uint32_t cursor{0};
+    auto has_copied = this->m_node1->append_copy_in_upto_size(*this->m_node2, cursor, filled_size,
+                                                              /*copy_only_if_fits=*/true); // Full copy in
+    ASSERT_EQ(has_copied, true) << "Append copy in has failed";
+    ASSERT_EQ(cursor, this->m_node2->total_entries()) << "Append copy cursor not updated";
+    ASSERT_EQ(this->m_node1->total_entries(), list.size()) << "Move out to right has failed";
+    ASSERT_EQ(this->m_node2->total_entries(), list.size()) << "Move out to right has failed";
+
+    // Make the node2 clean slate
+    this->m_node2->remove_all();
+    ASSERT_EQ(this->m_node2->total_entries(), 0) << "Remove all failed";
     this->validate_get_all();
-    this->m_node1->move_out_to_right_by_entries(this->m_cfg, *this->m_node2, list.size() / 2);
-    ASSERT_EQ(this->m_node1->total_entries(), list.size() / 2) << "Move out half entries to right has failed";
-    ASSERT_EQ(this->m_node2->total_entries(), list.size() - list.size() / 2)
-        << "Move out half entries to right has failed";
+
+    // Move roughly half of the size to the right node (node2)
+    filled_size = this->m_node1->occupied_size();
+    auto const nmoved = this->m_node1->move_out_to_right_by_size(*this->m_node2, filled_size / 2);
+    ASSERT_NE(nmoved, 0u) << "Move out didn't move any keys";
+    ASSERT_EQ(this->m_node1->total_entries(), list.size() - nmoved)
+        << "Move out roughly half size to right has failed on left node";
+    ASSERT_EQ(this->m_node2->total_entries(), nmoved) << "Move out half entries to right has failed on right node";
     this->validate_get_all();
     this->print();
     this->validate_key_order();
+
+    // Full copy back in to node1 and now it should be back to original full node
+    cursor = 0;
+    has_copied = this->m_node1->append_copy_in_upto_size(*this->m_node2, cursor, this->m_node1->node_data_size(),
+                                                         /*copy_only_if_fits=*/true); // Full copy in
+    ASSERT_EQ(has_copied, true) << "Append copy in has failed";
+    ASSERT_EQ(cursor, this->m_node2->total_entries()) << "Append copy cursor not updated";
+    ASSERT_EQ(this->m_node1->total_entries(), list.size()) << "Move out to right has failed";
+    this->print();
+
+    // Overwrite the node to right and check its equality.
+    this->m_node2->overwrite(*this->m_node1);
+    ASSERT_EQ(this->m_node1->total_entries(), list.size()) << "Move out to right has failed";
+    ASSERT_EQ(this->m_node2->total_entries(), list.size()) << "Move out to right has failed";
 }
 
 SISL_OPTIONS_ENABLE(logging, test_btree_node)

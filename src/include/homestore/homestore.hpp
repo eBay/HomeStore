@@ -53,24 +53,12 @@ class VirtualDev;
 class ChunkSelector;
 class ReplDevListener;
 class ReplApplication;
-class FaultContainmentService;
-class FaultContainmentCallback;
 
 #ifdef _PRERELEASE
 class CrashSimulator;
 #endif
 
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
-
-VENUM(hs_vdev_type_t, uint32_t, DATA_VDEV = 1, INDEX_VDEV = 2, META_VDEV = 3, LOGDEV_VDEV = 4);
-
-#pragma pack(1)
-struct hs_vdev_context {
-    enum hs_vdev_type_t type;
-
-    sisl::blob to_blob() { return sisl::blob{uintptr_cast(this), sizeof(*this)}; }
-};
-#pragma pack()
 
 using hs_before_services_starting_cb_t = std::function< void(void) >;
 
@@ -79,29 +67,53 @@ struct hs_stats {
     uint64_t used_capacity{0ul};
 };
 
-struct HS_SERVICE {
-    static constexpr uint32_t META = 1 << 0;
-    static constexpr uint32_t LOG = 1 << 1;
-    static constexpr uint32_t DATA = 1 << 2;
-    static constexpr uint32_t INDEX = 1 << 3;
-    static constexpr uint32_t REPLICATION = 1 << 4;
-    static constexpr uint32_t FAULT_CMT = 1 << 5;
+ENUM(ServiceType, uint32_t, // List of all services we support
+     META = 0,              // Meta Service
+     LOG = 1,               // Log Service
+     DATA = 2,              // Data Service
+     INDEX = 3,             // Index Service
+     REPLICATION = 4        // Replication Service
+);
+using HS_SERVICE = ServiceType; // Alias for easier porting of code
 
-    uint32_t svcs;
+ENUM(ServiceSubType, uint32_t,      // All sub types within services. At this point it is a global list for all services
+     DEFAULT = 0,                   // No sub type
+     INDEX_BTREE_COPY_ON_WRITE = 1, // Copy on Write btree index
+     INDEX_BTREE_INPLACE = 2,       // LInplace Btree based index
+     INDEX_BTREE_MEMORY = 3,        // Memory based index
+);
 
-    HS_SERVICE() : svcs{META} {}
+VENUM(hs_vdev_type_t, uint32_t, DATA_VDEV = 1, INDEX_VDEV = 2, META_VDEV = 3, LOGDEV_VDEV = 4);
 
-    std::string list() const {
-        std::string str;
-        if (svcs & META) { str += "meta,"; }
-        if (svcs & DATA) { str += "data,"; }
-        if (svcs & INDEX) { str += "index,"; }
-        if (svcs & LOG) { str += "log,"; }
-        if (svcs & REPLICATION) { str += "replication,"; }
-        if (svcs & FAULT_CMT) { str += "fault_containment,"; }
-        return str;
+#pragma pack(1)
+struct hs_vdev_context {
+    enum hs_vdev_type_t type;
+    ServiceSubType sub_type{ServiceSubType::DEFAULT};
+
+    sisl::blob to_blob() { return sisl::blob{uintptr_cast(this), sizeof(*this)}; }
+};
+#pragma pack()
+
+struct ServiceId {
+    ServiceType type;
+    ServiceSubType sub_type;
+
+    ServiceId(ServiceType st, ServiceSubType sst) : type{st}, sub_type{sst} {}
+    ServiceId(ServiceType st) : type{st}, sub_type{ServiceSubType::DEFAULT} {}
+};
+} // namespace homestore
+
+namespace std {
+template <>
+struct less< homestore::ServiceId > {
+    bool operator()(const homestore::ServiceId& lhs, const homestore::ServiceId& rhs) const {
+        return (lhs.type == rhs.type) ? (uint32_cast(lhs.sub_type) < uint32_cast(lhs.sub_type))
+                                      : (uint32_cast(lhs.type) < uint32_cast(rhs.type));
     }
 };
+} // namespace std
+
+namespace homestore {
 
 /*
  * IO errors handling by homestore.
@@ -119,8 +131,9 @@ private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
+#ifdef REPLICATION_SUPPORT
     std::shared_ptr< ReplicationService > m_repl_service;
-    std::unique_ptr< FaultContainmentService > m_fc_service;
+#endif
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;
@@ -129,12 +142,12 @@ private:
     std::unique_ptr< CPManager > m_cp_mgr;
     shared< sisl::Evictor > m_evictor;
 
-    HS_SERVICE m_services; // Services homestore is starting with
+    std::vector< std::vector< ServiceSubType > > m_services; // Services homestore is starting with
     hs_before_services_starting_cb_t m_before_services_starting_cb{nullptr};
     std::atomic< bool > m_init_done{false};
 
 public:
-    HomeStore() = default;
+    HomeStore();
     virtual ~HomeStore() = default;
 
     /////////////////////////////////////////// static HomeStore member functions /////////////////////////////////
@@ -151,13 +164,14 @@ public:
     HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_log_service();
     HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs,
-                                  cshared< ChunkSelector >& custom_chunk_selector = nullptr);
+                                  std::vector< ServiceSubType > sub_types);
+#ifdef REPLICATION_SUPPORT
     HomeStore& with_repl_data_service(cshared< ReplApplication >& repl_app,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
-    HomeStore& with_fault_containment(std::unique_ptr< FaultContainmentCallback > cb);
+#endif
 
     bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);
-    void format_and_start(std::map< uint32_t, hs_format_params >&& format_opts);
+    void format_and_start(std::map< ServiceId, hs_format_params >&& format_opts);
     void shutdown();
 
     // cap_attrs get_system_capacity() const; // Need to move this to homeblks/homeobj
@@ -170,7 +184,7 @@ public:
     bool has_meta_service() const;
     bool has_log_service() const;
     bool has_repl_data_service() const;
-    bool has_fc_service() const;
+    std::string services_list() const;
 
     BlkDataService& data_service() { return *m_data_service; }
     MetaBlkService& meta_service() { return *m_meta_service; }
@@ -179,11 +193,9 @@ public:
         if (!m_index_service) { throw std::runtime_error("index_service is nullptr"); }
         return *m_index_service;
     }
+#ifdef REPLICATION_SUPPORT
     ReplicationService& repl_service() { return *m_repl_service; }
-    FaultContainmentService& fc_service() {
-        if (!m_fc_service) { throw std::runtime_error("fc_service is nullptr"); }
-        return *m_fc_service;
-    }
+#endif
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
@@ -196,7 +208,6 @@ public:
 #endif
 
 private:
-    void init_cache();
     shared< VirtualDev > create_vdev_cb(const vdev_info& vinfo, bool load_existing);
     uint64_t pct_to_size(float pct, HSDevType dev_type) const;
     void do_start();

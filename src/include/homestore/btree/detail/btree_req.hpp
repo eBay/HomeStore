@@ -16,36 +16,37 @@
 #pragma once
 #include <sisl/fds/buffer.hpp>
 #include <homestore/btree/btree_kv.hpp>
+#include <homestore/btree/btree_base.hpp>
 
 namespace homestore {
 struct BtreeRequest;
+class CPContext;
 
 typedef std::pair< BtreeKey, BtreeValue > btree_kv_t;
 
 // Base class for any btree operations
 struct BtreeRequest {
-    BtreeRequest() = default;
-    BtreeRequest(void* app_ctx, void* op_ctx) : m_app_context{app_ctx}, m_op_context{op_ctx} {}
-
-    void enable_route_tracing() {
-        route_tracing = std::make_unique< std::vector< trace_route_entry > >();
-        route_tracing->reserve(8);
+    BtreeRequest(BtreeBase& btree, bool enable_tracing) : m_btree{btree} {
+        if (enable_tracing) {
+            m_route_tracing = std::make_unique< std::vector< trace_route_entry > >();
+            m_route_tracing->reserve(8);
+        }
     }
 
     std::string route_string() const {
         std::string out;
-        if (route_tracing) {
-            fmt::format_to(std::back_inserter(out), "Route size={}\n", route_tracing->size());
-            for (const auto& r : *route_tracing) {
+        if (m_route_tracing) {
+            fmt::format_to(std::back_inserter(out), "Route size={}\n", m_route_tracing->size());
+            for (const auto& r : *m_route_tracing) {
                 fmt::format_to(std::back_inserter(out), "{}\n", r.to_string());
             }
         }
         return out;
     }
 
-    void* m_app_context{nullptr};
-    void* m_op_context{nullptr};
-    std::unique_ptr< std::vector< trace_route_entry > > route_tracing{nullptr};
+    BtreeBase& m_btree;
+    CPContext* m_op_context{nullptr};
+    std::unique_ptr< std::vector< trace_route_entry > > m_route_tracing{nullptr};
 };
 
 // Base class for all range related operations
@@ -71,8 +72,9 @@ public:
     }
 
 protected:
-    BtreeRangeRequest(BtreeKeyRange< K >&& input_range, void* app_context = nullptr, uint32_t batch_size = UINT32_MAX) :
-            BtreeRequest{app_context, nullptr}, m_search_state{std::move(input_range)}, m_batch_size{batch_size} {}
+    BtreeRangeRequest(BtreeBase& btree, BtreeKeyRange< K >&& input_range, uint32_t batch_size = UINT32_MAX,
+                      bool enable_tracing = false) :
+            BtreeRequest{btree, enable_tracing}, m_search_state{std::move(input_range)}, m_batch_size{batch_size} {}
 
 private:
     BtreeTraversalState< K > m_search_state;
@@ -80,14 +82,22 @@ private:
 };
 
 /////////////////////////// 1: Put Operations /////////////////////////////////////
-ENUM(put_filter_decision, uint8_t, keep, replace, remove);
-using put_filter_cb_t = std::function< put_filter_decision(BtreeKey const&, BtreeValue const&, BtreeValue const&) >;
-
 struct BtreeSinglePutRequest : public BtreeRequest {
 public:
-    BtreeSinglePutRequest(const BtreeKey* k, const BtreeValue* v, btree_put_type put_type,
+    BtreeSinglePutRequest(BtreeBase& btree, const BtreeKey* k, const BtreeValue* v, btree_put_type put_type,
                           BtreeValue* existing_val = nullptr, put_filter_cb_t filter_cb = nullptr) :
-            m_k{k}, m_v{v}, m_put_type{put_type}, m_existing_val{existing_val}, m_filter_cb{std::move(filter_cb)} {}
+            BtreeRequest{btree, btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::PUT)},
+            m_k{k},
+            m_v{v},
+            m_put_type{put_type},
+            m_existing_val{existing_val},
+            m_filter_cb{std::move(filter_cb)} {}
+
+    ~BtreeSinglePutRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::PUT, this->route_string());
+        }
+    }
 
     const BtreeKey& key() const { return *m_k; }
     const BtreeValue& value() const { return *m_v; }
@@ -102,13 +112,20 @@ public:
 template < typename K >
 struct BtreeRangePutRequest : public BtreeRangeRequest< K > {
 public:
-    BtreeRangePutRequest(BtreeKeyRange< K >&& inp_range, btree_put_type put_type, const BtreeValue* value,
-                         void* app_context = nullptr, uint32_t batch_size = std::numeric_limits< uint32_t >::max(),
+    BtreeRangePutRequest(BtreeBase& btree, BtreeKeyRange< K >&& inp_range, btree_put_type put_type,
+                         const BtreeValue* value, uint32_t batch_size = std::numeric_limits< uint32_t >::max(),
                          put_filter_cb_t filter_cb = nullptr) :
-            BtreeRangeRequest< K >(std::move(inp_range), app_context, batch_size),
+            BtreeRangeRequest< K >{btree, std::move(inp_range), batch_size,
+                                   btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::PUT)},
             m_put_type{put_type},
             m_newval{value},
             m_filter_cb{std::move(filter_cb)} {}
+
+    ~BtreeRangePutRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::PUT, this->route_string());
+        }
+    }
 
     const btree_put_type m_put_type{btree_put_type::UPDATE};
     const BtreeValue* m_newval;
@@ -118,7 +135,16 @@ public:
 /////////////////////////// 2: Remove Operations /////////////////////////////////////
 struct BtreeSingleRemoveRequest : public BtreeRequest {
 public:
-    BtreeSingleRemoveRequest(const BtreeKey* k, BtreeValue* out_val) : m_k{k}, m_outval{out_val} {}
+    BtreeSingleRemoveRequest(BtreeBase& btree, const BtreeKey* k, BtreeValue* out_val) :
+            BtreeRequest{btree, btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::REMOVE)},
+            m_k{k},
+            m_outval{out_val} {}
+
+    ~BtreeSingleRemoveRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::REMOVE, this->route_string());
+        }
+    }
 
     const BtreeKey& key() const { return *m_k; }
     const BtreeValue& value() const { return *m_outval; }
@@ -130,15 +156,22 @@ public:
 template < typename K >
 struct BtreeRemoveAnyRequest : public BtreeRequest {
 public:
-    BtreeRemoveAnyRequest(BtreeKeyRange< K >&& inp_range, BtreeKey* out_key, BtreeValue* out_val) :
-            m_range{std::move(inp_range)}, m_outkey{out_key}, m_outval{out_val} {}
+    BtreeRemoveAnyRequest(BtreeBase& btree, BtreeKeyRange< K >&& inp_range, BtreeKey* out_key, BtreeValue* out_val) :
+            BtreeRequest{btree, btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::REMOVE)},
+            m_range{std::move(inp_range)},
+            m_outkey{out_key},
+            m_outval{out_val} {}
+
+    ~BtreeRemoveAnyRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::REMOVE, this->route_string());
+        }
+    }
 
     BtreeKeyRange< K > m_range;
     BtreeKey* m_outkey;
     BtreeValue* m_outval;
 };
-
-using remove_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
 
 template < typename K >
 struct BtreeRangeRemoveRequest : public BtreeRangeRequest< K > {
@@ -146,16 +179,33 @@ public:
     remove_filter_cb_t m_filter_cb;
 
 public:
-    BtreeRangeRemoveRequest(BtreeKeyRange< K >&& inp_range, void* app_context = nullptr,
+    BtreeRangeRemoveRequest(BtreeBase& btree, BtreeKeyRange< K >&& inp_range,
                             uint32_t batch_size = std::numeric_limits< uint32_t >::max(),
                             remove_filter_cb_t filter_cb = nullptr) :
-            BtreeRangeRequest< K >(std::move(inp_range), app_context, batch_size), m_filter_cb{std::move(filter_cb)} {}
+            BtreeRangeRequest< K >(btree, std::move(inp_range), batch_size,
+                                   btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::REMOVE)),
+            m_filter_cb{std::move(filter_cb)} {}
+
+    ~BtreeRangeRemoveRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::REMOVE, this->route_string());
+        }
+    }
 };
 
 /////////////////////////// 3: Get Operations /////////////////////////////////////
 struct BtreeSingleGetRequest : public BtreeRequest {
 public:
-    BtreeSingleGetRequest(const BtreeKey* k, BtreeValue* out_val) : m_k{k}, m_outval{out_val} {}
+    BtreeSingleGetRequest(BtreeBase& btree, const BtreeKey* k, BtreeValue* out_val) :
+            BtreeRequest{btree, btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::GET)},
+            m_k{k},
+            m_outval{out_val} {}
+
+    ~BtreeSingleGetRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::GET, this->route_string());
+        }
+    }
 
     const BtreeKey& key() const { return *m_k; }
     const BtreeValue& value() const { return *m_outval; }
@@ -167,8 +217,17 @@ public:
 template < typename K >
 struct BtreeGetAnyRequest : public BtreeRequest {
 public:
-    BtreeGetAnyRequest(BtreeKeyRange< K >&& range, BtreeKey* out_key, BtreeValue* out_val) :
-            m_range{std::move(range)}, m_outkey{out_key}, m_outval{out_val} {}
+    BtreeGetAnyRequest(BtreeBase& btree, BtreeKeyRange< K >&& range, BtreeKey* out_key, BtreeValue* out_val) :
+            BtreeRequest{btree, btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::GET)},
+            m_range{std::move(range)},
+            m_outkey{out_key},
+            m_outval{out_val} {}
+
+    ~BtreeGetAnyRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::GET, this->route_string());
+        }
+    }
 
     BtreeKeyRange< K > m_range;
     BtreeKey* m_outkey;
@@ -195,21 +254,24 @@ ENUM(BtreeQueryType, uint8_t,
      // This is both inefficient and quiet intrusive/unsafe query, where it locks the range
      // that is being queried for and do not allow any insert or update within that range. It
      // essentially create a serializable level of isolation.
-     SERIALIZABLE_QUERY)
-
-using get_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
+     SERIALIZABLE_QUERY);
 
 template < typename K >
 struct BtreeQueryRequest : public BtreeRangeRequest< K > {
 public:
-    BtreeQueryRequest(BtreeKeyRange< K >&& inp_range,
+    BtreeQueryRequest(BtreeBase& btree, BtreeKeyRange< K >&& inp_range,
                       BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
-                      uint32_t batch_size = UINT32_MAX, get_filter_cb_t filter_cb = nullptr,
-                      void* app_context = nullptr) :
-            BtreeRangeRequest< K >{std::move(inp_range), app_context, batch_size},
+                      uint32_t batch_size = UINT32_MAX, get_filter_cb_t filter_cb = nullptr) :
+            BtreeRangeRequest< K >{btree, std::move(inp_range), batch_size,
+                                   btree.route_tracer().is_enabled_for(BtreeRouteTracer::Op::QUERY)},
             m_query_type{query_type},
             m_filter_cb{std::move(filter_cb)} {}
-    ~BtreeQueryRequest() = default;
+
+    ~BtreeQueryRequest() {
+        if (this->m_route_tracing) {
+            this->m_btree.route_tracer().append_to(BtreeRouteTracer::Op::QUERY, this->route_string());
+        }
+    }
 
     // virtual bool is_serializable() const = 0;
     BtreeQueryType query_type() const { return m_query_type; }

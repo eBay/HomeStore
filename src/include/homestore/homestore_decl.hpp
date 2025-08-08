@@ -112,7 +112,8 @@ ENUM(vdev_size_type_t, uint8_t, VDEV_SIZE_STATIC, VDEV_SIZE_DYNAMIC);
 
 ////////////// All structs ///////////////////
 struct dev_info {
-    explicit dev_info(std::string name, HSDevType type = HSDevType::Data) : dev_name{std::move(name)}, dev_type{type} {}
+    explicit dev_info(std::string name, HSDevType type = HSDevType::Data, uint64_t size = 0) :
+            dev_name{std::move(name)}, dev_type{type}, dev_size{size} {}
     std::string to_string() const { return fmt::format("{} - {} size={}", dev_name, enum_name(dev_type), dev_size); }
 
     std::string dev_name;
@@ -212,5 +213,3 @@ struct cap_attrs {
 } // namespace homestore
 
 ////////////// Misc ///////////////////
-#define HOMESTORE_LOG_MODS                                                                                             \
-    btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication, journalvdev, solorepl

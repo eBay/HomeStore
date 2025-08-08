@@ -15,347 +15,213 @@
  *********************************************************************************/
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
-#include <homestore/index/index_internal.hpp>
 #include <homestore/btree/detail/btree_node.hpp>
-#include "index/wb_cache.hpp"
-#include "index/index_cp.hpp"
+
+#include <folly/futures/Future.h>
 #include "common/homestore_utils.hpp"
 #include "common/homestore_assert.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "device/chunk.h"
+#include "index/cow_btree/cow_btree_store.h"
+//#include "index/inplace_btree/inplace_btree_store.h"
+#include "index/mem_btree/mem_btree_store.h"
+#include "index/index_cp.h"
 
 namespace homestore {
 IndexService& index_service() { return hs()->index_service(); }
 
-IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs, shared< ChunkSelector > chunk_selector) :
-        m_svc_cbs{std::move(cbs)}, m_custom_chunk_selector{std::move(chunk_selector)} {
+IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs,
+                           std::vector< ServiceSubType > const& sub_types) :
+        m_svc_cbs{std::move(cbs)} {
     m_ordinal_reserver = std::make_unique< sisl::IDReserver >();
     meta_service().register_handler(
-        "index",
+        "index_table",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            m_itable_sbs.emplace_back(std::pair{mblk, std::move(buf)});
+            superblk< IndexSuperBlock > sb("index_table");
+            sb.load(buf, mblk);
+            m_index_sbs.emplace_back(std::move(sb));
         },
         nullptr);
 
     meta_service().register_handler(
-        "wb_cache",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { m_wbcache_sb = std::pair{mblk, std::move(buf)}; },
+        "index_store",
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            superblk< IndexStoreSuperBlock > sb("index_store");
+            sb.load(buf, mblk);
+            m_store_sbs.emplace_back(std::move(sb));
+        },
         nullptr);
 }
 
-void IndexService::create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks,
-                               chunk_selector_type_t chunk_sel_type) {
+void IndexService::create_vdev(ServiceSubType sub_type, uint64_t size, HSDevType devType, uint32_t num_chunks) {
     auto const atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::INDEX_VDEV;
+    vdev_ctx.sub_type = sub_type;
 
     hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "index",
                                                     .vdev_size = size,
                                                     .num_chunks = num_chunks,
                                                     .blk_size = atomic_page_size,
                                                     .dev_type = devType,
-                                                    .alloc_type = blk_allocator_type_t::fixed,
-                                                    .chunk_sel_type = chunk_sel_type,
+                                                    .alloc_type = blk_allocator_type_t::varsize,
+                                                    .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                     .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                     .context_data = vdev_ctx.to_blob()});
 }
 
-shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr /* event_cb */,
-                                            true /* auto_recovery */, m_custom_chunk_selector);
-    return m_vdev;
+shared< VirtualDev > IndexService::open_vdev(ServiceSubType sub_type, const vdev_info& vinfo, bool load_existing) {
+    auto const vdev =
+        std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr /* event_cb */, false /* auto_recovery */);
+    m_vdevs.insert(std::make_pair(sub_type, vdev));
+    return vdev;
+}
+
+void IndexService::start() {
+    cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC, std::move(std::make_unique< IndexCPCallbacks >()));
+
+    if (m_store_sbs.size()) {
+        // Segregate the index store super blocks based on the store type
+        std::unordered_map< IndexStore::Type, std::vector< superblk< IndexStoreSuperBlock > > > m;
+        for (auto& sb : m_store_sbs) {
+            m[sb->index_store_type].emplace_back(std::move(sb));
+        }
+
+        for (auto& [store_type, sbs] : m) {
+            lookup_or_create_store(store_type, std::move(sbs));
+        }
+    }
+
+    // Load any index tables which are to loaded from meta blk
+    for (auto& sb : m_index_sbs) {
+        m_ordinal_reserver->reserve(sb->ordinal);
+        add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
+    }
+
+    // Notify each index store that we have completed recovery
+    std::unique_lock lg(m_index_map_mtx);
+    for (auto& [type, store] : m_index_stores) {
+        store->on_recovery_completed();
+    }
+}
+
+void IndexService::stop() {
+    m_index_map.clear();
+    m_ordinal_index_map.clear();
+
+    for (auto& [type, store] : m_index_stores) {
+        store->stop();
+        store.reset();
+    }
+}
+
+shared< VirtualDev > IndexService::get_vdev(ServiceSubType sub_type) {
+    auto it = m_vdevs.find(sub_type);
+    HS_REL_ASSERT(it != m_vdevs.end(), "Vdev not found for sub_type={}, vdev not created/opened?", sub_type);
+    return it->second;
+}
+
+IndexStore* IndexService::lookup_store(IndexStore::Type store_type) {
+    auto it = m_index_stores.find(store_type);
+    return (it != m_index_stores.end()) ? it->second.get() : nullptr;
+}
+
+shared< IndexStore > IndexService::lookup_or_create_store(IndexStore::Type store_type,
+                                                          std::vector< superblk< IndexStoreSuperBlock > > sbs) {
+    std::unique_lock lg(m_index_map_mtx);
+    auto it = m_index_stores.find(store_type);
+    if (it != m_index_stores.end()) { return it->second; }
+
+    shared< IndexStore > store;
+
+    switch (store_type) {
+    case IndexStore::Type::COPY_ON_WRITE_BTREE:
+        store = std::make_shared< COWBtreeStore >(get_vdev(ServiceSubType::INDEX_BTREE_COPY_ON_WRITE), std::move(sbs));
+        break;
+
+    case IndexStore::Type::INPLACE_BTREE:
+#if 0
+        store = std::make_shared< InPlaceBtreeStore >(get_vdev(ServiceSubType::INDEX_BTREE_INPLACE), std::move(sbs),
+                                                      hs()->evictor(),
+                                                      hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
+#endif
+        break;
+
+    case IndexStore::Type::MEM_BTREE:
+        store = std::make_shared< MemBtreeStore >();
+        break;
+
+    default:
+        HS_REL_ASSERT(false, "Unsupported index store type {}", store_type);
+        break;
+    }
+    m_index_stores.emplace(std::pair(store_type, store));
+    return store;
+}
+
+void IndexService::add_index_table(const shared< Index >& index) {
+    std::unique_lock lg(m_index_map_mtx);
+    m_index_map.insert(std::make_pair(index->uuid(), index));
+    m_ordinal_index_map.insert(std::make_pair(index->ordinal(), index));
+}
+
+folly::Future< folly::Unit > IndexService::destroy_index_table(const shared< Index >& index) {
+    auto const uuid = index->uuid();
+    auto const ordinal = index->ordinal();
+    auto fut = index->destroy();
+
+    // We remove from the map right away for the following reason:
+    // Typically before a btree is destroyed, it could have done some IO or merging the nodes. So if IO is done, then
+    // btree is initiated a destroy and then CP is taken, underlying btree will request for all indexes and flush
+    // them before it starts processing the destroyed btrees. This is because maintaining a map of removed btrees and
+    // removing from flusing is slightly more expensive for something that is rare event (delete of a btree). So we
+    // remove the map right away to minimize this cost.
+    {
+        std::unique_lock lg(m_index_map_mtx);
+        auto it = m_index_map.find(uuid);
+        if (it == m_index_map.end()) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
+
+        m_ordinal_index_map.erase(ordinal);
+        m_index_map.erase(it);
+    }
+
+    // We cannot unreserve the ordinal, until we complete the destroy in underlying tree, otherwise, there could be 2
+    // live btrees with same ordinal.
+    return std::move(fut).thenValue([this, ordinal](auto&&) {
+        m_ordinal_reserver->unreserve(ordinal);
+        return folly::makeFuture< folly::Unit >(folly::Unit{});
+    });
+}
+
+shared< Index > IndexService::get_index_table(uuid_t uuid) const {
+    std::shared_lock lg(m_index_map_mtx);
+    auto const it = m_index_map.find(uuid);
+    return (it != m_index_map.cend()) ? it->second : nullptr;
+}
+
+shared< Index > IndexService::get_index_table(uint32_t ordinal) const {
+    std::shared_lock lg(m_index_map_mtx);
+    auto const it = m_ordinal_index_map.find(ordinal);
+    return (it != m_ordinal_index_map.cend()) ? it->second : nullptr;
+}
+
+std::vector< shared< Index > > IndexService::get_all_index_tables() const {
+    std::shared_lock lg(m_index_map_mtx);
+    std::vector< shared< Index > > v;
+    std::transform(m_index_map.begin(), m_index_map.end(), std::back_inserter(v),
+                   [](auto const& kv) { return kv.second; });
+    return v;
 }
 
 uint32_t IndexService::reserve_ordinal() { return m_ordinal_reserver->reserve(); }
 
-bool IndexService::reserve_ordinal(uint32_t ordinal) {
-    if (m_ordinal_reserver->is_reserved(ordinal)) {
-        LOGERROR("ordinal {} is already reserved", ordinal);
-        return false;
-    }
-    m_ordinal_reserver->reserve(ordinal);
-    return true;
-}
-
-bool IndexService::unreserve_ordinal(uint32_t ordinal) {
-    if (!m_ordinal_reserver->is_reserved(ordinal)) {
-        LOGERROR("ordinal {} doesn't exist", ordinal);
-        return false;
-    }
-    m_ordinal_reserver->unreserve(ordinal);
-    return true;
-}
-
-void IndexService::start() {
-    // Start Writeback cache
-    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, m_wbcache_sb, hs()->evictor(),
-                                                  hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
-
-    // Load any index tables which are to loaded from meta blk
-    for (auto const& [meta_cookie, buf] : m_itable_sbs) {
-        superblk< index_table_sb > sb;
-        sb.load(buf, meta_cookie);
-        auto inode = sb->total_interior_nodes;
-        auto lnode = sb->total_leaf_nodes;
-        auto depth = sb->btree_depth;
-        LOGINFO("sb metrics interior {},  leaf: {} depth {}", inode, lnode, depth);
-        auto tbl = m_svc_cbs->on_index_table_found(std::move(sb));
-        tbl->load_metrics(inode, lnode, depth);
-        reserve_ordinal(tbl->ordinal());
-        add_index_table(tbl);
-    }
-
-    // Recover the writeback cache, which in-turns recovers any index table nodes
-    m_wb_cache->recover(m_wbcache_sb.second);
-
-    // Notify each table that we have completed recovery
-    std::unique_lock lg(m_index_map_mtx);
-    for (const auto& [_, tbl] : m_index_map) {
-        tbl->recovery_completed();
-#ifdef _PRERELEASE
-        tbl->audit_tree();
-#endif
-    }
-    // Force taking cp after recovery done. This makes sure that the index table is in consistent state and dirty
-    // buffer after recovery can be added to dirty list for flushing in the new cp
-    hs()->cp_mgr().trigger_cp_flush(true /* force */);
-}
-
-void IndexService::write_sb(uint32_t ordinal) {
-    if (is_stopping()) return;
-    incr_pending_request_num();
-    std::unique_lock lg(m_index_map_mtx);
-    auto const it = m_ordinal_index_map.find(ordinal);
-    if (it != m_ordinal_index_map.cend()) { it->second->update_sb(); }
-    decr_pending_request_num();
-}
-
-IndexService::~IndexService() { m_wb_cache.reset(); }
-
-bool IndexService::sanity_check(const uint32_t index_ordinal, const IndexBufferPtrList& bufs) const {
-    auto tbl = get_index_table(index_ordinal);
-    if (!tbl) {
-        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", index_ordinal);
-    }
-    return tbl->sanity_check(bufs);
-}
-
-void IndexService::stop() {
-    start_stopping();
-    while (true) {
-        if (!get_pending_request_num()) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-    std::unique_lock lg(m_index_map_mtx);
-    for (auto& [_, table] : m_index_map)
-        table->stop();
-}
-
-uint64_t IndexService::num_tables() {
-    std::unique_lock lg(m_index_map_mtx);
-    return m_index_map.size();
-}
-
-bool IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
-    std::unique_lock lg(m_index_map_mtx);
-    m_index_map.insert(std::make_pair(tbl->uuid(), tbl));
-    m_ordinal_index_map.insert(std::make_pair(tbl->ordinal(), tbl));
-    decr_pending_request_num();
-    return true;
-}
-
-bool IndexService::remove_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
-    if (is_stopping()) return false;
-    incr_pending_request_num();
-    std::unique_lock lg(m_index_map_mtx);
-    if (!unreserve_ordinal(tbl->ordinal())) {
-        decr_pending_request_num();
-        return false;
-    }
-    m_index_map.erase(tbl->uuid());
-    m_ordinal_index_map.erase(tbl->ordinal());
-    decr_pending_request_num();
-    return true;
-}
-
-std::shared_ptr< IndexTableBase > IndexService::get_index_table(uuid_t uuid) const {
-    if (is_stopping()) return nullptr;
-    incr_pending_request_num();
-    std::unique_lock lg(m_index_map_mtx);
-    auto const it = m_index_map.find(uuid);
-    auto ret = (it != m_index_map.cend()) ? it->second : nullptr;
-    decr_pending_request_num();
-    return ret;
-}
-
-std::shared_ptr< IndexTableBase > IndexService::get_index_table(uint32_t ordinal) const {
-    if (is_stopping()) return nullptr;
-    incr_pending_request_num();
-    std::unique_lock lg(m_index_map_mtx);
-    auto const it = m_ordinal_index_map.find(ordinal);
-    auto ret = (it != m_ordinal_index_map.cend()) ? it->second : nullptr;
-    decr_pending_request_num();
-    return ret;
-}
-
-void IndexService::repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf) {
-    auto tbl = get_index_table(ordinal);
-    if (tbl) {
-        tbl->repair_node(node_buf);
-    } else {
-        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", ordinal);
-    }
-}
-
-void IndexService::parent_recover(uint32_t ordinal, IndexBufferPtr const& node_buf) {
-    auto tbl = get_index_table(node_buf->m_index_ordinal);
-    if (tbl) {
-        tbl->delete_stale_children(node_buf);
-    } else {
-        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected",
-                      node_buf->m_index_ordinal);
-    }
-}
-
-void IndexService::update_root(uint32_t ordinal, IndexBufferPtr const& node_buf) {
-    auto tbl = get_index_table(ordinal);
-    if (tbl) {
-        tbl->repair_root_node(node_buf);
-    } else {
-        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", ordinal);
-    }
-}
-
-uint32_t IndexService::node_size() const { return m_vdev->atomic_page_size(); }
-
-uint64_t IndexService::used_size() const {
+uint64_t IndexService::space_occupied() const {
     auto size{0};
     std::unique_lock lg{m_index_map_mtx};
-    for (auto& [id, table] : m_index_map) {
-        size += table->used_size();
+    for (auto& [id, index] : m_index_map) {
+        size += index->space_occupied();
     }
     return size;
 }
-
-/////////////////////// IndexBuffer methods //////////////////////////
-IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
-        m_blkid{blkid}, m_bytes{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)} {}
-
-IndexBuffer::IndexBuffer(uint8_t* raw_bytes, BlkId blkid) : m_blkid(blkid), m_bytes{raw_bytes} {}
-
-IndexBuffer::~IndexBuffer() {
-    if (m_bytes) { hs_utils::iobuf_free(m_bytes, sisl::buftag::btree_node); }
-}
-
-std::string IndexBuffer::to_string() const {
-    static std::vector< std::string > state_str = {"CLEAN", "DIRTY", "FLUSHING"};
-    // store m_down_buffers in a string
-    std::string down_bufs = "";
-#ifndef NDEBUG
-    {
-        std::lock_guard lg(m_down_buffers_mtx);
-        if (m_down_buffers.empty()) {
-            fmt::format_to(std::back_inserter(down_bufs), "EMPTY");
-        } else {
-            for (auto const& down_buf : m_down_buffers) {
-                if (auto ptr = down_buf.lock()) {
-                    fmt::format_to(std::back_inserter(down_bufs), "[{}]", voidptr_cast(ptr.get()));
-                }
-            }
-            fmt::format_to(std::back_inserter(down_bufs), "  #down bufs={}", m_down_buffers.size());
-        }
-    }
-#endif
-
-    if (m_is_meta_buf) {
-        return fmt::format("[Meta] Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} down={{{}}}",
-                           voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal,
-                           state_str[int_cast(state())], m_created_cp_id, m_dirtied_cp_id,
-                           m_wait_for_down_buffers.get(), m_node_freed ? " Freed" : "", down_bufs);
-    } else {
-
-        return fmt::format(
-            "Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} up={} node=[{}] down={{{}}}",
-            voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, state_str[int_cast(state())],
-            m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(), m_node_freed ? " Freed" : "",
-            voidptr_cast(const_cast< IndexBuffer* >(m_up_buffer.get())),
-            (m_bytes == nullptr) ? "not attached yet" : r_cast< persistent_hdr_t const* >(m_bytes)->to_compact_string(),
-            down_bufs);
-    }
-}
-
-std::string IndexBuffer::to_string_dot() const {
-    auto str = fmt::format("IndexBuffer {} ", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)));
-    if (m_bytes == nullptr) {
-        fmt::format_to(std::back_inserter(str), " node_buf=nullptr ");
-    } else {
-        fmt::format_to(std::back_inserter(str), " node_buf={} {} created/dirtied={}/{} {}  down_wait#={}",
-                       static_cast< void* >(m_bytes), m_is_meta_buf ? "[META]" : "", m_created_cp_id, m_dirtied_cp_id,
-                       m_node_freed ? "FREED" : "", m_wait_for_down_buffers.get());
-    }
-    return str;
-}
-
-void IndexBuffer::add_down_buffer(const IndexBufferPtr& buf) {
-    m_wait_for_down_buffers.increment();
-#ifndef NDEBUG
-    {
-        std::lock_guard lg(m_down_buffers_mtx);
-        m_down_buffers.push_back(buf);
-    }
-#endif
-}
-
-void IndexBuffer::remove_down_buffer(const IndexBufferPtr& buf) {
-    m_wait_for_down_buffers.decrement();
-#ifndef NDEBUG
-    bool found{false};
-    {
-        std::lock_guard lg(m_down_buffers_mtx);
-        for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
-            if (it->lock() == buf) {
-                buf->m_up_buffer->m_down_buffers.erase(it);
-                found = true;
-                break;
-            }
-        }
-    }
-    HS_DBG_ASSERT(found, "Down buffer {} is linked to up_buf, but up_buf {} doesn't have down_buf in its list",
-                  buf->to_string(), buf->m_up_buffer ? buf->m_up_buffer->to_string() : std::string("nulptr"));
-#endif
-}
-
-#ifndef NDEBUG
-bool IndexBuffer::is_in_down_buffers(const IndexBufferPtr& buf) {
-    std::lock_guard< std::mutex > lg(m_down_buffers_mtx);
-    for (auto const& dbuf : m_down_buffers) {
-        if (dbuf.lock() == buf) { return true; }
-    }
-    return false;
-}
-#endif
-
-MetaIndexBuffer::MetaIndexBuffer(superblk< index_table_sb >& sb) : IndexBuffer{nullptr, BlkId{}}, m_sb{sb} {
-    m_is_meta_buf = true;
-}
-
-MetaIndexBuffer::MetaIndexBuffer(shared< MetaIndexBuffer > const& other) :
-        IndexBuffer{nullptr, BlkId{}}, m_sb{other->m_sb} {
-    m_is_meta_buf = true;
-    m_bytes = hs_utils::iobuf_alloc(m_sb.size(), sisl::buftag::metablk, meta_service().align_size());
-    copy_sb_to_buf();
-}
-
-MetaIndexBuffer::~MetaIndexBuffer() {
-    if (m_bytes) {
-        hs_utils::iobuf_free(m_bytes, sisl::buftag::metablk);
-        m_bytes = nullptr;
-    }
-    m_valid = false;
-}
-
-void MetaIndexBuffer::copy_sb_to_buf() { std::memcpy(m_bytes, m_sb.raw_buf()->cbytes(), m_sb.size()); }
 } // namespace homestore

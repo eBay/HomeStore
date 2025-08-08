@@ -89,7 +89,7 @@ public:
      * @param cb [OPTIONAL] Callback if caller wants specific callback as against common/default callback registed.
      * The callback returns the request back with status of execution
      */
-    logstore_seq_num_t write_async(logstore_req* req, const log_req_comp_cb_t& cb = nullptr);
+    void write_async(logstore_req* req, const log_req_comp_cb_t& cb = nullptr);
 
     /**
      * @brief Write the blob at the user specified seq number
@@ -99,8 +99,7 @@ public:
      * @param cookie : Any cookie or context which will passed back in the callback
      * @param cb Callback upon completion which is called with the status, seq_num and cookie that was passed.
      */
-    logstore_seq_num_t write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
-                                   const log_write_comp_cb_t& cb);
+    void write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb);
 
     /**
      * @brief This method appends the blob into the log and makes a callback at the end of the append.
@@ -126,7 +125,7 @@ public:
      * @param seq_num: Seq number to write to
      * @param b : Blob of data
      */
-    logstore_seq_num_t write_and_flush(logstore_seq_num_t seq_num, const sisl::io_blob& b);
+    void write_and_flush(logstore_seq_num_t seq_num, const sisl::io_blob& b);
 
     /**
      * @brief Read the log provided the sequence number synchronously. This is not the most efficient way to read
@@ -151,11 +150,9 @@ public:
      * completed, a device truncation can be triggered for all the logstores. The device truncation is more
      * expensive and grouping them together yields better results.
      *
-     * @return True on success
-     *
      * Note: this flag currently is not used, meaning all truncate is in memory only;
      */
-    bool truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);
+    void truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);
 
     /**
      * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed
@@ -163,9 +160,8 @@ public:
      * result in out_of_range exception.
      *
      * @param seq_num: Seq_num to fill to.
-     * @return True on success
      */
-    bool fill_gap(logstore_seq_num_t seq_num);
+    void fill_gap(logstore_seq_num_t seq_num);
 
     /**
      * @brief Get the last truncated seqnum upto which we have truncated. If called after recovery, it returns the
@@ -196,9 +192,8 @@ public:
      * @param start_idx  idx to start with;
      * @param cb called with current idx and log buffer.
      * Return value of the cb: true means proceed, false means stop;
-     * @return True on success
      */
-    bool foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb);
+    void foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb);
 
     /**
      * @brief Get the store id of this HomeLogStore
@@ -232,9 +227,8 @@ public:
      *
      * @param seq_num Sequence number upto which logs are to be flushed. If not provided, will wait to flush all seq
      * numbers issued prior.
-     * @return True on success
      */
-    bool flush(logstore_seq_num_t upto_seq_num = invalid_lsn());
+    void flush(logstore_seq_num_t upto_seq_num = invalid_lsn());
 
     /**
      * @brief Rollback the given instance to the given sequence number
@@ -283,8 +277,6 @@ public:
 
     auto get_comp_cb() const { return m_comp_cb; }
 
-    void stop();
-
 private:
     logstore_id_t m_store_id;
     std::shared_ptr< LogDev > m_logdev;
@@ -303,18 +295,5 @@ private:
     LogStoreServiceMetrics& m_metrics;
 
     logdev_key m_trunc_ld_key{0, 0};
-
-private:
-    // graceful shutdown related fields
-    std::atomic_bool m_stopping{false};
-    mutable std::atomic_uint64_t pending_request_num{0};
-
-    bool is_stopping() const { return m_stopping.load(); }
-    void start_stopping() { m_stopping = true; }
-
-    uint64_t get_pending_request_num() const { return pending_request_num.load(); }
-
-    void incr_pending_request_num() const { pending_request_num++; }
-    void decr_pending_request_num() const { pending_request_num--; }
 };
 } // namespace homestore

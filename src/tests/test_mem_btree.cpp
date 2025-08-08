@@ -22,17 +22,15 @@
 #include <sisl/utility/enum.hpp>
 #include <boost/algorithm/string.hpp>
 
-#include <homestore/btree/mem_btree.hpp>
 #include "test_common/range_scheduler.hpp"
-#include <homestore/btree/mem_btree.hpp>
-#include <homestore/btree/detail/simple_node.hpp>
-#include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/detail/prefix_node.hpp>
+#include <homestore/homestore.hpp>
+#include <homestore/btree/node_variant/simple_node.hpp>
+#include <homestore/btree/node_variant/varlen_node.hpp>
+#include <homestore/btree/node_variant/prefix_node.hpp>
 #include "btree_helpers/btree_test_helper.hpp"
 
 using namespace homestore;
-SISL_LOGGING_DEF(btree)
-SISL_LOGGING_INIT(btree)
+ 
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(
@@ -42,8 +40,6 @@ SISL_OPTION_GROUP(
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
-    (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
-     ""),
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_fibers, "", "num_fibers", "number of fibers", ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
@@ -57,43 +53,43 @@ SISL_OPTION_GROUP(
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"))
 
 struct FixedLenBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestFixedValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = IndexStore::Type::MEM_BTREE;
 };
 
 struct VarKeySizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestFixedValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_KEY;
     static constexpr btree_node_type interior_node_type = btree_node_type::VAR_KEY;
+    static constexpr IndexStore::Type store_type = IndexStore::Type::MEM_BTREE;
 };
 
 struct VarValueSizeBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestVarLenValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = IndexStore::Type::MEM_BTREE;
 };
 
 struct VarObjSizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestVarLenValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
     static constexpr btree_node_type interior_node_type = btree_node_type::VAR_OBJECT;
+    static constexpr IndexStore::Type store_type = IndexStore::Type::MEM_BTREE;
 };
 
 struct PrefixIntervalBtreeTest {
-    using BtreeType = MemBtree< TestIntervalKey, TestIntervalValue >;
     using KeyType = TestIntervalKey;
     using ValueType = TestIntervalValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::PREFIX;
+    static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED_PREFIX;
     static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
+    static constexpr IndexStore::Type store_type = IndexStore::Type::MEM_BTREE;
 };
 
 template < typename TestType >
@@ -106,16 +102,12 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
-#ifdef _PRERELEASE
-        this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
-#endif
-        this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
-        this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
+        this->m_bt = std::make_shared< Btree< K, V > >(this->m_cfg);
     }
 };
 
-using BtreeTypes = testing::Types< FixedLenBtreeTest, PrefixIntervalBtreeTest, VarKeySizeBtreeTest,
+// TODO Enable PrefixIntervalBtreeTest later
+using BtreeTypes = testing::Types< /* PrefixIntervalBtreeTest, */ FixedLenBtreeTest, VarKeySizeBtreeTest,
                                    VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -291,131 +283,6 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
     this->query_all();
 }
 
-TYPED_TEST(BtreeTest, SimpleTombstone) {
-    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < 20; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    this->move_to_tombstone(10, btree_status_t::success);
-    this->move_to_tombstone(10, btree_status_t::filtered_out);
-    this->move_to_tombstone(40, btree_status_t::not_found);
-}
-
-TYPED_TEST(BtreeTest, SimpleMultiTombstone) {
-    if constexpr (std::is_same_v< TypeParam, PrefixIntervalBtreeTest >) { return; }
-    uint32_t start_key = 500;
-    uint32_t end_key = 1000;
-    LOGDEBUG("Step 1: Do forward sequential insert for [{},{}] entries", start_key, end_key);
-    for (uint32_t i{start_key}; i <= end_key; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    std::vector< std::pair< typename TypeParam::KeyType, typename TypeParam::ValueType > > out;
-    auto format_tombstoned = [](const auto& out) {
-        std::stringstream ss;
-        for (const auto& [k, v] : out) {
-            ss << "[" << k.to_string() << "] =" << v.to_string() << std::endl;
-        }
-        return ss.str();
-    };
-    auto run_and_validate_tombstone = [&](auto s, auto e, auto expect_status, auto expected_size) {
-        this->move_to_tombstone(s, e, out, expect_status);
-        LOGDEBUG("Tombstoned {} keys:\n{}", out.size(), format_tombstoned(out));
-        ASSERT_EQ(out.size(), expected_size) << "Tombstoned keys should be " << expected_size << ", but got "
-                                             << out.size() << " keys in range [" << s << ", " << e << "]";
-    };
-    auto sum_tombstoned = 0;
-    {
-        run_and_validate_tombstone(0, start_key - 100, btree_status_t::not_found, 0);
-        run_and_validate_tombstone(end_key + 100, end_key + 2000, btree_status_t::not_found, 0);
-    }
-    {
-        run_and_validate_tombstone(start_key - 100, start_key, btree_status_t::success, 1);
-        run_and_validate_tombstone(start_key - 100, start_key, btree_status_t::success, 0);
-        sum_tombstoned += 1;
-    }
-    {
-        run_and_validate_tombstone(start_key + 20, start_key + 40, btree_status_t::success, 21);
-        run_and_validate_tombstone(start_key + 20, start_key + 40, btree_status_t::success, 0);
-        run_and_validate_tombstone(start_key + 20, start_key + 41, btree_status_t::success, 1);
-        run_and_validate_tombstone(start_key + 45, start_key + 50, btree_status_t::success, 6);
-        run_and_validate_tombstone(start_key + 20, start_key + 60, btree_status_t::success, 41 - 28);
-        sum_tombstoned += 21 + 1 + 6 + (41 - 28);
-    }
-
-    {
-        run_and_validate_tombstone(end_key, end_key + 1000, btree_status_t::success, 1);
-        run_and_validate_tombstone(end_key, end_key + 1000, btree_status_t::success, 0);
-        sum_tombstoned += 1;
-    }
-    {
-        run_and_validate_tombstone(0, end_key + 1000, btree_status_t::success,
-                                   end_key - start_key - sum_tombstoned + 1);
-        run_and_validate_tombstone(0, end_key + 1000, btree_status_t::success, 0);
-    }
-    this->range_remove_existing(start_key, end_key - start_key + 1);
-    ASSERT_EQ(this->m_bt->count_keys(), 0);
-    // creating two intervals
-    uint32_t start_key1 = 1000;
-    uint32_t end_key1 = 1999;
-    uint32_t start_key2 = 3000;
-    uint32_t end_key2 = 3999;
-    sum_tombstoned = 0;
-    for (uint32_t i{start_key1}; i <= end_key1; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    for (uint32_t i{start_key2}; i <= end_key2; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    {
-        run_and_validate_tombstone(start_key1 + 100, end_key2 + 100, btree_status_t::success, 1900);
-        run_and_validate_tombstone(start_key1 + 100, end_key2 + 100, btree_status_t::success, 0);
-    }
-}
-
-TYPED_TEST(BtreeTest, SimpleGC) {
-    if constexpr (std::is_same_v< TypeParam, PrefixIntervalBtreeTest >) { return; }
-    uint32_t start_key1 = 1000;
-    uint32_t end_key1 = 1999;
-    uint32_t start_key2 = 3000;
-    uint32_t end_key2 = 3999;
-    std::vector< std::pair< typename TypeParam::KeyType, typename TypeParam::ValueType > > out;
-    for (uint32_t i{start_key1}; i <= end_key1; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    for (uint32_t i{start_key2}; i <= end_key2; ++i) {
-        this->put(i, btree_put_type::INSERT);
-    }
-    this->print_keys(" Before tombstone ");
-    auto start_tombstone = start_key1 + 100;
-    auto end_tombstone = end_key1 - 100;
-    auto expected_size = end_key1 - 200 - start_key1 + 1;
-    this->move_to_tombstone(start_tombstone, end_tombstone, out, btree_status_t::success);
-    ASSERT_EQ(out.size(), expected_size) << "Tombstoned keys should be " << expected_size << ", but got " << out.size()
-                                         << " keys in range [" << start_tombstone << ", " << end_tombstone << "]";
-
-    this->print_keys(fmt::format(" After tombstone [{},{}] ", start_tombstone, end_tombstone));
-    LOGINFO("Step 2: Do GC on the tree for keys in range [{}, {}]", start_key1, end_key2);
-    this->remove_tombstone(start_key1, end_key2, out, btree_status_t::success);
-    expected_size = end_key2 - start_key1 + 1 - 1000 - expected_size;
-    ASSERT_EQ(out.size(), expected_size) << "# of keys after GCs hould be " << expected_size << ", but got "
-                                         << out.size() << " keys in range [" << start_key1 << ", " << end_key2 << "]";
-    auto format_tombstoned = [](const auto& out) {
-        std::stringstream ss;
-        for (const auto& [k, v] : out) {
-            ss << "[" << k.to_string() << "] =" << v.to_string() << std::endl;
-        }
-        return ss.str();
-    };
-
-    this->print_keys(fmt::format(" After GC {} entries are still in range [{},{}] ", out.size(), start_key1, end_key2));
-    LOGDEBUG("GC {} keys:\n{}", out.size(), format_tombstoned(out));
-    this->remove_tombstone(start_key1, end_key2, out, btree_status_t::not_found);
-    ASSERT_EQ(out.size(), expected_size) << "After GC, no keys should be left in range [" << start_key1 << ", "
-                                         << end_key2 << "] but got " << out.size();
-    LOGDEBUG("GC {} keys:\n{}", out.size(), format_tombstoned(out));
-}
-
 template < typename TestType >
 struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
@@ -433,12 +300,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
                                                      .hugepage_size_mb = 0});
 
         BtreeTestHelper< TestType >::SetUp();
-#ifdef _PRERELEASE
-        this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
-#endif
-        this->m_cfg.m_max_merge_level = SISL_OPTIONS["max_merge_level"].as< uint8_t >();
-        this->m_cfg.m_merge_turned_on = !SISL_OPTIONS["disable_merge"].as< bool >();
-        this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
+        this->m_bt = std::make_shared< Btree< K, V > >(this->m_cfg);
     }
 
     void TearDown() override {

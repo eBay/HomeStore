@@ -44,7 +44,6 @@
  * CP end :- when cp flush is completed. It frees the CP.
  */
 namespace homestore {
-SISL_LOGGING_DECL(cp, replay)
 
 #define CP_PERIODIC_LOG(level, cp_id, msg, ...)                                                                        \
     HS_PERIODIC_DETAILED_LOG(level, cp, "cp_id", cp_id, , , msg, ##__VA_ARGS__)
@@ -70,11 +69,6 @@ class CPContext;
 class CPManager;
 
 VENUM(cp_consumer_t, uint8_t,
-      // Sealer is a special consumer that provides information regarding where the cp is up to.
-      // It will be the first one during cp switch over , as a conservative marker of everything
-      // before or equals to this point, should be in current cp, possibly some consumer are above this point which is
-      // fine. And Sealer is the last one during cp flush after all other services flushed successfully.
-      SEALER = 3,
       HS_CLIENT = 0,       // Client of the homestore module
       INDEX_SVC = 1,       // Index service module
       BLK_DATA_SVC = 2,    // Block data service module
@@ -89,10 +83,7 @@ struct CP {
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
     folly::SharedPromise< bool > m_comp_promise;
-    Clock::time_point m_cp_start_time;
-#ifdef _PRERELEASE
-    std::atomic< bool > m_abrupt_cp{false};
-#endif
+    bool m_is_on_shutdown{false}; // Is this CP taken as part of shutdown of homestore
 
 public:
     CP(CPManager* mgr) : m_cp_mgr{mgr} {}

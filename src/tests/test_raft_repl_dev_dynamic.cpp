@@ -39,17 +39,12 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     uint32_t member_in = num_replicas;
 
     g_helper->sync_for_test_start(num_members);
-    std::string task_id = "task_id";
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::TASK_NOT_FOUND);
-    });
     if (g_helper->replica_num() < num_replicas) {
         // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -58,14 +53,6 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
 
     g_helper->sync_for_verify_start(num_members);
     LOGINFO("sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::IN_PROGRESS);
-        std::string new_task_id = "mismatched_task_id";
-        replace_member(db, new_task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
-                       ReplServiceError::REPLACE_MEMBER_TASK_MISMATCH);
-    });
     if (is_replica_num_in({0, 1, member_in})) {
         // Skip the member which is going to be replaced. Validate data on all other replica's.
         LOGINFO("Validate all data written so far by reading them replica={}", g_helper->replica_num());
@@ -74,7 +61,7 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     g_helper->sync_for_verify_start(num_members);
     LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
 
-    // wait for background reaper thread to trigger complete_replace_member
+    //wait for background reaper thread to trigger complete_replace_member
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -88,11 +75,6 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::COMPLETED);
-    });
     LOGINFO("ReplaceMember test done replica={}", g_helper->replica_num());
 }
 
@@ -127,13 +109,11 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         LOGINFO("Shutdown replica 2");
     }
 
-    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         // Replace down replica 2 with spare replica 3 with commit quorum 1
         // so that leader can go ahead with replacing member.
-        LOGINFO("Replace member started, task_id={}", task_id);
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in),
-                       1 /* commit quorum*/);
+        LOGINFO("Replace member started");
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 1 /* commit quorum*/);
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
         LOGINFO("Leader completed num_io={}", num_io_entries);
     }
@@ -148,12 +128,6 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         LOGINFO("Validate all data written so far by reading them replica={}", g_helper->replica_num());
         this->validate_data();
     }
-    g_helper->sync_for_verify_start(num_members);
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::IN_PROGRESS);
-    });
 
     if (g_helper->replica_num() == 1) {
         LOGINFO("Start replica 1");
@@ -193,13 +167,12 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
     }
-    // shut down before replace member
+    //shut down before replace member
     this->shutdown_replica(2);
     LOGINFO("Shutdown replica 2");
 
-    std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -222,11 +195,6 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
     // data synced, waiting for removing learner
     LOGINFO("data synced, sync for completing replace member, replica={}", g_helper->replica_num());
     g_helper->sync_for_verify_start(num_members);
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::IN_PROGRESS);
-    });
     // Since the out_member stopped, it cannot response to remove_srv req, as a result the first time will get CANCELLED
     // error, so waiting time is longer than other tests.
     if (g_helper->replica_num() == 2) {
@@ -243,26 +211,9 @@ TEST_F(ReplDevDynamicTest, OutMemberDown) {
         LOGINFO("Repl dev destroyed on out member replica={}", g_helper->replica_num());
         db->set_zombie();
     }
-    g_helper->sync_for_test_start(num_members);
-    if (g_helper->replica_num() != 2) {
-        this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-            auto status = check_replace_member_status(db, task_id, g_helper->replica_id(member_out),
-                                                      g_helper->replica_id(member_in));
-            // out_member is down, so it can not response to remove req. Based on nuraft logic, leader will wait for
-            // timeout and remove it automatically. Simulate next complete_replace_member retry.
-            if (status == ReplaceMemberStatus::IN_PROGRESS) {
-                auto& raft_repl_svc = dynamic_cast< RaftReplService& >(hs()->repl_service());
-                raft_repl_svc.monitor_replace_member_replication_status();
-                LOGINFO("Simulate reaper thread to complete_replace_member");
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-            ASSERT_EQ(check_replace_member_status(db, task_id, g_helper->replica_id(member_out),
-                                                  g_helper->replica_id(member_in)),
-                      ReplaceMemberStatus::COMPLETED);
-        });
-    }
+
     g_helper->sync_for_cleanup_start(num_members);
-    LOGINFO("OutMemberDown test done replica={}", g_helper->replica_num());
+    LOGINFO("OneMemberDown test done replica={}", g_helper->replica_num());
 }
 
 TEST_F(ReplDevDynamicTest, LeaderReplace) {
@@ -282,7 +233,7 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
     uint32_t member_in = num_replicas;
 
     g_helper->sync_for_test_start(num_members);
-    std::string task_id = "task_id";
+
     if (g_helper->replica_num() == member_out) {
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
@@ -291,13 +242,13 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
         // Leader will return error NOT_LEADER and yield leadership, sleep and connect again
         // to the new leader.
         LOGINFO("Replace old leader");
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
                        ReplServiceError::NOT_LEADER);
         LOGINFO("Replace member leader yield done");
     }
     std::this_thread::sleep_for(std::chrono::seconds(3));
     if (g_helper->replica_num() != member_in) {
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         LOGINFO("Replace member old leader done");
     }
 
@@ -313,12 +264,8 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
         this->validate_data();
     }
 
+    g_helper->sync_for_verify_start(num_members);
     LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::IN_PROGRESS);
-    });
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -333,11 +280,6 @@ TEST_F(ReplDevDynamicTest, LeaderReplace) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::COMPLETED);
-    });
     LOGINFO("LeaderReplace test done replica={}", g_helper->replica_num());
 }
 
@@ -361,13 +303,13 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
         LOGINFO("Restart replica 1, ");
         this->restart_replica(15);
     }
-    std::string task_id = "task_id";
+
     if (g_helper->replica_num() == 0) {
         // With existing raft repl dev group, write IO's, validate and call replace_member on leader.
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
 
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in));
         std::this_thread::sleep_for(std::chrono::seconds(3));
     } else if (g_helper->replica_num() == member_in) {
         LOGINFO("Wait for commits replica={}", g_helper->replica_num());
@@ -382,12 +324,8 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
         this->validate_data();
     }
 
+    g_helper->sync_for_verify_start(num_members);
     LOGINFO("data synced, sync_for_verify_state replica={} ", g_helper->replica_num());
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::IN_PROGRESS);
-    });
     if (g_helper->replica_num() == member_out) {
         // The out member will have the repl dev destroyed.
         auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -401,11 +339,6 @@ TEST_F(ReplDevDynamicTest, OneMemberRestart) {
     }
 
     g_helper->sync_for_cleanup_start(num_members);
-    this->run_on_leader(db, [this, db, &task_id, member_out, member_in] {
-        ASSERT_EQ(
-            check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
-            ReplaceMemberStatus::COMPLETED);
-    });
     LOGINFO("OneMemberRestart test done replica={}", g_helper->replica_num());
 }
 
@@ -429,11 +362,11 @@ TEST_F(ReplDevDynamicTest, ValidateRequest) {
 
     g_helper->sync_for_test_start(num_members);
 
-    // shut down before replace member
+    //shut down before replace member
     this->shutdown_replica(1);
     LOGINFO("Shutdown replica 1");
 
-    // wait for shutdown
+    //wait for shutdown
     std::this_thread::sleep_for(std::chrono::seconds(3));
     g_helper->sync_for_verify_start(num_members);
     if (g_helper->replica_num() == 0) {
@@ -441,18 +374,17 @@ TEST_F(ReplDevDynamicTest, ValidateRequest) {
         LOGINFO("Writing on leader num_io={} replica={}", num_io_entries, g_helper->replica_num());
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
     }
-
-    std::string task_id = "task_id";
+    g_helper->sync_for_verify_start(num_members);
     if (g_helper->replica_num() == 0) {
         // generate uuid
         replica_id_t fake_member_out = boost::uuids::random_generator()();
         replica_id_t fake_member_in = boost::uuids::random_generator()();
         LOGINFO("test SERVER_NOT_FOUND");
-        replace_member(db, task_id, fake_member_out, fake_member_in, 0, ReplServiceError::SERVER_NOT_FOUND);
+        replace_member(db, fake_member_out, fake_member_in, 0, ReplServiceError::SERVER_NOT_FOUND);
         LOGINFO("test replace_member already complete");
-        replace_member(db, task_id, fake_member_out, g_helper->replica_id(0));
+        replace_member(db, fake_member_out, g_helper->replica_id(0));
         LOGINFO("test QUORUM_NOT_MET", num_io_entries, g_helper->replica_num());
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 0,
                        ReplServiceError::QUORUM_NOT_MET);
     }
 

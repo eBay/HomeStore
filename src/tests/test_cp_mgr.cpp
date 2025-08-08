@@ -27,10 +27,9 @@
 
 using namespace homestore;
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
-SISL_LOGGING_DECL(test_cp_mgr)
 
 SISL_OPTION_GROUP(test_cp_mgr,
                   (num_records, "", "num_records", "number of record to test",

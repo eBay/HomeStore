@@ -35,7 +35,7 @@
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 SISL_OPTIONS_ENABLE(logging, log_store_benchmark, iomgr, test_common_setup)
 SISL_OPTION_GROUP(log_store_benchmark,

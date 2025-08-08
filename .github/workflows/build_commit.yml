@@ -20,62 +20,26 @@ on:
         type: string
 
 jobs:
-  SislDeps:
-    uses: eBay/sisl/.github/workflows/build_dependencies.yml@master
-    with:
-      branch: master
-      platform: ${{ inputs.platform }}
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-      tooling: None
-    if: ${{ github.event_name != 'pull_request' }}
+  HomestorePRBuild:
+     uses: ./.github/workflows/build_dependencies.yml
+     with:
+       branch: ${{ github.ref }}
+       platform: ${{ inputs.platform }}
+       build-type: ${{ inputs.build-type }}
+       malloc-impl: ${{ inputs.malloc-impl }}
+       prerelease: ${{ inputs.prerelease }}
+       tooling: ${{ inputs.tooling }}
+       testing : 'True'
+     if: ${{ github.event_name == 'pull_request' }}
 
-  NuraftMesgDeps:
-    needs: SislDeps
-    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@main
-    with:
-      branch: main
-      platform: ${{ inputs.platform }}
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-      tooling: None
-    if: ${{ github.event_name != 'pull_request' }}
-
-  IOMgrDeps:
-    needs: SislDeps
-    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
-    with:
-      branch: master
-      platform: ${{ inputs.platform }}
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-      tooling: None
-    if: ${{ github.event_name != 'pull_request' }}
-
-  HomestoreDeps:
-    needs: [IOMgrDeps, NuraftMesgDeps]
-    uses: ./.github/workflows/build_dependencies.yml
-    with:
-      branch: ${{ github.ref }}
-      platform: ${{ inputs.platform }}
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-      tooling: ${{ inputs.tooling }}
-      testing: 'True'
-    if: ${{ github.event_name != 'pull_request' }}
-
-  HomestoreBuild:
-    uses: ./.github/workflows/build_dependencies.yml
-    with:
-      branch: ${{ github.ref }}
-      platform: ${{ inputs.platform }}
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-      tooling: ${{ inputs.tooling }}
-      testing: 'True'
-    if: ${{ github.event_name == 'pull_request' }}
+  HomestoreCommitBuild:
+     uses: ./.github/workflows/build_dependencies.yml
+     with:
+       branch: ${{ github.ref }}
+       platform: ${{ inputs.platform }}
+       build-type: ${{ inputs.build-type }}
+       malloc-impl: ${{ inputs.malloc-impl }}
+       prerelease: ${{ inputs.prerelease }}
+       tooling: ${{ inputs.tooling }}
+       testing: 'False'
+     if: ${{ github.event_name != 'pull_request' }}

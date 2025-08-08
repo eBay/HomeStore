@@ -49,11 +49,9 @@ extern "C" {
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+ 
 
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
-
-SISL_LOGGING_DECL(test_meta_blk_mgr)
 
 struct Param {
     uint64_t num_io;
@@ -125,7 +123,7 @@ public:
 protected:
     void SetUp() override { m_helper.start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}}); }
 
-    void TearDown() override {};
+    void TearDown() override{};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
@@ -402,7 +400,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -840,7 +838,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     // write 1/2 of the available blks;
     for (uint64_t i = 0; i < max_write_times / 2; i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
-        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
+        LOGDEBUG("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
 
     // restart homestore
@@ -851,7 +849,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     this->register_client();
     for (uint64_t i = 0; i < (max_write_times / 2); i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
-        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
+        LOGDEBUG("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
     this->shutdown();
 }

@@ -34,9 +34,6 @@
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
 
-SISL_LOGGING_DECL(blkalloc)
-SISL_LOGGING_DECL(transient)
-
 namespace homestore {
 #define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_DBG_ASSERT(cond, msg, ...)                                                                            \

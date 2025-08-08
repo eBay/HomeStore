@@ -40,7 +40,6 @@ using namespace homestore;
 // this is used to splite the setup and teardown from the benchmark to get a more accurate result
 void* g_btree_helper{nullptr};
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, index_btree_benchmark, iomgr, test_common_setup)
 
 SISL_OPTION_GROUP(index_btree_benchmark,
