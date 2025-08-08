@@ -220,6 +220,8 @@ public:
     void release_data();
     flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
     void release_fb_builder() { m_fb_builder.Release(); }
+    void disable_push_data() { m_enable_push_data = false; }
+    bool is_push_data_enabled() const { return m_enable_push_data; }
 
 public:
     // IMPORTANT: Avoid declaring variables public, since this structure carries various entries and try to work in
@@ -260,6 +262,7 @@ private:
     sisl::io_blob_safe m_buf_for_unaligned_data;
     intrusive< sisl::GenericRpcData > m_pushed_data;
     sisl::GenericClientResponse m_fetched_data;
+    bool m_enable_push_data{true};
 };
 
 //
