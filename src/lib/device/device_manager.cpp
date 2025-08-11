@@ -115,7 +115,10 @@ void DeviceManager::format_devices() {
     // Get common iomgr_attributes
     for (auto& dinfo : m_dev_infos) {
         format_single_device(dinfo);
-    }
+    } 
+
+    // Verify the first blocks to see if the devs are unique
+    HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system");
 }
 
 uint32_t DeviceManager::format_single_device(dev_info& dinfo) {
@@ -152,6 +155,35 @@ uint32_t DeviceManager::format_single_device(dev_info& dinfo) {
 
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
     return pdev_id;
+}
+
+bool DeviceManager::verify_unique_devs() const {
+    bool ret = true;
+    std::unordered_map< uint32_t, std::pair< pdev_info_header, uint32_t > > pdev_info_map;
+    for (auto& pdev : m_all_pdevs) {
+        if (!pdev) { continue; }
+        auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
+        if (auto err = pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset()); err) {
+            LOGERROR("Failed to read first block from device={}, error={}", pdev->get_devname(), err.message());
+            ret = false;
+            continue;
+        }
+        auto pdev_hdr = (r_cast< first_block* >(buf))->this_pdev_hdr;
+        if (pdev_info_map.find(pdev_hdr.pdev_id) != pdev_info_map.end()) {
+            pdev_info_map[pdev_hdr.pdev_id].second++;
+        } else {
+            pdev_info_map[pdev_hdr.pdev_id] = {pdev_hdr, 1};
+        }
+        hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+    }
+
+    for (auto const& [pdev_id, val] : pdev_info_map) {
+        if (val.second > 1) {
+            LOGERROR("Found duplicate pdev: [{}] with count={}", val.first.to_string(), val.second);
+            ret = false;
+        }
+    }
+    return ret;
 }
 
 void DeviceManager::load_devices() {
@@ -269,6 +301,9 @@ void DeviceManager::load_devices() {
         }
     }
     commit_formatting();
+
+    // 5. verify if all the pdevs are unique
+    HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system after loading devices");
 }
 
 void DeviceManager::commit_formatting() {
