@@ -6,6 +6,8 @@ include_directories (BEFORE ../tests/)
 include_directories (BEFORE .)
 add_subdirectory(test_scripts)
 
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/test_data/" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/test_data/")
+
 can_build_nonio_tests(build_nonio_tests)
 if (${build_nonio_tests})
     link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})

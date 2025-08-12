@@ -689,6 +689,51 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     LOGINFO("RaftLogTruncationTest done");
 }
 
+TEST_F(RaftReplDevTest, WriteWithSSL) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    // Enable SSL for the repl_dev
+    LOGINFO("Setup SSL for the repl_dev");
+    static const std::string test_data_dir = "test_data";
+    static const std::string cert_file = "/tmp/cert.pem";
+    static const std::string key_file = "/tmp/key.pem";
+
+    std::filesystem::copy(fmt::format("{}/cert.pem", test_data_dir), cert_file,
+                          std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy(fmt::format("{}/key.pem", test_data_dir), key_file,
+                          std::filesystem::copy_options::overwrite_existing);
+
+    std::string prev_ssl_ca_file = "";
+    HS_SETTINGS_FACTORY().modifiable_settings([&prev_ssl_ca_file](auto& s) {
+        prev_ssl_ca_file = s.consensus.ssl_ca_file;
+        s.consensus.ssl_ca_file = "/tmp/cert.pem";
+    });
+    HS_SETTINGS_FACTORY().save();
+
+    // init sisl info
+    ioenvironment.set_ssl_certs(cert_file, key_file);
+    g_helper->sync_for_verify_start();
+
+    LOGINFO("Restart all the replicas with SSL enabled");
+    g_helper->restart();
+    g_helper->sync_for_test_start();
+
+    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+
+    // Set the settings back and save.
+    LOGINFO("Set the ssl_ca_file back to previous value={}", prev_ssl_ca_file);
+    HS_SETTINGS_FACTORY().modifiable_settings(
+        [prev_ssl_ca_file](auto& s) { s.consensus.ssl_ca_file = prev_ssl_ca_file; });
+    HS_SETTINGS_FACTORY().save();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;
