@@ -84,12 +84,14 @@ RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : Generic
 void RaftReplService::start() {
     // Step 1: Initialize the Nuraft messaging service, which starts the nuraft service
     m_my_uuid = m_repl_app->get_my_repl_id();
+    std::string ssl_ca_file = HS_DYNAMIC_CONFIG(consensus.ssl_ca_file);
     auto params = nuraft_mesg::Manager::Params{
         .server_uuid_ = m_my_uuid,
         .mesg_port_ = m_repl_app->lookup_peer(m_my_uuid).second,
         .default_group_type_ = "homestore_replication",
         .ssl_key_ = ioenvironment.get_ssl_key(),
         .ssl_cert_ = ioenvironment.get_ssl_cert(),
+        .ssl_ca_ = ssl_ca_file.empty() ? ioenvironment.get_ssl_cert() : ssl_ca_file,
         .token_verifier_ = std::dynamic_pointer_cast< sisl::GrpcTokenVerifier >(ioenvironment.get_token_verifier()),
         .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client()),
         .max_receive_message_size_ = HS_DYNAMIC_CONFIG(consensus.max_grpc_message_size),

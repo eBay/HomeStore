@@ -131,7 +131,7 @@ public:
                 RELEASE_ASSERT(false, "Gotten lookup_peer call for a non member");
             }
 
-            return std::make_pair(std::string("127.0.0.1"), port);
+            return std::make_pair(std::string("localhost"), port);
         }
 
         homestore::replica_id_t get_my_repl_id() const override { return helper_.my_replica_id_; }

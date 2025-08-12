@@ -309,6 +309,9 @@ table Consensus {
 
     // Enable tee logs to console, this is helpful for sherlock to collect logs
     enable_console_log: bool = true;
+
+    // ca file for nuraft mesg client verification
+    ssl_ca_file: string;
 }
 
 table HomeStoreSettings {
