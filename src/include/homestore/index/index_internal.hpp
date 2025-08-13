@@ -61,6 +61,7 @@ struct index_table_sb {
     uint8_t user_sb_bytes[0];
     uint32_t pdev_id;
     uint32_t index_num_chunks{0};
+    uint64_t max_size_bytes{0};
     // List of chunk ids allocated for this index table are stored after this.
     void init_chunks(std::vector< chunk_num_t > const& chunk_ids) {
         index_num_chunks = chunk_ids.size();

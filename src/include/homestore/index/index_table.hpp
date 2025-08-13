@@ -62,7 +62,7 @@ public:
 
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
                uint32_t ordinal = INVALID_ORDINAL, const std::vector< chunk_num_t >& chunk_ids = {},
-               uint32_t pdev_id = 0) :
+               uint32_t pdev_id = 0, uint64_t max_size_bytes = 0) :
             Btree< K, V >{cfg}, m_sb{"index"} {
         uint32_t ord_num = INVALID_ORDINAL;
         if (ordinal != INVALID_ORDINAL) {
@@ -76,6 +76,7 @@ public:
         // Create a superblk for the index table and create MetaIndexBuffer corresponding to that
         m_sb.create(sizeof(index_table_sb) + (chunk_ids.size() * sizeof(chunk_num_t)));
         m_sb->init_chunks(chunk_ids);
+        m_sb->max_size_bytes = max_size_bytes;
         m_sb->pdev_id = pdev_id;
         m_sb->ordinal = ord_num;
         m_sb->uuid = uuid;
