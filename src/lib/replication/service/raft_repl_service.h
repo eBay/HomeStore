@@ -54,6 +54,7 @@ private:
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::timer_handle_t m_replace_member_sync_check_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
+    std::atomic< int32_t > restart_counter{0};
     std::mutex raft_restart_mutex;
 
 public:
