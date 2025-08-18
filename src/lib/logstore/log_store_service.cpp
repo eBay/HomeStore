@@ -142,12 +142,12 @@ logdev_id_t LogStoreService::get_next_logdev_id() {
     return id;
 }
 
-logdev_id_t LogStoreService::create_new_logdev(flush_mode_t flush_mode) {
+logdev_id_t LogStoreService::create_new_logdev(flush_mode_t flush_mode, uuid_t pid) {
     if (is_stopping()) return 0;
     incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     logdev_id_t logdev_id = get_next_logdev_id();
-    auto logdev = create_new_logdev_internal(logdev_id, flush_mode);
+    auto logdev = create_new_logdev_internal(logdev_id, flush_mode, pid);
     logdev->start(true /* format */, m_logdev_vdev);
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
     HS_LOG(INFO, logstore, "Created log_dev={}", logdev_id);
@@ -190,8 +190,9 @@ void LogStoreService::delete_unopened_logdevs() {
     m_unopened_logdev.clear();
 }
 
-std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_t logdev_id, flush_mode_t flush_mode) {
-    auto logdev = std::make_shared< LogDev >(logdev_id, flush_mode);
+std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_t logdev_id, flush_mode_t flush_mode,
+                                                                      uuid_t pid) {
+    auto logdev = std::make_shared< LogDev >(logdev_id, flush_mode, pid);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
     m_id_logdev_map.insert(std::make_pair<>(logdev_id, logdev));
@@ -199,11 +200,11 @@ std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_
     return logdev;
 }
 
-void LogStoreService::open_logdev(logdev_id_t logdev_id, flush_mode_t flush_mode) {
+void LogStoreService::open_logdev(logdev_id_t logdev_id, flush_mode_t flush_mode, uuid_t pid) {
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
     if (it == m_id_logdev_map.end()) {
-        auto logdev = std::make_shared< LogDev >(logdev_id, flush_mode);
+        auto logdev = std::make_shared< LogDev >(logdev_id, flush_mode, pid);
         m_id_logdev_map.emplace(logdev_id, logdev);
         LOGDEBUGMOD(logstore, "log_dev={} does not exist, created!", logdev_id);
     }
@@ -241,13 +242,14 @@ void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* m
         std::shared_ptr< LogDev > logdev;
         auto id = sb->logdev_id;
         auto flush_mode = sb->flush_mode;
+        auto const pid = sb->pid;
         const auto it = m_id_logdev_map.find(id);
         // We could update the logdev map either with logdev or rollback superblks found callbacks.
         if (it != m_id_logdev_map.end()) {
             logdev = it->second;
             HS_LOG(DEBUG, logstore, "Log dev superblk found log_dev={}", id);
         } else {
-            logdev = std::make_shared< LogDev >(id, flush_mode);
+            logdev = std::make_shared< LogDev >(id, flush_mode, pid);
             m_id_logdev_map.emplace(id, logdev);
             // when recover logdev meta blk, we get all the logdevs from the superblk. we put them in m_unopened_logdev
             // too. after logdev meta blks are all recovered, when a client opens a logdev, we remove it from
