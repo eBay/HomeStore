@@ -781,7 +781,7 @@ private:
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
     HomeStoreSafePtr m_hs;                             // Back pointer to homestore
     flush_mode_t m_flush_mode;
-    uuid_t m_parent_id;
+    uuid_t m_parent_id; // uuid of the parent container of this logdev(if any), controlled by user;
 
     folly::SharedMutexWritePriority m_store_map_mtx;
     std::unordered_map< logstore_id_t, logstore_info > m_id_logstore_map;
