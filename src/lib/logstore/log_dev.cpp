@@ -23,6 +23,7 @@
 
 #include <homestore/logstore_service.hpp>
 #include <homestore/meta_service.hpp>
+#include <homestore/fault_cmt_service.hpp>
 #include <homestore/homestore.hpp>
 
 #include "log_dev.hpp"
@@ -43,7 +44,8 @@ SISL_LOGGING_DECL(logstore)
 static bool has_data_service() { return HomeStore::instance()->has_data_service(); }
 // static BlkDataService& data_service() { return HomeStore::instance()->data_service(); }
 
-LogDev::LogDev(logdev_id_t id, flush_mode_t flush_mode) : m_logdev_id{id}, m_flush_mode{flush_mode} {
+LogDev::LogDev(logdev_id_t id, flush_mode_t flush_mode, uuid_t pid) :
+        m_logdev_id{id}, m_flush_mode{flush_mode}, m_parent_id{pid} {
     m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_logdev);
 }
 
@@ -64,7 +66,7 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
     // First read the info block
     if (format) {
         HS_LOG_ASSERT(m_logdev_meta.is_empty(), "Expected meta to be not present");
-        m_logdev_meta.create(m_logdev_id, m_flush_mode);
+        m_logdev_meta.create(m_logdev_id, m_flush_mode, m_parent_id);
         m_vdev_jd->update_data_start_offset(0);
     } else {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(),
@@ -488,11 +490,25 @@ bool LogDev::flush() {
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
-        HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
+        if (sisl_unlikely(sz < lg->actual_data_size()) && hs()->has_fc_service()) {
+            auto const reason = fmt::format("parent_uuid: {}, size {} lg size {}",
+                                            boost::uuids::to_string(get_parent_id()), sz, lg->actual_data_size());
+            hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&m_parent_id), reason);
+            return false;
+        } else {
+            HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
+        }
         off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
         lg->m_log_dev_offset = offset;
 
-        HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+        if (sisl_unlikely(lg->m_log_dev_offset == INVALID_OFFSET) && hs()->has_fc_service()) {
+            auto const reason =
+                fmt::format("parent_uuid: {}, log dev is full", boost::uuids::to_string(get_parent_id()));
+            hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&m_parent_id), reason);
+            return false;
+        } else {
+            HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+        }
         THIS_LOGDEV_LOG(TRACE, "Flushing log group data size={} at offset={} log_group={}", lg->actual_data_size(),
                         offset, *lg);
 
@@ -832,7 +848,7 @@ nlohmann::json LogDev::get_status(int verbosity) const {
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
 LogDevMetadata::LogDevMetadata() : m_sb{logdev_sb_meta_name}, m_rollback_sb{logdev_rollback_sb_meta_name} {}
 
-logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode) {
+logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode, uuid_t pid) {
     logdev_superblk* sb = m_sb.create(logdev_sb_size_needed(0));
     rollback_superblk* rsb = m_rollback_sb.create(rollback_superblk::size_needed(1));
 
@@ -842,6 +858,7 @@ logdev_superblk* LogDevMetadata::create(logdev_id_t id, flush_mode_t flush_mode)
     m_id_reserver = std::make_unique< sisl::IDReserver >();
     m_sb->logdev_id = id;
     m_sb->flush_mode = flush_mode;
+    m_sb->pid = pid;
     m_sb.write();
 
     m_rollback_sb->logdev_id = id;

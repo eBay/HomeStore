@@ -23,6 +23,7 @@
 #include <homestore/homestore.hpp>
 #include <homestore/logstore_service.hpp>
 #include "common/homestore_assert.hpp"
+#include <homestore/fault_cmt_service.hpp>
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -94,8 +95,17 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cook
 logstore_seq_num_t HomeLogStore::write_and_flush(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
     if (is_stopping()) return 0;
     incr_pending_request_num();
-    HS_LOG_ASSERT(iomanager.am_i_sync_io_capable(),
-                  "Write and flush is a blocking IO, which can't run in this thread, please reschedule to a fiber");
+    if (sisl_unlikely(iomanager.am_i_sync_io_capable() == false) && hs()->has_fc_service()) {
+        auto uuid = m_logdev->get_parent_id();
+        auto const reason = fmt::format("parent_uuid: {}, Write and flush is a blocking IO, which can't run in this "
+                                        "thread, please reschedule to a fiber",
+                                        boost::uuids::to_string(uuid));
+        hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&uuid), reason);
+        return 0;
+    } else {
+        HS_LOG_ASSERT(iomanager.am_i_sync_io_capable(),
+                      "Write and flush is a blocking IO, which can't run in this thread, please reschedule to a fiber");
+    }
     if (seq_num > m_next_lsn.load(std::memory_order_relaxed)) m_next_lsn.store(seq_num + 1, std::memory_order_relaxed);
     auto ret = write_async(seq_num, b, nullptr /* cookie */, nullptr /* cb */);
     m_logdev->flush_under_guard();
@@ -107,7 +117,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     if (is_stopping()) return log_buffer{};
     incr_pending_request_num();
     HS_LOG_ASSERT(iomanager.am_i_sync_io_capable(),
-                  "Read sync is a blocking IO, which can't run in this thread, reschedule to a fiber");
+                  "Read sync is a blocking IO, which can't run in this thread, please reschedule to a fiber");
 
     // If seq_num has not been flushed yet, but issued, then we flush them before reading
     auto const s = m_records.status(seq_num);
