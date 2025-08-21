@@ -54,7 +54,7 @@ class HomestoreConan(ConanFile):
     def requirements(self):
         self.requires("iomgr/[^11.3]@oss/master", transitive_headers=True)
         self.requires("sisl/[^12.2]@oss/master", transitive_headers=True)
-        self.requires("nuraft_mesg/[~3.8.6]@oss/main", transitive_headers=True)
+        self.requires("nuraft_mesg/[~3.8.7]@oss/main", transitive_headers=True)
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
