@@ -52,7 +52,7 @@ class HomestoreConan(ConanFile):
         self.test_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[^11.3]@oss/master", transitive_headers=True)
+        self.requires("iomgr/[^11.4]@oss/master", transitive_headers=True)
         self.requires("sisl/[^12.2]@oss/master", transitive_headers=True)
         self.requires("nuraft_mesg/[~3.8.7]@oss/main", transitive_headers=True)
 
