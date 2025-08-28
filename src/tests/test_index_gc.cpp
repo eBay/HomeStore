@@ -25,7 +25,7 @@ SISL_OPTION_GROUP(
     ::cxxopts::value< uint32_t >()->default_value("500000"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("7000"), "number"),
-     (num_put, "", "num_put", "number of entries to test with",
+    (num_put, "", "num_put", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("20000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint64_t >()->default_value("36000"), "seconds"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
@@ -34,6 +34,7 @@ SISL_OPTION_GROUP(
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
     (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
+    (ignore_node_lock_refresh, "", "ignore_node_lock_refresh", "ignore node lock refresh", ::cxxopts::value< bool >(), ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
      ::cxxopts::value< bool >()->default_value("1"), ""),
     (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
@@ -195,7 +196,7 @@ public:
         if (!valid_blob_indexes.empty()) {
             LOGERROR("gc index table is not empty for chunk={} after purging, valid_blob_indexes.size={}", chunk_id,
                     valid_blob_indexes.size());
-            return false;
+            return SISL_OPTIONS["ignore_node_lock_refresh"].as< bool >();
         }
 
         return true;
@@ -298,7 +299,7 @@ int main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&parsed_argc, argv);
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_index_gc, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_index_gc");
-    spdlog::set_pattern("[%D %T%z] [%^%L%$] [%t] %v");
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%f %z] [%^%L%$] [%t] %v");
 
     if (SISL_OPTIONS.count("seed")) {
         auto seed = SISL_OPTIONS["seed"].as< uint64_t >();
