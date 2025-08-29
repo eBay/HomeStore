@@ -399,6 +399,10 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             available_size = balanced_size;
             new_nodes.emplace_back(new_node);
         }
+        if (!new_node) {
+            BT_NODE_DBG_ASSERT_EQ(total_entries, 0, parent_node, "No new node allocated but still have entries to copy");
+            break;
+        }
 
         auto& old_ith_node = old_nodes[src_cursor.ith_node];
         auto const existing_size = new_node->occupied_size();
