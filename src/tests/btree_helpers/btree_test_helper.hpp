@@ -228,6 +228,10 @@ public:
         bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
         if (care_success) {
+            if (!removed) {
+                LOGERROR("Failed to remove key {}", k);
+                this->print_keys();
+            }
             ASSERT_EQ(removed, m_shadow_map.exists(*pk))
                 << "Removal of key " << pk->key() << " status doesn't match with shadow";
             if (removed) { m_shadow_map.remove_and_check(*pk, *existing_v); }

@@ -229,6 +229,8 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     BtreeNodeList new_nodes;
     BtreeNodePtr new_node;
     uint32_t total_size{0};
+    uint32_t total_entries{0};
+    uint32_t total_entries_copied{0};
     uint32_t balanced_size{0};
     int32_t available_size{0};
     uint32_t num_nodes{0};
@@ -251,7 +253,36 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     _leftmost_src_info leftmost_src;
     _src_cursor_info src_cursor;
 
+    // string for detailed logging if assert is hit
+    auto complete_info_str = [&]() {
+        std::string info_str = fmt::format("parent node {}, start_idx {}, end_idx {}\n",
+            parent_node->to_string(), start_idx, end_idx);
+
+        fmt::format_to(std::back_inserter(info_str),
+            "total_size {}, total_entries {}, total_entries_copied {}, balanced_size {}, available_size {}, num_nodes {}",
+            total_size, total_entries, total_entries_copied, balanced_size, available_size, num_nodes);
+
+        fmt::format_to(std::back_inserter(info_str), "leftmost_src last_node_upto {}, src_cursor ith node {}, src_cursor nth_entry {}",
+            leftmost_src.last_node_upto, src_cursor.ith_node, src_cursor.nth_entry);
+
+        for (auto i = 0u; i < old_nodes.size(); ++i) {
+            fmt::format_to(std::back_inserter(info_str), "old child node {}, [{}]\n", i, old_nodes[i]->to_string());
+        }
+
+        for (auto i = 0u; i < new_nodes.size(); ++i) {
+            fmt::format_to(std::back_inserter(info_str), "new child node {}, [{}]\n", i, new_nodes[i]->to_string());
+        }
+        return info_str;
+    };
+
+    // We use total size and total entries to determine when to create new nodes during merge
+    // and copy entries from old node
+    // We first compute total_size and total_entries based on all the nodes to be merged
+    // Then, we start subtracting size and entries based on the entries we merge.
+    // The total_entries is expected to be 0 by the end
+    // The total entries is more accurate here as we move/copy entries based on nentries
     total_size = leftmost_node->occupied_size();
+    total_entries = leftmost_node->total_entries();
     uint32_t expected_entities = leftmost_node->total_entries();
 #ifdef _PRERELEASE
     const uint64_t max_keys = leftmost_node->max_keys_in_node();
@@ -260,7 +291,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     for (auto indx = start_idx + 1; indx <= end_idx; ++indx) {
         if (indx == parent_node->total_entries()) {
             BT_NODE_LOG_ASSERT(parent_node->has_valid_edge(), parent_node,
-                               "Assertion failure, expected valid edge for parent_node");
+                               "Assertion failure, expected valid edge for parent_node: info {}", complete_info_str());
         }
 
         BtreeLinkInfo child_info;
@@ -276,6 +307,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         // compaction will occur for both leftmost and new nodes. This calculation makes available size not be balanced
         // for the leftmost node and new nodes.
         total_size += child->occupied_size();
+        total_entries += child->total_entries();
     }
 
     // Determine if packing the nodes would result in reducing the number of nodes, if so go with that. If else
@@ -302,15 +334,22 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             "MERGE disqualified for parent node {} leftmost_node {}! current size {} is more than balanced size {}",
             parent_node->to_string(), leftmost_node->to_string(), leftmost_node->occupied_size(), balanced_size);
         BT_NODE_DBG_ASSERT(false, leftmost_node,
-                           "Didn't expect current size is more than balanced size without rebalancing");
+                           "Didn't expect current size is more than balanced size without rebalancing, info {}", complete_info_str());
         ret = btree_status_t::merge_not_required;
         goto out;
     }
-
+    // for sanity check towards the end
+    total_entries_copied = total_entries;
     // First try to see how many entries you can fit in the leftmost node within the balanced size. We are checking
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
     available_size = static_cast< int32_t >(balanced_size) - leftmost_node->occupied_size();
+    total_size -= leftmost_node->occupied_size();
+    total_entries -= leftmost_node->total_entries();
+    if (available_size > 0) {
+        total_size -= available_size;
+    }
+
     if (leftmost_node->get_node_type() == btree_node_type::PREFIX) {
         auto cur_node = static_cast< FixedPrefixNode< K, V >* >(leftmost_node.get());
         expected_holes = cur_node->num_prefix_holes();
@@ -336,6 +375,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         }
 #endif
 
+        total_entries -= nentries;
         if ((old_nodes[i]->total_entries() - nentries) == 0) { // Entire node goes in
             if (old_nodes[i]->get_node_type() == btree_node_type::PREFIX) {
                 auto cur_node = static_cast< FixedPrefixNode< K, V >* >(old_nodes[i].get());
@@ -343,7 +383,8 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
                 expected_holes = c_used_slot > init_holes ? 0 : (expected_holes - c_used_slot);
                 expected_tail = init_tail + (expected_holes > 0 ? 0 : (c_used_slot - init_holes));
                 BT_NODE_DBG_ASSERT_EQ(expected_tail >= init_tail, true, leftmost_node,
-                                      "Expected tail {} is not greater than initial tail {}", expected_tail, init_tail);
+                                      "Expected tail {} is not greater than initial tail {}, info {}",
+                                      expected_tail, init_tail, complete_info_str());
                 auto prefix_increased_size =
                     (expected_tail - init_tail) * FixedPrefixNode< K, V >::prefix_entry::size();
                 auto suffix_increased_size = cur_node->total_entries() * FixedPrefixNode< K, V >::suffix_entry::size();
@@ -354,7 +395,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             } else {
                 available_size -= old_nodes[i]->occupied_size();
             }
-            BT_NODE_DBG_ASSERT_EQ(available_size >= 0, true, leftmost_node, "negative available size");
+            BT_NODE_DBG_ASSERT_EQ(available_size >= 0, true, leftmost_node, "negative available size, info {}", complete_info_str());
             if (i >= old_nodes.size() - 1) {
                 src_cursor.ith_node = i + 1;
                 src_cursor.nth_entry = std::numeric_limits< uint32_t >::max();
@@ -373,7 +414,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // We are ready to keep copying all the old nodes from src cursor to new nodes
     available_size = 0;
     while (src_cursor.ith_node < old_nodes.size()) {
-        if (available_size == 0) {
+        if (available_size == 0 && total_entries > 0) {
             new_node.reset(leftmost_node->is_leaf() ? alloc_leaf_node().get() : alloc_interior_node().get());
             if (new_node == nullptr) {
                 ret = btree_status_t::merge_failed;
@@ -383,10 +424,18 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             available_size = balanced_size;
             new_nodes.emplace_back(new_node);
         }
+        if (!new_node) {
+            BT_NODE_DBG_ASSERT_EQ(total_entries, 0, parent_node, "No new node allocated but still have entries to copy, info {}",
+                complete_info_str());
+            break;
+        }
 
         auto& old_ith_node = old_nodes[src_cursor.ith_node];
+        auto const existing_size = new_node->occupied_size();
         auto const nentries = new_node->copy_by_size(m_bt_cfg, *old_ith_node, src_cursor.nth_entry, available_size);
-        total_size -= new_node->occupied_size();
+        auto const size_copied = new_node->occupied_size() - existing_size;
+        total_size = (total_size > size_copied) ? (total_size - size_copied) : 0;
+        total_entries -= nentries;
         if (old_ith_node->total_entries() == (src_cursor.nth_entry + nentries)) {
             // Copied entire node
             ++src_cursor.ith_node;
@@ -405,6 +454,8 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             }
         }
     }
+
+    BT_NODE_DBG_ASSERT_EQ(total_entries, 0, parent_node, "Did not copy all the entries from old to new nodes, info {}", complete_info_str());
 
     // There are degenerate case (especially if the first key/value is very big) that number of resultant nodes are
     // more than initial number of nodes before rebalance. In those cases, just give up the merging and hope for a
@@ -479,8 +530,9 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         for (auto it = new_nodes.rbegin(); it != new_nodes.rend(); ++it) {
             (*it)->set_next_bnode(next_node_id);
             auto this_node_id = (*it)->node_id();
-            if ((*it)->total_entries())
-                parent_node->update(cur_idx--, (*it)->get_last_key< K >(), BtreeLinkInfo{this_node_id, 0});
+            BT_NODE_DBG_ASSERT_GT((*it)->total_entries(), 0, parent_node, "Found a new node with 0 entries, info {}",
+                                  complete_info_str());
+            parent_node->update(cur_idx--, (*it)->get_last_key< K >(), BtreeLinkInfo{this_node_id, 0});
             last_new_node = *it;
             next_node_id = this_node_id;
         }
@@ -503,6 +555,14 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         }
 
 #ifndef NDEBUG
+        // check if all the entries are copied
+        uint32_t num_copied = leftmost_node->total_entries();
+        for (const auto& node : new_nodes) {
+            num_copied += node->total_entries();
+        }
+        BT_NODE_DBG_ASSERT_EQ(num_copied, total_entries_copied, parent_node, "mismatch of total entries copied, info {}",
+                              complete_info_str());
+
         // BT_DBG_ASSERT(!parent_node_step1.empty() && !parent_node_step2.empty() && !parent_node_step3.empty(),
         //               "Empty string");
         // check if the link version of parent for each key info match the link version of its child
@@ -524,22 +584,23 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             }
             parent_node->get_nth_value(start_idx, &child_info, false /* copy */);
             BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), leftmost_node->link_version(), parent_node,
-                                  "parent_node, mismatch of link version of leftmost node in unsuccessful merge");
+                                  "parent_node, mismatch of link version of leftmost node in unsuccessful merge, info {}",
+                                  complete_info_str());
         }
 
         if (leftmost_node->total_entries() && (start_idx < parent_node->total_entries())) {
             BT_NODE_DBG_ASSERT_LE(
                 leftmost_node->get_last_key< K >().compare(parent_node->get_nth_key< K >(start_idx, false)), 0,
-                parent_node);
+                parent_node, "info {}", complete_info_str());
         }
 
         auto idx = start_idx + 1;
         for (const auto& node : new_nodes) {
             if (idx == parent_node->total_entries()) { break; }
             BT_NODE_DBG_ASSERT_GT(node->get_first_key< K >().compare(parent_node->get_nth_key< K >(idx - 1, false)), 0,
-                                  parent_node);
+                                  parent_node, "info {}", complete_info_str());
             BT_NODE_DBG_ASSERT_LE(node->get_last_key< K >().compare(parent_node->get_nth_key< K >(idx, false)), 0,
-                                  parent_node);
+                                  parent_node, "info {}", complete_info_str());
             ++idx;
         }
 #endif
