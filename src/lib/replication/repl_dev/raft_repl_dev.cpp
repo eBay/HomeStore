@@ -1697,6 +1697,47 @@ std::vector< peer_info > RaftReplDev::get_replication_status() const {
     return pi;
 }
 
+void RaftReplDev::reconcile_leader() {
+    int32_t my_priority = raft_server()->get_srv_config(m_raft_server_id)->get_priority();
+    if (!is_leader()) {
+        // follower only has the view of itself, so we just check its own priority here.
+        if (my_priority == raft_leader_priority) {
+            bool success = raft_server()->request_leadership();
+            RD_LOGI(NO_TRACE_ID, "Not the leader, but have the highest priority, try to request leader, result: {}",
+                    success ? "succeed" : "failed");
+        } else {
+            RD_LOGD(NO_TRACE_ID, "Not the leader, no need to reconcile");
+        }
+        return;
+    }
+
+    // Find the expected leader with the highest priority before yield leadership
+    replica_id_t expected_leader_id = m_my_repl_id;
+    int32_t highest_priority = my_priority;
+    auto repl_status = get_replication_status();
+    for (const auto& peer_info : repl_status) {
+        if (peer_info.id_ == m_my_repl_id) { continue; }
+        auto peer_priority = static_cast< int32_t >(peer_info.priority_);
+        if (peer_priority > highest_priority) {
+            highest_priority = peer_priority;
+            expected_leader_id = peer_info.id_;
+            RD_LOGD(NO_TRACE_ID, "Found higher priority peer {}, priority {}", expected_leader_id, peer_priority);
+        }
+    }
+
+    if (expected_leader_id == m_my_repl_id) {
+        RD_LOGD(NO_TRACE_ID, "Current leader {} has highest priority {}, no need to reconcile", get_leader_id(),
+                my_priority);
+        return;
+    }
+
+    RD_LOGI(NO_TRACE_ID, "Current leader {} is different from expected leader {}, reconciling it, my id={}",
+            get_leader_id(), expected_leader_id, m_my_repl_id);
+    raft_server()->yield_leadership(false /* immediate_yield */,
+                                    nuraft_mesg::to_server_id(expected_leader_id) /* successor_id */);
+    RD_LOGI(NO_TRACE_ID, "Yielded leadership");
+}
+
 std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     auto repl_status = get_replication_status();
     std::set< replica_id_t > res;

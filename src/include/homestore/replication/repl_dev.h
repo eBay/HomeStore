@@ -528,6 +528,9 @@ public:
     /// @return group_id
     virtual group_id_t group_id() const = 0;
 
+    /// @brief request leadership if it should be the leader but not, yield leadership if it is leader but should not be
+    virtual void reconcile_leader() = 0;
+
     /// @brief Sets a custom name for the repldev. Users can assign a meaningful name to the repldev for easy debugging.
     virtual void set_custom_rdev_name(std::string const& name) = 0;
 
