@@ -787,6 +787,8 @@ public:
         return hs()->repl_service().get_replace_member_status(db->repl_dev()->group_id(), task_id, out, in, others);
     }
 
+    void reconcile_leader(std::shared_ptr< TestReplicatedDB > db) { db->repl_dev()->reconcile_leader(); }
+
 protected:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
     uint32_t written_entries_{0};
