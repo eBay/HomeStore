@@ -35,7 +35,7 @@ public:
     explicit CPMgrMetrics() : sisl::MetricsGroup("CPMgr") {
         REGISTER_COUNTER(back_to_back_cps, "back to back cp");
         REGISTER_COUNTER(cp_cnt, "cp cnt");
-        REGISTER_HISTOGRAM(cp_latency, "cp latency (in us)");
+        REGISTER_HISTOGRAM(cp_latency, "cp latency (in us)", HistogramBucketsType(OpLatecyBuckets));
         register_me_to_farm();
     }
 

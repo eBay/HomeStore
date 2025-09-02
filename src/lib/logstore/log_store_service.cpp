@@ -404,23 +404,25 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
                      {"op", "write"});
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
-    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
+    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"},
+                       HistogramBucketsType(OpLatecyBuckets));
 #ifdef _PRERELEASE
     REGISTER_HISTOGRAM(logstore_stream_tracker_lock_latency, "Logstore stream tracker lock latency",
                        "logstore_stream_tracker_lock_latency");
 #endif
-    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
+    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"},
+                       HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
                        HistogramBucketsType(LinearUpto128Buckets));
     REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
-    REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
-                       "Logdev post flush processing (including callbacks) latency");
-    REGISTER_HISTOGRAM(logdev_flush_time_us, "time elapsed since last flush time in us");
-    REGISTER_HISTOGRAM(logdev_fsync_time_us, "Logdev fsync completion time in us");
+                       "Logdev post flush processing (including callbacks) latency",
+                       HistogramBucketsType(OpLatecyBuckets));
+    REGISTER_HISTOGRAM(logdev_flush_time_us, "time elapsed since last flush time in us",
+                       HistogramBucketsType(OpLatecyBuckets));
 
     register_me_to_farm();
 }
