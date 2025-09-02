@@ -90,42 +90,35 @@ public:
         // leader: data write latency;
         // follower: from rreq push data received to data write completion;
         REGISTER_HISTOGRAM(rreq_data_write_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
-                           {"op", "write"});
-        REGISTER_HISTOGRAM(rreq_data_read_latency_us, "rreq data read latency in us", "rreq_data_op_latency",
-                           {"op", "read"}); // placeholder
+                           {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(rreq_push_data_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
-                           {"op", "push"});
-        // latency from req received to sending response
-        REGISTER_HISTOGRAM(rreq_data_write_respond_latency_us, "rreq data write and respond latency in us",
-                           "rreq_data_op_latency", {"op", "respond"});
-        // latency from req received to rpc complete
-        REGISTER_HISTOGRAM(rreq_data_write_complete_latency_us, "rreq data rpc complete latency in us",
-                           "rreq_data_op_latency", {"op", "complete"});
+                           {"op", "push"}, HistogramBucketsType(OpLatecyBuckets));
         // latency from follower->originator->follower, not including actual data write on follower;
         REGISTER_HISTOGRAM(rreq_data_fetch_latency_us, "rreq data fetch latency in us", "rreq_data_op_latency",
-                           {"op", "fetch"});
+                           {"op", "fetch"}, HistogramBucketsType(OpLatecyBuckets));
 
         /* from rreq creation to data ops completion */
-        REGISTER_HISTOGRAM(rreq_total_data_read_latency_us, "rreq data read latency in us", "rdev_data_op_latency",
-                           {"op", "read"}); // placeholder
         REGISTER_HISTOGRAM(rreq_total_data_write_latency_us, "rreq data write latency in us", "rdev_data_op_latency",
-                           {"op", "write"});
+                           {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
 
         REGISTER_HISTOGRAM(rreq_pieces_per_write, "Number of individual pieces per write",
-                           HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(SteppedUpto32Buckets));
 
         // In the identical layout chunk, the blk num of the follower and leader is expected to be the same.
         // However, due to the concurrency between the data channel and the raft channel, there might be some
         // allocation differences on the same lsn. When a leader switch occurs, these differences could become garbage.
         // This metric can partially reflect the potential amount of garbage.
         REGISTER_HISTOGRAM(blk_diff_with_proposer,
-                           "allocated blk num diff on the same lsn with proposer when chunk usage >= 0.9");
+                           "allocated blk num diff on the same lsn with proposer when chunk usage >= 0.9",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
 
         // Raft channel metrics
         REGISTER_HISTOGRAM(raft_end_of_append_batch_latency_us, "Raft end_of_append_batch latency in us",
-                           "raft_logstore_append_latency", {"op", "end_of_append_batch"});
+                           "raft_logstore_append_latency", {"op", "end_of_append_batch"},
+                           HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(data_channel_wait_latency_us, "Data channel wait latency in us",
-                           "raft_logstore_append_latency", {"op", "wait_for_data"});
+                           "raft_logstore_append_latency", {"op", "wait_for_data"},
+                           HistogramBucketsType(OpLatecyBuckets));
 
         register_me_to_farm();
     }

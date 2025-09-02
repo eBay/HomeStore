@@ -180,7 +180,7 @@ public:
         REGISTER_COUNTER(num_blks_alloc_direct, "Number of blks alloc attempt directly because of empty cache");
 
         REGISTER_HISTOGRAM(frag_pct_distribution, "Distribution of fragmentation percentage",
-                           HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(PercentileBuckets));
 
         register_me_to_farm();
     }

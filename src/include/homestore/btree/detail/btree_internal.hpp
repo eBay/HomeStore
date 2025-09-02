@@ -315,9 +315,9 @@ public:
         REGISTER_COUNTER(btree_num_pc_gen_mismatch, "Number of gen mismatches to recover");
 
         REGISTER_HISTOGRAM(btree_int_node_occupancy, "Interior node occupancy", "btree_node_occupancy",
-                           {"node_type", "interior"}, HistogramBucketsType(LinearUpto128Buckets));
+                           {"node_type", "interior"}, HistogramBucketsType(PercentileBuckets));
         REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
-                           {"node_type", "leaf"}, HistogramBucketsType(LinearUpto128Buckets));
+                           {"node_type", "leaf"}, HistogramBucketsType(PercentileBuckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
@@ -326,13 +326,16 @@ public:
         REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");
         REGISTER_HISTOGRAM(btree_exclusive_time_in_int_node,
                            "Exclusive time spent (Write locked) on interior node (ns)", "btree_exclusive_time_in_node",
-                           {"node_type", "interior"});
+                           {"node_type", "interior"}, HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(btree_exclusive_time_in_leaf_node, "Exclusive time spent (Write locked) on leaf node (ns)",
-                           "btree_exclusive_time_in_node", {"node_type", "leaf"});
+                           "btree_exclusive_time_in_node", {"node_type", "leaf"},
+                           HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(btree_inclusive_time_in_int_node, "Inclusive time spent (Read locked) on interior node (ns)",
-                           "btree_inclusive_time_in_node", {"node_type", "interior"});
+                           "btree_inclusive_time_in_node", {"node_type", "interior"},
+                           HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(btree_inclusive_time_in_leaf_node, "Inclusive time spent (Read locked) on leaf node (ns)",
-                           "btree_inclusive_time_in_node", {"node_type", "leaf"});
+                           "btree_inclusive_time_in_node", {"node_type", "leaf"},
+                           HistogramBucketsType(OpLatecyBuckets));
 
         register_me_to_farm();
     }
