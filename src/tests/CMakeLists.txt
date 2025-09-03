@@ -70,6 +70,10 @@ endif()
 
 can_build_io_tests(io_tests)
 if (${io_tests})
+    set(TEST_INDEXBTREE_SOURCE_FILES test_index_gc.cpp)
+    add_executable(test_index_gc ${TEST_INDEXBTREE_SOURCE_FILES})
+    target_link_libraries(test_index_gc homestore ${COMMON_TEST_DEPS} GTest::gtest)
+
     set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
     add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
     target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
