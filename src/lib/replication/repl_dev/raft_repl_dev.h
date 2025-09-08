@@ -298,6 +298,7 @@ public:
     std::set< replica_id_t > get_active_peers() const;
     group_id_t group_id() const override { return m_group_id; }
     void reconcile_leader() override;
+    void yield_leadership(bool immediate_yield, replica_id_t candidate) override;
     void set_custom_rdev_name(std::string const& name) override {
         RD_LOGI(NO_TRACE_ID, "Resetting repl dev name from {} to {}", m_rdev_name, name);
         m_rdev_name = name;

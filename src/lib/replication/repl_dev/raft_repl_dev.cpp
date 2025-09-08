@@ -1738,6 +1738,10 @@ void RaftReplDev::reconcile_leader() {
     RD_LOGI(NO_TRACE_ID, "Yielded leadership");
 }
 
+void RaftReplDev::yield_leadership(bool immediate_yield, replica_id_t candidate) {
+    raft_server()->yield_leadership(immediate_yield, nuraft_mesg::to_server_id(candidate));
+}
+
 std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     auto repl_status = get_replication_status();
     std::set< replica_id_t > res;

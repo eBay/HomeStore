@@ -750,20 +750,24 @@ TEST_F(RaftReplDevTest, ReconcileLeader) {
     this->validate_data();
     g_helper->sync_for_cleanup_start();
 
-    LOGINFO("Restart leader");
-    if (g_helper->replica_num() == 0) { g_helper->restart_homestore(); }
+    LOGINFO("Yield leader");
+    auto expected_leader_num = 1;
+    auto expected_leader = g_helper->replica_id(expected_leader_num);
+    if (g_helper->replica_num() == 0) { this->yield_leadership(dbs_[0], false, expected_leader); }
     g_helper->sync_for_verify_start();
     LOGINFO("Validate leader switched");
     std::this_thread::sleep_for(std::chrono::milliseconds{500});
     auto leader = this->wait_and_get_leader_id();
-    auto leader_replica_num = 0;
-    if (g_helper->replica_num() == 0) {
-        ASSERT_NE(leader, g_helper->my_replica_id());
-        LOGINFO("Leader has changed");
-    } else if (g_helper->my_replica_id() == leader) {
-        leader_replica_num = g_helper->replica_num();
-        LOGINFO("New leader is replica={}, replica_num={}", leader, leader_replica_num);
-    }
+    ASSERT_EQ(leader, expected_leader);
+
+    g_helper->sync_for_test_start();
+    LOGINFO("Trigger reconcile leader on follower, expected no change")
+    if (g_helper->replica_num() == 2) { this->reconcile_leader(dbs_[0]); }
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate leader unchanged");
+    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+    leader = this->wait_and_get_leader_id();
+    ASSERT_EQ(leader, expected_leader);
 
     g_helper->sync_for_test_start();
     if (g_helper->replica_num() == 0) {
@@ -777,19 +781,13 @@ TEST_F(RaftReplDevTest, ReconcileLeader) {
     if (g_helper->replica_num() == 0) { ASSERT_EQ(leader, g_helper->my_replica_id()); }
     g_helper->sync_for_cleanup_start();
 
-    LOGINFO("Restart leader again");
-    if (g_helper->replica_num() == 0) { g_helper->restart_homestore(); }
+    LOGINFO("Yield leader again");
+    if (g_helper->replica_num() == 0) { this->yield_leadership(dbs_[0], false, expected_leader); }
     g_helper->sync_for_verify_start();
     LOGINFO("Validate leader switched");
     std::this_thread::sleep_for(std::chrono::milliseconds{500});
     leader = this->wait_and_get_leader_id();
-    if (g_helper->replica_num() == 0) {
-        ASSERT_NE(leader, g_helper->my_replica_id());
-        LOGINFO("Leader has changed again");
-    } else if (g_helper->my_replica_id() == leader) {
-        leader_replica_num = g_helper->replica_num();
-        LOGINFO("New leader is replica={}, replica_num={}", leader, leader_replica_num);
-    }
+    ASSERT_EQ(leader, expected_leader);
     g_helper->sync_for_test_start();
 
     if (g_helper->my_replica_id() == leader) {
@@ -800,11 +798,7 @@ TEST_F(RaftReplDevTest, ReconcileLeader) {
     std::this_thread::sleep_for(std::chrono::milliseconds{1000});
     leader = this->wait_and_get_leader_id();
     LOGINFO("Validate leader switched back to initial replica, leader={}", leader);
-    if (g_helper->replica_num() == 0 && leader != g_helper->my_replica_id()) {
-        // yield leadership cannot garantee replica 0 will be leader again
-        // so we just log a warning here if it is not
-        LOGWARN("Leader is not replica 0 after yielding, leader={}", leader);
-    }
+    if (g_helper->replica_num() == 0) { ASSERT_EQ(leader, g_helper->my_replica_id()); }
     g_helper->sync_for_cleanup_start();
 }
 

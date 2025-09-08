@@ -531,6 +531,10 @@ public:
     /// @brief request leadership if it should be the leader but not, yield leadership if it is leader but should not be
     virtual void reconcile_leader() = 0;
 
+    /// @brief Yield current leadership and becomes a follower.
+    /// this API call nuraft yield_leadership directly
+    virtual void yield_leadership(bool immediate_yield, replica_id_t candidate) = 0;
+
     /// @brief Sets a custom name for the repldev. Users can assign a meaningful name to the repldev for easy debugging.
     virtual void set_custom_rdev_name(std::string const& name) = 0;
 

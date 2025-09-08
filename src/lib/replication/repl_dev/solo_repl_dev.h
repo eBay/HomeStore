@@ -79,6 +79,7 @@ public:
             peer_info{.id_ = m_group_id, .replication_idx_ = 0, .last_succ_resp_us_ = 0, .priority_ = 1}};
     }
     void reconcile_leader() override {}
+    void yield_leadership(bool immediate_yield, replica_id_t candidate) override {}
     bool is_ready_for_traffic() const override { return true; }
     void set_stage(repl_dev_stage_t stage) override {}
     repl_dev_stage_t get_stage() const override { return repl_dev_stage_t::ACTIVE; }
