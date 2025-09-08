@@ -789,6 +789,10 @@ public:
 
     void reconcile_leader(std::shared_ptr< TestReplicatedDB > db) { db->repl_dev()->reconcile_leader(); }
 
+    void yield_leadership(std::shared_ptr< TestReplicatedDB > db, bool immediate_yield, replica_id_t candidate) {
+        db->repl_dev()->yield_leadership(immediate_yield, candidate);
+    }
+
 protected:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
     uint32_t written_entries_{0};
