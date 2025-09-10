@@ -426,6 +426,12 @@ public:
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id) {};
 
+    /// @brief ask upper layer to verify the received data.
+    // the received data comes for on_push_data_received or handle_fetch_data_response
+    virtual bool verify_received_data(const sisl::blob& header, uint8_t const* data, uint32_t const& size) {
+        return true;
+    }
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };
