@@ -63,7 +63,7 @@ public:
     // Creates the vdev that is needed to initialize the device
     void create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks,
                      chunk_selector_type_t chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
-                     uint32_t chunk_size = 0);
+                     uint64_t chunk_size = 0);
     // Open the existing vdev which is represnted by the vdev_info_block
     shared< VirtualDev > open_vdev(const vdev_info& vb, bool load_existing);
     std::shared_ptr< ChunkSelector > get_chunk_selector() { return m_custom_chunk_selector; };

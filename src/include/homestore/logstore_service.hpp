@@ -160,7 +160,7 @@ public:
      */
     void device_truncate();
 
-    folly::Future< std::error_code > create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size);
+    folly::Future< std::error_code > create_vdev(uint64_t size, HSDevType devType, uint64_t chunk_size);
     std::shared_ptr< VirtualDev > open_vdev(const vdev_info& vinfo, bool load_existing);
     std::shared_ptr< JournalVirtualDev > get_vdev() const { return m_logdev_vdev; }
     std::vector< std::shared_ptr< LogDev > > get_all_logdevs();

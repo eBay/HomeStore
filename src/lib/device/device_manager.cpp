@@ -115,7 +115,7 @@ void DeviceManager::format_devices() {
     // Get common iomgr_attributes
     for (auto& dinfo : m_dev_infos) {
         format_single_device(dinfo);
-    } 
+    }
 
     // Verify the first blocks to see if the devs are unique
     HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system");
@@ -163,7 +163,9 @@ bool DeviceManager::verify_unique_devs() const {
     for (auto& pdev : m_all_pdevs) {
         if (!pdev) { continue; }
         auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
-        if (auto err = pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset()); err) {
+        if (auto err =
+                pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset());
+            err) {
             LOGERROR("Failed to read first block from device={}, error={}", pdev->get_devname(), err.message());
             ret = false;
             continue;
@@ -413,7 +415,7 @@ void DeviceManager::compose_vparam(uint64_t vdev_id, vdev_parameters& vparam, st
     }
 
     // Based on the min chunk size, we calculate the max number of chunks that can be created in each target pdev
-    uint32_t min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
+    auto min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
     // FIXME: it is possible that each vdev is less than max_num_chunks, but total is more than MAX_CHUNKS_IN_SYSTEM.
     // uint32 convert is safe as it only overflow when vdev size > 64PB with 16MB min_chunk_size.
     uint32_t max_num_chunks = std::min(uint32_t(vparam.vdev_size / min_chunk_size), hs_super_blk::MAX_CHUNKS_IN_SYSTEM);
