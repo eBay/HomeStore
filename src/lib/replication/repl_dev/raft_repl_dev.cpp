@@ -912,6 +912,13 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                   .traceID = push_req->trace_id()};
     auto const req_orig_time_ms = push_req->time_ms();
 
+    if (!m_listener->verify_received_data(header, incoming_buf.cbytes() + fb_size, push_req->data_size())) {
+        RD_LOGE(rkey.traceID, "Data Channel: received invalid PushData, ignoring this call, time diff={} ms.",
+                get_elapsed_time_ms(req_orig_time_ms));
+        rpc_data->send_response();
+        return;
+    }
+
     RD_LOGD(rkey.traceID, "Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
 
 #ifdef _PRERELEASE
@@ -1354,6 +1361,11 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 
     for (auto const& rreq : rreqs) {
         auto const data_size = rreq->remote_blkid().blkid.blk_count() * get_blk_size();
+
+        if (!m_listener->verify_received_data(rreq->header(), raw_data, data_size)) {
+            RD_LOGE(rreq->traceID(), "Data Channel: received invalid fetch_data_response, ignoring this!");
+            return;
+        }
 
         if (!rreq->save_fetched_data(response, raw_data, data_size)) {
             RD_DBG_ASSERT(rreq->local_blkid().is_valid(), "Invalid blkid for rreq={}", rreq->to_string());
