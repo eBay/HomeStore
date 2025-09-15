@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <openssl/evp.h>
 
 #include <libnuraft/ptr.hxx>
 #include <nuraft_mesg/nuraft_mesg.hpp>
@@ -461,6 +462,7 @@ private:
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
     void handle_fetch_data_response(sisl::GenericClientResponse response, std::vector< repl_req_ptr_t > rreqs);
     bool is_resync_mode();
+    uint64_t sha256ToUint64(const void* data, size_t length);
 
     /**
      * \brief This method handles errors that occur during append entries or data receiving.

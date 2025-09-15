@@ -846,6 +846,17 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list const& data) {
     auto& builder = rreq->create_fb_builder();
 
+    // calculate the checksum of the pushed data. we do not care the alignment here, so use raw malloc/free
+    void* raw_data = malloc(data.size);
+    auto cur = raw_data;
+    for (const auto& iov : data.iovs) {
+        std::memcpy(cur, iov.iov_base, iov.iov_len);
+        cur = static_cast< void* >(static_cast< char* >(cur) + iov.iov_len);
+    }
+    RD_LOGD(rreq->traceID(), "Data Channel: the sha256 value of the data pushed for rreq=[{}] is {}",
+            rreq->to_compact_string(), sha256ToUint64(raw_data, data.size));
+    free(raw_data);
+
     // Prepare the rpc request packet with all repl_reqs details
     builder.FinishSizePrefixed(CreatePushDataRequest(
         builder, rreq->traceID(), server_id(), rreq->term(), rreq->dsn(),
@@ -945,6 +956,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
 
     COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
     COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
+    RD_LOGD(rkey.traceID,
+            "Data Channel: the sha256 value of the data received in on_push_data_received for rreq=[{}] is {}",
+            rreq->to_compact_string(), sha256ToUint64(r_cast< const void* >(rreq->data()), push_req->data_size()));
 
     // Schedule a write and upon completion, mark the data as written.
     data_service()
@@ -1327,8 +1342,23 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
             }
 
-            rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
-                for (auto const& sgs : sgs_vec) {
+            rpc_data->set_comp_cb([this, sgs_vec = std::move(sgs_vec)](intrusive< sisl::GenericRpcData >& rpc_data) {
+                auto fetch_req = GetSizePrefixedFetchData(rpc_data->request_blob().cbytes());
+                auto const& reqs = *(fetch_req->request()->entries());
+                RD_DBG_ASSERT_EQ(reqs.size(), sgs_vec.size(), "req.size not equal to sgs_vec.size");
+
+                for (uint64_t i = 0; i < reqs.size(); i++) {
+                    const auto dsn = reqs[i]->dsn();
+                    const auto& sgs = sgs_vec[i];
+
+                    // here, we have already know there is only one iov in this sgs(line 1305), so we compute the crc
+                    // directly according to the first iov.
+
+                    // TODO: change this if we have multiple iov in sgs in the future, like(line 850)
+                    RD_LOGD(NO_TRACE_ID,
+                            "Data Channel: the sha256 value of the data in on_fetch_data_received for dsn={} is {}",
+                            dsn, sha256ToUint64(sgs.iovs[0].iov_base, sgs.iovs[0].iov_len));
+
                     for (auto const& iov : sgs.iovs) {
                         iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
                     }
@@ -1368,6 +1398,12 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
             auto const data_write_start_time = Clock::now();
             COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
             COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
+            RD_LOGD(
+                rreq->traceID(),
+                "Data Channel: the sha256 value of the data received in handle_fetch_data_response for rreq=[{}] is {}",
+                rreq->to_compact_string(), sha256ToUint64(r_cast< const void* >(rreq->data()), data_size));
+
             data_service()
                 .async_write(r_cast< const char* >(rreq->data()), data_size, rreq->local_blkid())
                 .thenValue([this, rreq, data_write_start_time](auto&& err) {
@@ -2541,6 +2577,35 @@ bool RaftReplDev::is_state_machine_paused() { return raft_server()->is_state_mac
 void RaftReplDev::resume_state_machine() {
     RD_LOGI(NO_TRACE_ID, "Resume state machine execution for group_id={}", group_id_str());
     raft_server()->resume_state_machine_execution();
+}
+
+uint64_t RaftReplDev::sha256ToUint64(const void* data, size_t length) {
+    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+    if (mdctx == nullptr) { throw std::runtime_error("Failed to create EVP_MD_CTX"); }
+
+    if (EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        throw std::runtime_error("Failed to initialize digest");
+    }
+
+    if (EVP_DigestUpdate(mdctx, data, length) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        throw std::runtime_error("Failed to update digest");
+    }
+
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hashLength;
+    if (EVP_DigestFinal_ex(mdctx, hash, &hashLength) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        throw std::runtime_error("Failed to finalize digest");
+    }
+
+    EVP_MD_CTX_free(mdctx);
+
+    uint64_t result;
+    std::memcpy(&result, hash, sizeof(result));
+
+    return result;
 }
 
 } // namespace homestore
