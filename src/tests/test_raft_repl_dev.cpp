@@ -824,6 +824,8 @@ int main(int argc, char* argv[]) {
         args.emplace_back(argv[i]);
     }
 
+    RaftReplDev::enable_fetch_data_only_from_originator(true);
+
     ::testing::InitGoogleTest(&parsed_argc, argv);
 
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, config, test_raft_repl_dev, iomgr, test_common_setup,

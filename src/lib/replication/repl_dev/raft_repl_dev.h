@@ -234,6 +234,10 @@ private:
     std::atomic_uint64_t m_pending_init_req_num;
     std::atomic< bool > m_in_quience;
 
+    // TODO::remove this after we change raft_repl_dev UT to support fetching data from non-originitor
+    inline static bool m_fetch_data_only_from_originator =
+        false; // If true, fetch data only from originator, not from other peers
+
 public:
     friend class RaftStateMachine;
 
@@ -433,6 +437,10 @@ public:
 
     // clear reqs that has allocated blks on the given chunk.
     void clear_chunk_req(chunk_num_t chunk_id);
+
+    static void enable_fetch_data_only_from_originator(bool enable) { m_fetch_data_only_from_originator = enable; }
+
+    static bool is_fetch_data_only_from_originator() { return m_fetch_data_only_from_originator; }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////

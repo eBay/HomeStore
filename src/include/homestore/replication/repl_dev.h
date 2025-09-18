@@ -413,8 +413,10 @@ public:
     // @param blkid - original blkid of the log entry
     // @param sgs - sgs to be filled with data
     // @param lsn - lsn of the log entry
+    // @param is_originator - I am the originator or not
     virtual folly::Future< std::error_code > on_fetch_data(const int64_t lsn, const sisl::blob& header,
-                                                           const MultiBlkId& blkid, sisl::sg_list& sgs) {
+                                                           const MultiBlkId& blkid, sisl::sg_list& sgs,
+                                                           bool is_originator) {
         // default implementation is reading by blkid directly
         return data_service().async_read(blkid, sgs, sgs.size);
     }

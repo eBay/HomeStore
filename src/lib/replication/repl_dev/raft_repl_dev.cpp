@@ -1206,7 +1206,28 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
     RD_LOGD(NO_TRACE_ID, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs.size(),
             server_id());
-    auto const& originator = rreqs.front()->remote_blkid().server_id;
+
+    int32_t fetch_from_peer_id{0};
+
+    if (RaftReplDev::is_fetch_data_only_from_originator()) {
+        // in raft_repl_dev UT, we do not implement the header parser, so it has to fetch data from originator.
+        fetch_from_peer_id = rreqs.front()->remote_blkid().server_id;
+    } else {
+        auto const& srv_configs = raft_server()->get_config()->get_servers();
+        std::vector< int32_t > peer_ids;
+        for (const auto& srv_config : srv_configs) {
+            auto peer_id = srv_config->get_id();
+            if (peer_id != m_raft_server_id) peer_ids.emplace_back(peer_id);
+        }
+        const auto available_peer_size = peer_ids.size();
+        if (!available_peer_size) {
+            RD_LOGE(NO_TRACE_ID, "Data Channel: No available peer to fetch data from, ignoring this fetch call");
+            return;
+        }
+
+        // here we use time as the random generator to select a random peer
+        fetch_from_peer_id = peer_ids[static_cast< long int >(std::time(nullptr)) % available_peer_size];
+    }
 
     for (auto const& rreq : rreqs) {
         entries.push_back(CreateRequestEntry(*builder, rreq->lsn(), rreq->term(), rreq->dsn(),
@@ -1215,15 +1236,9 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                                              rreq->remote_blkid().server_id /* blkid_originator */,
                                              builder->CreateVector(rreq->remote_blkid().blkid.serialize().cbytes(),
                                                                    rreq->remote_blkid().blkid.serialized_size())));
-        // relax this assert if there is a case in same batch originator can be different (can't think of one now)
-        // but if there were to be such case, we need to group rreqs by originator and send them in separate
-        // batches;
-        RD_DBG_ASSERT_EQ(rreq->remote_blkid().server_id, originator, "Unexpected originator for rreq={}",
-                         rreq->to_string());
 
-        RD_LOGT(rreq->traceID(),
-                "Fetching data from originator={}, remote: rreq=[{}], remote_blkid={}, my server_id={}", originator,
-                rreq->to_string(), rreq->remote_blkid().blkid.to_string(), server_id());
+        RD_LOGT(rreq->traceID(), "Fetching data from peer={}, remote: rreq=[{}], remote_blkid={}, my server_id={}",
+                fetch_from_peer_id, rreq->to_string(), rreq->remote_blkid().blkid.to_string(), server_id());
     }
 
     builder->FinishSizePrefixed(
@@ -1233,16 +1248,14 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     COUNTER_INCREMENT(m_metrics, fetch_total_entries_cnt, rreqs.size());
     COUNTER_INCREMENT(m_metrics, outstanding_data_fetch_cnt, 1);
 
-    // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
-    // blkid;
     auto const fetch_start_time = Clock::now();
     group_msg_service()
         ->data_service_request_bidirectional(
-            originator, FETCH_DATA,
+            fetch_from_peer_id, FETCH_DATA,
             sisl::io_blob_list_t{
                 sisl::io_blob{builder->GetBufferPointer(), builder->GetSize(), false /* is_aligned */}})
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, builder, rreqs = std::move(rreqs), fetch_start_time](auto response) {
+        .thenValue([this, builder, fetch_from_peer_id, rreqs = std::move(rreqs), fetch_start_time](auto response) {
             COUNTER_DECREMENT(m_metrics, outstanding_data_fetch_cnt, 1);
             auto const fetch_latency_us = get_elapsed_time_us(fetch_start_time);
             HISTOGRAM_OBSERVE(m_metrics, rreq_data_fetch_latency_us, fetch_latency_us);
@@ -1253,9 +1266,9 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                 // if we are here, it means the original who sent the log entries are down.
                 // we need to handle error and when the other member becomes leader, it will resend the log entries;
                 RD_LOGE(NO_TRACE_ID,
-                        "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
-                        "retry when new leader start appending log entries",
-                        rreqs.front()->remote_blkid().server_id, response.error());
+                        "Not able to fetching data from peer={}, error={}, probably leader is down. Will retry when "
+                        "new leader start appending log entries",
+                        fetch_from_peer_id, response.error());
                 for (auto const& rreq : rreqs) {
                     // TODO: Set the data_received promise with error, so that waiting threads can be unblocked and
                     // reject the request. Without that, it will timeout and then reject it.
@@ -1313,17 +1326,19 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         // accumulate the sgs for later use (send back to the requester));
         sgs_vec.push_back(sgs);
 
-        if (originator != server_id()) {
+        const auto is_originator = (originator == server_id());
+
+        if (is_originator) {
+            RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
+        } else {
             RD_LOGD(NO_TRACE_ID, "non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}",
                     req->dsn(), lsn, originator, server_id());
-        } else {
-            RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData received:  dsn={} lsn={}", req->dsn(), lsn);
         }
 
         auto const& header = req->user_header();
         sisl::blob user_header = sisl::blob{header->Data(), header->size()};
         RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData handled, my_blkid={}", local_blkid.to_string());
-        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs)));
+        futs.emplace_back(std::move(m_listener->on_fetch_data(lsn, user_header, local_blkid, sgs, is_originator)));
     }
 
     folly::collectAllUnsafe(futs).thenValue(
