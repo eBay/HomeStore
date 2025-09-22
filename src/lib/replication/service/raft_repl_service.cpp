@@ -207,6 +207,13 @@ void RaftReplService::start() {
 }
 
 void RaftReplService::stop() {
+    // we stop reaper thread here before destorying repl_dev to prevent data from being fetched after repl_dev is
+    // stopped.
+
+    // FIXME: there is still a case that before we stop_reaper_thread, some fetch_data requests have already been sent
+    // out. we need use a counter to make sure all the fetch_data request has completed.
+    stop_reaper_thread();
+
     start_stopping();
     while (true) {
         auto pending_request_num = get_pending_request_num();
@@ -236,8 +243,7 @@ void RaftReplService::stop() {
 }
 
 RaftReplService::~RaftReplService() {
-    stop_reaper_thread();
-
+    LOGINFO("raft_repl_service has been destructed!");
     // the base class destructor will clear the m_rd_map
 }
 

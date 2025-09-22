@@ -820,7 +820,8 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
                 COUNTER_DECREMENT(m_metrics, outstanding_data_write_cnt, 1);
 
                 if (err) {
-                    HS_DBG_ASSERT(false, "Error in writing data, err_code={}", err.value());
+                    HS_DBG_ASSERT(false, "Error in writing data, err_code={}, category={}, err_message={}", err.value(),
+                                  err.category().name(), err.message());
                     handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
                 } else {
                     // update metrics for originated rreq;
@@ -955,7 +956,8 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
 
             if (err) {
                 COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
-                RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
+                RD_DBG_ASSERT(false, "Error in writing data, error_code={},category={}, err_message={}", err.value(),
+                              err.category().name(), err.message());
                 handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
             } else {
                 rreq->release_data();
@@ -1273,7 +1275,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             fetch_req->request()->entries()->size());
 
     std::vector< sisl::sg_list > sgs_vec;
-    std::vector< folly::Future< bool > > futs;
+    std::vector< folly::Future< std::error_code > > futs;
     sgs_vec.reserve(fetch_req->request()->entries()->size());
     futs.reserve(fetch_req->request()->entries()->size());
 
@@ -1309,12 +1311,21 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     folly::collectAllUnsafe(futs).thenValue(
         [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec)](auto&& vf) {
             for (auto const& err_c : vf) {
-                if (sisl_unlikely(err_c.value())) {
-                    COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
-                    RD_REL_ASSERT(false, "Error in reading data");
-                    // TODO: Find a way to return error to the Listener
-                    // TODO: actually will never arrive here as iomgr will assert
-                    // (should not assert but to raise alert and leave the raft group);
+                const auto& err = err_c.value();
+                if (err) {
+                    // if read data failed, we should ignore the rpc_data and let the follower retry the fetch
+                    RD_LOGD(NO_TRACE_ID,
+                            "Data Channel: Error happens when fetching data. value={}, category={}, err_message={}, "
+                            "ignoring this call",
+                            err.value(), err.category().name(), err.message());
+
+                    for (auto const& sgs : sgs_vec) {
+                        for (auto const& iov : sgs.iovs) {
+                            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+                        }
+                    }
+                    rpc_data->send_response();
+                    return;
                 }
             }
 
@@ -1345,10 +1356,12 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
     auto raw_data = resp_blob.cbytes();
     auto total_size = resp_blob.size();
 
-    COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
+    if (!total_size || !raw_data) {
+        RD_LOGW(NO_TRACE_ID, "Empty response from remote!");
+        return;
+    }
 
-    RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
-    RD_DBG_ASSERT(raw_data, "Empty response from remote");
+    COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
 
     RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData completed for {} requests", rreqs.size());
 
@@ -1381,8 +1394,9 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
                     HISTOGRAM_OBSERVE(m_metrics, rreq_data_write_latency_us, data_write_latency);
                     HISTOGRAM_OBSERVE(m_metrics, rreq_total_data_write_latency_us, total_data_write_latency);
 
-                    RD_REL_ASSERT(!err,
-                                  "Error in writing data"); // TODO: Find a way to return error to the Listener
+                    RD_REL_ASSERT(!err, "Error in writing data, error_code={}, category={}, err_message={}",
+                                  err.value(), err.category().name(), err.message());
+                    // TODO: Find a way to return error to the Listener
                     rreq->release_data();
                     rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                     rreq->m_data_written_promise.setValue();
@@ -2511,13 +2525,14 @@ ReplServiceError RaftReplDev::init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, j
 }
 
 void RaftReplDev::become_leader_cb() {
+    auto current_gate = m_traffic_ready_lsn.load();
     auto new_gate = raft_server()->get_last_log_idx();
-    repl_lsn_t existing_gate = 0;
-    if (!m_traffic_ready_lsn.compare_exchange_strong(existing_gate, new_gate)) {
-        // was a follower, m_traffic_ready_lsn should be zero on follower.
-        RD_REL_ASSERT(!existing_gate, "existing gate should be zero");
-    }
-    RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
+    m_traffic_ready_lsn.store(new_gate);
+
+    // in nuraft, a leader might become a new leader directly, which means it is unnecessary to become a follower before
+    // becoming a leader.
+
+    RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", current_gate, new_gate);
 }
 
 bool RaftReplDev::is_ready_for_traffic() const {
