@@ -87,7 +87,7 @@ void RaftReplService::start() {
     std::string ssl_ca_file = HS_DYNAMIC_CONFIG(consensus.ssl_ca_file);
     auto params = nuraft_mesg::Manager::Params{
         .server_uuid_ = m_my_uuid,
-        .mesg_port_ = m_repl_app->lookup_peer(m_my_uuid).second,
+        .mesg_port_ = static_cast< uint16_t >(m_repl_app->get_my_repl_svc_port()),
         .default_group_type_ = "homestore_replication",
         .ssl_key_ = ioenvironment.get_ssl_key(),
         .ssl_cert_ = ioenvironment.get_ssl_cert(),

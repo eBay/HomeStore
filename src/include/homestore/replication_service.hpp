@@ -114,6 +114,9 @@ public:
 
     // Get the current application/server repl uuid
     virtual replica_id_t get_my_repl_id() const = 0;
+
+    // Get the current replication service port
+    virtual uint32_t get_my_repl_svc_port() const = 0;
 };
 
 } // namespace homestore
