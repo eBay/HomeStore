@@ -135,6 +135,9 @@ public:
         }
 
         homestore::replica_id_t get_my_repl_id() const override { return helper_.my_replica_id_; }
+        uint32_t get_my_repl_svc_port() const override {
+            return SISL_OPTIONS["base_port"].as< uint16_t >() + helper_.replica_num_;
+        }
     };
 
 public:
