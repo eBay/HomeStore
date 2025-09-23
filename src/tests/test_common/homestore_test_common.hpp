@@ -31,6 +31,7 @@
 #include <device/hs_super_blk.h>
 #include <iomgr/iomgr_config_generated.h>
 #include <common/homestore_assert.hpp>
+#include <iomgr/http_server.hpp>
 
 #ifdef _PRERELEASE
 #include "common/crash_simulator.hpp"
@@ -69,6 +70,34 @@ SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
 using namespace homestore;
 
 namespace test_common {
+
+class test_http_server {
+public:
+    void get_prometheus_metrics(const Pistache::Rest::Request&, Pistache::Http::ResponseWriter response) {
+        response.send(Pistache::Http::Code::Ok,
+                      sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat));
+    }
+
+    void start() {
+        auto http_server_ptr = ioenvironment.get_http_server();
+
+        std::vector< iomgr::http_route > routes = {
+            {Pistache::Http::Method::Get, "/metrics",
+             Pistache::Rest::Routes::bind(&test_http_server::get_prometheus_metrics, this), iomgr::url_t::safe}};
+        try {
+            http_server_ptr->setup_routes(routes);
+            LOGINFO("Started http server ");
+        } catch (std::runtime_error const& e) { LOGERROR("setup routes failed, {}", e.what()) }
+
+        // start the server
+        http_server_ptr->start();
+    }
+
+    void stop() {
+        auto http_server_ptr = ioenvironment.get_http_server();
+        http_server_ptr->stop();
+    }
+};
 
 // Fix a port for http server
 inline static void set_fixed_http_port(uint32_t http_port) {
@@ -362,6 +391,12 @@ public:
         }
     }
 
+    test_http_server* get_http_server() {
+        return m_http_server.get();
+    }
+
+    void set_app_mem_size(uint64_t app_mem_size) { m_app_mem_size = app_mem_size; }
+
 private:
     void do_start_homestore(bool fake_restart = false, bool init_device = true, uint32_t shutdown_delay_sec = 5) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
@@ -429,7 +464,7 @@ private:
             ioenvironment.with_http_server();
         }
 
-        const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+        const uint64_t app_mem_size = (m_app_mem_size == 0) ? (((ndevices * dev_size) * 15) / 100) : m_app_mem_size;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
 
         using namespace homestore;
@@ -530,6 +565,8 @@ private:
 protected:
     test_token m_token;
     std::vector< std::string > m_generated_devs;
+    std::unique_ptr< test_http_server > m_http_server;
+    uint64_t m_app_mem_size{0};
 #ifdef _PRERELEASE
     flip::FlipClient m_fc{iomgr_flip::instance()};
     folly::Promise< folly::Unit > m_crash_recovered;
