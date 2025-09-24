@@ -2528,8 +2528,8 @@ void RaftReplDev::become_leader_cb() {
     auto current_gate = m_traffic_ready_lsn.load();
     auto new_gate = raft_server()->get_last_log_idx();
 
-    HS_REL_ASSERT(new_gate >= current_gate, "new_gate={} should be equal or larger than current_gate={}!", new_gate,
-                  current_gate);
+    RD_REL_ASSERT(new_gate >= static_cast< uint64_t >(current_gate),
+                  "new_gate={} should be equal or larger than current_gate={}!", new_gate, current_gate);
 
     m_traffic_ready_lsn.store(new_gate);
     // in nuraft, a leader might become a new leader directly, which means it is unnecessary to become a follower before
