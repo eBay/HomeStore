@@ -19,6 +19,7 @@ private:
 public:
     ShadowMap(uint32_t num_keys) : m_range_scheduler(num_keys), m_max_keys{num_keys} {}
 
+    using pick_existing_range_cb_t = std::function< void(const K&) >;
     void put_and_check(const K& key, const V& val, const V& old_val, bool expected_success) {
         std::lock_guard lock{m_mutex};
         auto const [it, happened] = m_map.insert(std::make_pair(key, val));
@@ -64,6 +65,18 @@ public:
         auto it = start_it;
         uint32_t count = 0;
         while ((it != m_map.cend()) && (++count < max_count)) {
+            ++it;
+        }
+        return std::pair(start_it->first, it->first);
+    }
+
+    std::pair< K, K > pick_existing_range(const K& start_key, uint32_t max_count, pick_existing_range_cb_t cb) const {
+        std::lock_guard lock{m_mutex};
+        auto const start_it = m_map.lower_bound(start_key);
+        auto it = start_it;
+        uint32_t count = 0;
+        while ((it != m_map.cend()) && (++count < max_count)) {
+            cb(it->first);
             ++it;
         }
         return std::pair(start_it->first, it->first);

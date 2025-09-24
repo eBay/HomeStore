@@ -51,6 +51,10 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< bool >()->default_value("1"), ""),
     (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
      ""),
+    (cache_pct, "", "cache_pct", "cache percentage", ::cxxopts::value< uint32_t >()->default_value("10"),
+     ""),
+    (app_mem_size_mb, "", "app_mem_size_mb", "application memory size", ::cxxopts::value< uint64_t >()->default_value("900"),
+     ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -108,6 +112,10 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
         this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
         hs()->index_service().add_index_table(this->m_bt);
         LOGINFO("Added index table to index service");
+
+        //start http server
+        m_helper.get_http_server()->start();
+        LOGINFO("Started http server");
     }
 
     void TearDown() override {
@@ -115,6 +123,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
         auto [interior, leaf] = this->m_bt->compute_node_count();
         LOGINFO("Teardown with Root bnode_id {} tree size: {} btree node count (interior = {} leaf= {})",
                 this->m_bt->root_node_id(), this->m_bt->count_keys(this->m_bt->root_node_id()), interior, leaf);
+        m_helper.get_http_server()->stop();
         m_helper.shutdown_homestore(false);
         this->m_bt.reset();
         log_obj_life_counter();
@@ -479,6 +488,11 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
     void restart_homestore() {
         m_helper.params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
         m_helper.restart_homestore();
+        BtreeTestHelper< TestType >::SetUp();
+    }
+
+    void set_app_mem_size(uint64_t app_mem_size) {
+        m_helper.set_app_mem_size(app_mem_size);
     }
 
     void SetUp() override {
@@ -556,6 +570,34 @@ TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     auto ops = this->build_op_list(input_ops);
 
     this->multi_op_execute(ops, !SISL_OPTIONS["init_device"].as< bool >());
+}
+
+TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOpsCacheEviction) {
+    // restart homestore with smaller cache %
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.resource_limits.cache_size_percent = SISL_OPTIONS["cache_pct"].as< uint32_t >();
+        HS_SETTINGS_FACTORY().save();
+    });
+    this->set_app_mem_size(SISL_OPTIONS["app_mem_size_mb"].as< uint64_t >() * 1024 * 1024);
+
+    this->restart_homestore();
+
+    // range put is not supported for non-extent keys
+    std::vector< std::string > input_ops = {"put:80", "remove:10", "query:10"};
+    if (SISL_OPTIONS.count("operation_list")) {
+        input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
+    }
+    auto ops = this->build_op_list(input_ops);
+
+    this->multi_op_execute(ops, !SISL_OPTIONS["init_device"].as< bool >());
+
+    LOGINFO("Metrics dump {}", sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat));
+    // reset cache pct
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.resource_limits.cache_size_percent = 65u;
+        HS_SETTINGS_FACTORY().save();
+    });
+    this->set_app_mem_size(0);
 }
 
 int main(int argc, char* argv[]) {

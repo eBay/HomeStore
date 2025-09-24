@@ -50,6 +50,7 @@ struct BtreeTestHelper {
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
 
         if (m_is_multi_threaded) {
+            m_fibers.clear();
             std::mutex mtx;
             m_run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
             iomanager.run_on_wait(iomgr::reactor_regex::all_worker, [this, &mtx]() {
@@ -326,6 +327,10 @@ public:
 
     void range_remove_any(uint32_t start_k, uint32_t end_k) {
         do_range_remove(start_k, end_k, false /* removing_all_existing */);
+    }
+
+    void range_remove_all(uint32_t start_k, uint32_t end_k) {
+        do_range_remove(start_k, end_k, true /* removing_all_existing */);
     }
 
     ////////////////////// All query operation variants ///////////////////////////////
