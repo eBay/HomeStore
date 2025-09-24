@@ -421,7 +421,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         this->m_shadow_map.save(m_shadow_filename);
     }
 
-    void reapply_after_crash(OperationList& operations) {
+    void reapply_after_crash(OperationList& operations, std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys) {
         for (const auto& [key, opType] : operations) {
             switch (opType) {
             case OperationType::Put:
@@ -433,6 +433,11 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                 this->remove_one(key, false);
                 break;
             }
+        }
+        if (range_remove_keys) {
+            auto [s_key, e_key] = *range_remove_keys;
+            LOGDEBUG("Reapply: Range removing keys [{}, {})", s_key, e_key);
+            this->range_remove_all(s_key, e_key);
         }
         trigger_cp(true);
     }
@@ -494,7 +499,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Sanity check passed for {} keys!", count);
     }
 
-    void crash_and_recover_common(OperationList& operations, std::string filename = "") {
+    void crash_and_recover_common(OperationList& operations, std::string filename = "", std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt) {
         print_keys_logging("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
@@ -521,7 +526,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         //        test_common::HSTestHelper::trigger_cp(true);
         LOGINFO("Before Reapply: {} keys in shadow map and actually {} in trees operation size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
-        this->reapply_after_crash(operations);
+        this->reapply_after_crash(operations, range_remove_keys);
         if (!filename.empty()) {
             std::string re_filename = filename + "_after_reapply.dot";
             LOGINFO("Visualize the tree after reapply {}", re_filename);
@@ -541,11 +546,11 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         this->crash_and_recover_common(operations, filename);
     }
 
-    void crash_and_recover(std::vector< std::string >& flips, OperationList& operations, std::string filename = "") {
+    void crash_and_recover(std::vector< std::string >& flips, OperationList& operations, std::string filename = "", std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt) {
         for (auto const& flip : flips) {
             this->remove_flip(flip);
         }
-        this->crash_and_recover_common(operations, filename);
+        this->crash_and_recover_common(operations, filename, range_remove_keys);
     }
 
     uint32_t tree_key_count() { return this->m_bt->count_keys(this->m_bt->root_node_id()); }
@@ -731,11 +736,12 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     }
                 }
             }
+            std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt;
             if (crash_test_options.range_remove_) {
                 // add one range remove operation
-                auto op = this->range_remove_op(generator, crash_test_options.num_entries_per_rounds);
-                LOGDEBUG("Range removing keys [{}, {})", op.first, op.second);
-                this->range_remove_all(op.first, op.second);
+                range_remove_keys = this->range_remove_op(generator, crash_test_options.num_entries_per_rounds);
+                LOGDEBUG("Range removing keys [{}, {})", range_remove_keys->first, range_remove_keys->second);
+                this->range_remove_all(range_remove_keys->first, range_remove_keys->second);
             }
             if (normal_execution) {
                 if (clean_shutdown) {
@@ -746,8 +752,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     this->get_all();
                 }
             } else {
-                // remove the flips so that they do not get triggered erroneously
-                this->crash_and_recover(flips, operations, fmt::format("long_tree_{}", round));
+                this->crash_and_recover(flips, operations, fmt::format("long_tree_{}", round), range_remove_keys);
             }
             if (elapsed_time - last_progress_time > 30) {
                 last_progress_time = elapsed_time;
