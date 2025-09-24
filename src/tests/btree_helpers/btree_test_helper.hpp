@@ -329,6 +329,10 @@ public:
         do_range_remove(start_k, end_k, false /* removing_all_existing */);
     }
 
+    void range_remove_all(uint32_t start_k, uint32_t end_k) {
+        do_range_remove(start_k, end_k, true /* removing_all_existing */);
+    }
+
     ////////////////////// All query operation variants ///////////////////////////////
     void query_all() { do_query(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, UINT32_MAX); }
 

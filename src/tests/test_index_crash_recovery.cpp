@@ -236,6 +236,10 @@ public:
 
     void reset() { keyStates.clear(); }
 
+    std::map< uint64_t, bool >& getKeyStates() { return keyStates; }
+    std::atomic< uint64_t >& getInUseKeyCount() { return in_use_key_cnt_; }
+    std::uniform_int_distribution<>& getKeyDistribution() { return keyDist_; }
+
 private:
     int putFreq_;
     int removeFreq_;
@@ -264,6 +268,7 @@ struct long_running_crash_options {
     uint32_t num_entries_per_rounds{SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >()};
     bool load_mode{SISL_OPTIONS.count("load_from_file") > 0};
     bool save_mode{SISL_OPTIONS.count("save_to_file") > 0};
+    bool range_remove_{false};
 };
 
 template < typename TestType >
@@ -545,6 +550,13 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
     uint32_t tree_key_count() { return this->m_bt->count_keys(this->m_bt->root_node_id()); }
 
+    std::pair<uint32_t, uint32_t> range_remove_op(SequenceGenerator& generator, uint32_t range_remove_count) {
+        uint32_t key = generator.getKeyDistribution()(g_re); 
+        auto [start_key, end_key] = this->m_shadow_map.pick_existing_range(K{key}, range_remove_count,
+                [&generator](const K& key) { generator.getKeyStates()[key.key()] = false; generator.getInUseKeyCount().fetch_sub(1); });
+        return {start_key.key(), end_key.key()};
+    }
+
     void long_running_crash(long_running_crash_options const& crash_test_options) {
         // set putFreq 100 for the initial load
         SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/,
@@ -719,6 +731,12 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     }
                 }
             }
+            if (crash_test_options.range_remove_) {
+                // add one range remove operation
+                auto op = this->range_remove_op(generator, crash_test_options.num_entries_per_rounds);
+                LOGDEBUG("Range removing keys [{}, {})", op.first, op.second);
+                this->range_remove_all(op.first, op.second);
+            }
             if (normal_execution) {
                 if (clean_shutdown) {
                     this->m_shadow_map.save(this->m_shadow_filename);
@@ -877,6 +895,19 @@ TYPED_TEST(IndexCrashTest, long_running_put_remove_crash) {
                       "crash_flush_on_split_at_right_child"},
         .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
                          /*, "crash_flush_on_freed_child"*/},
+    };
+    this->long_running_crash(crash_test_options);
+}
+
+TYPED_TEST(IndexCrashTest, long_running_put_range_remove_crash) {
+    long_running_crash_options crash_test_options{
+        // put freq should be 100 for range remove test
+        .put_freq = 100,
+        .put_flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
+                      "crash_flush_on_split_at_right_child"},
+        .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
+                         /*, "crash_flush_on_freed_child"*/},
+        .range_remove_ = true,
     };
     this->long_running_crash(crash_test_options);
 }
