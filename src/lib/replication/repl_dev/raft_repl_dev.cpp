@@ -2057,6 +2057,21 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
         return nuraft::cb_func::ReturnCode::Ok;
     }
 
+    // this is called on leader before appending the log entries.
+    // leader will assign the current term to each log entry, we check if the corrsponding rreq exists. if not , refuse
+    // the request batch.
+    case nuraft::cb_func::Type::ProcessReq: {
+        auto req = r_cast< nuraft::req_msg* >(param->ctx);
+        for (const auto& entry : req->log_entries()) {
+            repl_journal_entry* jentry = r_cast< repl_journal_entry* >(entry->get_buf().data_begin());
+            repl_key rkey{.server_id = jentry->server_id, .term = raft_server()->get_term(), .dsn = jentry->dsn};
+            if (m_repl_key_req_map.find(rkey) == m_repl_key_req_map.end()) {
+                return nuraft::cb_func::ReturnCode::ReturnNull;
+            }
+        }
+        return nuraft::cb_func::ReturnCode::Ok;
+    }
+
     // RemovedFromCluster will be handled in nuraft_mesg::generic_raft_event_handler where leave() is called
 
     // TODO: Add more type handler if necessary
