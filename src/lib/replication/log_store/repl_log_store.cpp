@@ -15,8 +15,27 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
         return lsn;
     }
 
-    repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
-    RELEASE_ASSERT_NE(nullptr != rreq, "Failed to localize journal entry before appending log");
+    repl_journal_entry* jentry = r_cast< repl_journal_entry const* >(entry->get_buf().data_begin());
+    RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
+                      "Mismatched version of journal entry received from RAFT peer");
+
+    repl_key rkey{
+        .server_id = jentry->server_id, .term = entry->get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
+
+    // make sure the rreq exists before appending the log, both leader and follower
+
+    // 1. for leader, there is still a very corner case that after nuraft::cb_func::Type::ProcessReq check, term
+    // changes and leader appends a log entry with new , and the corresponding rreq is not created yet. This is very
+    // rare
+
+    // 2. for follower, when appending a log entry, it must have been proposed by the leader, so the rreq must exist
+    // in memory.
+    auto rreq = m_rd.repl_key_to_req(rkey);
+    if (!m_rd.repl_key_to_req(rkey)) {
+        // in this case, we crash to make sure no data correctness issue happens.
+        RELEASE_ASSERT(false, "Failed to find in-memory rreq for repl_key={} before appending log", rkey.to_string());
+    }
+
     ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
     RD_LOGT(rreq->traceID(), "Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
@@ -59,9 +78,9 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
             start_lsn, count, reqs->size(), proposer_reqs->size());
 
     if (!reqs->empty()) {
-        // Check the map if data corresponding to all of these requsts have been received and written. If not, schedule
-        // a fetch and write. Once all requests are completed and written, these requests are poped out of the map and
-        // the future will be ready.
+        // Check the map if data corresponding to all of these requsts have been received and written. If not,
+        // schedule a fetch and write. Once all requests are completed and written, these requests are poped out of
+        // the map and the future will be ready.
         auto cur_time = std::chrono::steady_clock::now();
         auto fut = m_rd.notify_after_data_written(reqs);
         // Wait for the fetch and write to be completed successfully.
