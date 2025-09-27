@@ -39,7 +39,10 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     auto* vec = sisl::VectorPool< raft_buf_ptr_t >::alloc();
     vec->push_back(rreq->raft_journal_buf());
 
-    auto append_status = m_rd.raft_server()->append_entries(*vec);
+    nuraft::raft_server::req_ext_params ex_params;
+    ex_params.expected_term_ = rreq->term();
+
+    auto append_status = m_rd.raft_server()->append_entries_ext(*vec, ex_params);
     sisl::VectorPool< raft_buf_ptr_t >::free(vec);
 
     if (append_status && !append_status->get_accepted()) {
