@@ -133,7 +133,7 @@ out:
     return rreq;
 }
 
-repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry& lentry) {
+repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry& lentry, bool is_append_log) {
     // Try to locate the rreq based on the log_entry.
     // If we are able to locate that req in the map for this entry, it could be one of
     //  a) This is an inline data and don't need any localization
@@ -164,6 +164,12 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
         .server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
 
     auto rreq = m_rd.repl_key_to_req(rkey);
+
+    if (is_append_log) {
+        // make sure the rreq exists before appending the log, both leader and follower
+        RELEASE_ASSERT(rreq, "Failed to find in-memory rreq for repl_key={} before appending log", rkey.to_string());
+    }
+
     if ((rreq == nullptr) || (rreq->is_localize_pending())) {
         rreq = localize_journal_entry_prepare(lentry,
                                               -1 /* lsn=-1, since this is a finish call and we don't have lsn yet */);

@@ -124,7 +124,7 @@ public:
     ReplServiceError propose_to_raft(repl_req_ptr_t rreq);
 
     repl_req_ptr_t localize_journal_entry_prepare(nuraft::log_entry& lentry, int64_t lsn = -1);
-    repl_req_ptr_t localize_journal_entry_finish(nuraft::log_entry& lentry);
+    repl_req_ptr_t localize_journal_entry_finish(nuraft::log_entry& lentry, bool is_append_log = false);
 
     void link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn);
     void unlink_lsn_to_req(int64_t lsn, repl_req_ptr_t rreq);
