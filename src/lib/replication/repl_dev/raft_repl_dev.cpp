@@ -249,11 +249,21 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
     auto ctx = replace_member_ctx(task_id, member_out, member_in);
 
     sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(replace_member_ctx));
-    rreq->init(repl_key{.server_id = server_id(),
-                        .term = raft_server()->get_term(),
-                        .dsn = m_next_dsn.fetch_add(1),
-                        .traceID = trace_id},
-               journal_type_t::HS_CTRL_START_REPLACE, true, header, sisl::blob{}, 0, m_listener);
+
+    auto status = init_req_ctx(rreq,
+                               repl_key{.server_id = server_id(),
+                                        .term = raft_server()->get_term(),
+                                        .dsn = m_next_dsn.fetch_add(1),
+                                        .traceID = trace_id},
+                               journal_type_t::HS_CTRL_START_REPLACE, true /* is_proposer */, header, sisl::blob{}, 0,
+                               m_listener);
+
+    if (status != ReplServiceError::OK) {
+        RD_LOGE(trace_id, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+    }
+
+    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
+    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -361,11 +371,21 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(std::string& task_id, con
     auto ctx = replace_member_ctx(task_id, member_out, member_in);
 
     sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(replace_member_ctx));
-    rreq->init(repl_key{.server_id = server_id(),
-                        .term = raft_server()->get_term(),
-                        .dsn = m_next_dsn.fetch_add(1),
-                        .traceID = trace_id},
-               journal_type_t::HS_CTRL_COMPLETE_REPLACE, true, header, sisl::blob{}, 0, m_listener);
+
+    auto status = init_req_ctx(rreq,
+                               repl_key{.server_id = server_id(),
+                                        .term = raft_server()->get_term(),
+                                        .dsn = m_next_dsn.fetch_add(1),
+                                        .traceID = trace_id},
+                               journal_type_t::HS_CTRL_COMPLETE_REPLACE, true /* is_proposer */, header, sisl::blob{},
+                               0, m_listener);
+
+    if (status != ReplServiceError::OK) {
+        RD_LOGE(trace_id, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+    }
+
+    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
+    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -681,6 +701,9 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
         return folly::makeSemiFuture< ReplServiceError >(std::move(err));
     }
 
+    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
+    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
+
     err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
         m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::ACTIVE; });
@@ -729,11 +752,22 @@ void RaftReplDev::propose_truncate_boundary() {
         auto ctx = truncate_ctx(truncation_upper_limit);
 
         sisl::blob header(r_cast< uint8_t* >(&ctx), sizeof(truncate_ctx));
-        rreq->init(repl_key{.server_id = server_id(),
-                            .term = raft_server()->get_term(),
-                            .dsn = m_next_dsn.fetch_add(1),
-                            .traceID = std::numeric_limits< uint64_t >::max()},
-                   journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY, true, header, sisl::blob{}, 0, m_listener);
+
+        auto status = init_req_ctx(rreq,
+                                   repl_key{.server_id = server_id(),
+                                            .term = raft_server()->get_term(),
+                                            .dsn = m_next_dsn.fetch_add(1),
+                                            .traceID = std::numeric_limits< uint64_t >::max()},
+                                   journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY, true /* is_proposer */, header,
+                                   sisl::blob{}, 0, m_listener);
+
+        if (status != ReplServiceError::OK) {
+            RD_LOGE(std::numeric_limits< uint64_t >::max(), "Initializing rreq failed, rreq=[{}], error={}",
+                    rreq->to_string(), status);
+        }
+
+        auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
+        RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
         auto err = m_state_machine->propose_to_raft(std::move(rreq));
         if (err != ReplServiceError::OK) {
@@ -785,7 +819,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             header.size(), key.size(), data.size);
 
     // Add the request to the repl_dev_rreq map, it will be accessed throughout the life cycle of this request
-    auto const [it, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
+    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
     RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
 
     // If it is header only entry, directly propose to the raft
