@@ -70,16 +70,17 @@ public:
         return std::pair(start_it->first, it->first);
     }
 
-    std::pair< K, K > pick_existing_range(const K& start_key, uint32_t max_count, pick_existing_range_cb_t cb) const {
+    std::optional<std::pair< K, K > > pick_existing_range(const K& start_key, uint32_t max_count, pick_existing_range_cb_t cb) const {
         std::lock_guard lock{m_mutex};
         auto const start_it = m_map.lower_bound(start_key);
+        if (start_it == m_map.cend()) { return std::nullopt; }
+        auto end_it = start_it;
         auto it = start_it;
-        uint32_t count = 0;
-        while ((it != m_map.cend()) && (++count < max_count)) {
+        for(uint32_t count = 0; count < max_count && it != m_map.cend(); ++count, ++it) {
             cb(it->first);
-            ++it;
+            end_it = it;
         }
-        return std::pair(start_it->first, it->first);
+        return std::pair(start_it->first, end_it->first);
     }
 
     uint32_t max_keys() const { return m_max_keys; }

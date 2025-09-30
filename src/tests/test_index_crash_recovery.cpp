@@ -437,7 +437,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         if (range_remove_keys) {
             auto [s_key, e_key] = *range_remove_keys;
             LOGDEBUG("Reapply: Range removing keys [{}, {})", s_key, e_key);
-            this->range_remove_all(s_key, e_key);
+            this->range_remove_all(s_key, e_key, false /* expect_success*/);
         }
         trigger_cp(true);
     }
@@ -555,11 +555,15 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
     uint32_t tree_key_count() { return this->m_bt->count_keys(this->m_bt->root_node_id()); }
 
-    std::pair<uint32_t, uint32_t> range_remove_op(SequenceGenerator& generator, uint32_t range_remove_count) {
+    std::optional< std::pair< uint32_t, uint32_t > > range_remove_op(SequenceGenerator& generator, uint32_t range_remove_count) {
         uint32_t key = generator.getKeyDistribution()(g_re); 
-        auto [start_key, end_key] = this->m_shadow_map.pick_existing_range(K{key}, range_remove_count,
+        auto range_opt = this->m_shadow_map.pick_existing_range(K{key}, range_remove_count,
                 [&generator](const K& key) { generator.getKeyStates()[key.key()] = false; generator.getInUseKeyCount().fetch_sub(1); });
-        return {start_key.key(), end_key.key()};
+        std::optional< std::pair< uint32_t, uint32_t > > ret = std::nullopt;
+        if (range_opt) {
+            ret = std::make_pair(range_opt->first.key(), range_opt->second.key());
+        }
+        return ret;
     }
 
     void long_running_crash(long_running_crash_options const& crash_test_options) {
@@ -740,8 +744,10 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             if (crash_test_options.range_remove_) {
                 // add one range remove operation
                 range_remove_keys = this->range_remove_op(generator, crash_test_options.num_entries_per_rounds);
-                LOGDEBUG("Range removing keys [{}, {})", range_remove_keys->first, range_remove_keys->second);
-                this->range_remove_all(range_remove_keys->first, range_remove_keys->second);
+                if (range_remove_keys) {
+                    LOGDEBUG("Range removing keys [{}, {})", range_remove_keys->first, range_remove_keys->second);
+                    this->range_remove_all(range_remove_keys->first, range_remove_keys->second);
+                }
             }
             if (normal_execution) {
                 if (clean_shutdown) {

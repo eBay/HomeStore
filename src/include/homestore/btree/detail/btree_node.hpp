@@ -310,7 +310,7 @@ public:
             auto prevKey = get_nth_key< K >(i - 1, false);
             auto curKey = get_nth_key< K >(i, false);
             if (prevKey.compare(curKey) >= 0) {
-                DEBUG_ASSERT(false, "Order check failed at entry={}", i);
+                DEBUG_ASSERT(false, "Order check failed at entry={}, btree id={}", i, node_id());
                 return false;
             }
         }
