@@ -437,7 +437,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         if (range_remove_keys) {
             auto [s_key, e_key] = *range_remove_keys;
             LOGDEBUG("Reapply: Range removing keys [{}, {})", s_key, e_key);
-            this->range_remove_all(s_key, e_key);
+            this->range_remove_all(s_key, e_key, false /* expect_success*/);
         }
         trigger_cp(true);
     }
