@@ -260,10 +260,13 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
 
     if (status != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+        reset_quorum_size(0, trace_id);
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::RETRY_REQUEST);
     }
 
-    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
-    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
+    // the rreq will be recreated when appending log, which is a follower-like flow
+    // TODO: refactor the rreq creation, we should put it into m_repl_key_req_map before we call propose_to_raft.
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -365,8 +368,8 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(std::string& task_id, con
 
     // Step 2. Append log entry to complete replace member
     RD_LOGI(trace_id,
-            "Step6. Replace member, propose to raft for HS_CTRL_COMPLETE_REPLACE req, group_id={}, task_id={}", task_id,
-            group_id_str());
+            "Step6. Replace member, propose to raft for HS_CTRL_COMPLETE_REPLACE req, group_id={}, task_id={}",
+            group_id_str(), task_id);
     auto rreq = repl_req_ptr_t(new repl_req_ctx{});
     auto ctx = replace_member_ctx(task_id, member_out, member_in);
 
@@ -382,10 +385,13 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(std::string& task_id, con
 
     if (status != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+        reset_quorum_size(0, trace_id);
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::RETRY_REQUEST);
     }
 
-    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
-    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
+    // the rreq will be recreated when appending log, which is a follower-like flow
+    // TODO: refactor the rreq creation, we should put it into m_repl_key_req_map before we call propose_to_raft.
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -701,8 +707,8 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
         return folly::makeSemiFuture< ReplServiceError >(std::move(err));
     }
 
-    auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
-    RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
+    // the rreq will be recreated when appending log, which is a follower-like flow
+    // TODO: refactor the rreq creation, we should put it into m_repl_key_req_map before we call propose_to_raft.
 
     err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -764,10 +770,12 @@ void RaftReplDev::propose_truncate_boundary() {
         if (status != ReplServiceError::OK) {
             RD_LOGE(std::numeric_limits< uint64_t >::max(), "Initializing rreq failed, rreq=[{}], error={}",
                     rreq->to_string(), status);
+            decr_pending_request_num();
+            return;
         }
 
-        auto const [_, happened] = m_repl_key_req_map.emplace(rreq->rkey(), rreq);
-        RD_DBG_ASSERT(happened, "Duplicate repl_key={} found in the map", rreq->rkey().to_string());
+        // the rreq will be recreated when appending log, which is a follower-like flow
+        // TODO: refactor the rreq creation, we should put it into m_repl_key_req_map before we call propose_to_raft.
 
         auto err = m_state_machine->propose_to_raft(std::move(rreq));
         if (err != ReplServiceError::OK) {
@@ -2171,9 +2179,8 @@ void RaftReplDev::monitor_replace_member_replication_status() {
 
     trace_id_t trace_id = generateRandomTraceId();
 
-    RD_LOGD(trace_id, "Trigger complete_replace_member, task_id={}, replica_in={}, replica_out={}",
-            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_in),
-            boost::uuids::to_string(replica_out));
+    RD_LOGD(trace_id, "Trigger complete_replace_member, task_id={}, replica_in={}, replica_out={}", task_id,
+            boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out));
 
     replica_member_info out{replica_out, ""};
     replica_member_info in{replica_in, ""};

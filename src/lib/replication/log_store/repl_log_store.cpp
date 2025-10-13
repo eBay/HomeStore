@@ -15,7 +15,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
         return lsn;
     }
 
-    repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry, true /* is_append_log */);
+    repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     RELEASE_ASSERT_NE(nullptr != rreq, "Failed to localize journal entry before appending log");
 
     ulong lsn = HomeRaftLogStore::append(entry);
