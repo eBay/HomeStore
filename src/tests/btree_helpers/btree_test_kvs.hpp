@@ -81,7 +81,7 @@ private:
 public:
     TestFixedKey() = default;
     TestFixedKey(uint64_t k) : m_key{k} {}
-    TestFixedKey(const TestFixedKey& other) : TestFixedKey(other.serialize(), true) {}
+    TestFixedKey(const TestFixedKey& other) : m_key{other.m_key} {}
     TestFixedKey(const BtreeKey& other) : TestFixedKey(other.serialize(), true) {}
     TestFixedKey(const sisl::blob& b, bool copy) : BtreeKey(), m_key{*(r_cast< const uint64_t* >(b.cbytes()))} {}
     TestFixedKey& operator=(const TestFixedKey& other) = default;
