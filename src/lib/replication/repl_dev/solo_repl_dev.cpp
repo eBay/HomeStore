@@ -240,7 +240,7 @@ void SoloReplDev::cp_flush(CP*) {
     m_rd_sb->last_checkpoint_lsn_2 = m_rd_sb->last_checkpoint_lsn_1;
     m_rd_sb->last_checkpoint_lsn_1 = m_rd_sb->checkpoint_lsn;
     m_rd_sb->checkpoint_lsn = lsn;
-    HS_LOG(TRACE, solorepl, "dev={} cp flush cp_lsn={} cp_lsn_1={} cp_lsn_2={}", boost::uuids::to_string(group_id()),
+    HS_LOG(INFO, solorepl, "dev={} cp flush cp_lsn={} cp_lsn_1={} cp_lsn_2={}", boost::uuids::to_string(group_id()),
            lsn, m_rd_sb->last_checkpoint_lsn_1, m_rd_sb->last_checkpoint_lsn_2);
     m_rd_sb.write();
 }
@@ -252,7 +252,7 @@ void SoloReplDev::truncate() {
 
     // Truncate is safe anything below last_checkpoint_lsn - 2 as all the free blks
     // before that will be flushed in the last_checkpoint.
-    HS_LOG(TRACE, solorepl, "dev={} truncating at lsn={}", boost::uuids::to_string(group_id()),
+    HS_LOG(INFO, solorepl, "dev={} truncating at lsn={}", boost::uuids::to_string(group_id()),
            m_rd_sb->last_checkpoint_lsn_2);
     m_data_journal->truncate(m_rd_sb->last_checkpoint_lsn_2);
 }
