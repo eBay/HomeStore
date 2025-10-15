@@ -117,6 +117,8 @@ public:
     void cp_cleanup(CP* cp);
 
     void destroy();
+
+    // solo repl device truncation is triggerred by CP after flushing all the data in its cp_cleanup routine;
     void truncate();
 
 private:
