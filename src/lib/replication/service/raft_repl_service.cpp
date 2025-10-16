@@ -200,7 +200,7 @@ void RaftReplService::start() {
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< RaftReplServiceCPHandler >());
 
     // Step 8: Start a reaper thread which wakes up time-to-time and fetches pending data or cleans up old requests etc
-    start_reaper_thread();
+    start_repl_service_timers();
 
     // Delete any unopened logstores.
     hs()->logstore_service().delete_unopened_logdevs();
@@ -212,7 +212,7 @@ void RaftReplService::stop() {
 
     // FIXME: there is still a case that before we stop_reaper_thread, some fetch_data requests have already been sent
     // out. we need use a counter to make sure all the fetch_data request has completed.
-    stop_reaper_thread();
+    stop_repl_service_timers();
 
     start_stopping();
     while (true) {
@@ -572,56 +572,47 @@ ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_
 }
 
 ////////////////////// Reaper Thread related //////////////////////////////////
-void RaftReplService::start_reaper_thread() {
-    folly::Promise< folly::Unit > p;
-    auto f = p.getFuture();
-    iomanager.create_reactor("repl_svc_reaper", iomgr::INTERRUPT_LOOP, 1u, [this, &p](bool is_started) mutable {
-        if (is_started) {
-            m_reaper_fiber = iomanager.iofiber_self();
+void RaftReplService::start_repl_service_timers() {
+    // we need to explictly cancel the timers before we stop the repl_devs, but we cannot cancel a thread timer
+    // explictly(and exception will be threw out), so here we create a seperate gloable timer for each of them.
 
-            // Schedule the rdev garbage collector timer
-            LOGINFOMOD(replication, "Reaper Thread: scheduling GC every {} seconds",
-                       HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
-            m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
-                HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void*) {
-                    LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
-                    gc_repl_reqs();
-                    gc_repl_devs();
-                });
+    //  Schedule the rdev garbage collector timer
+    LOGINFOMOD(replication, "Reaper Thread: scheduling GC every {} seconds",
+               HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
+    m_rdev_gc_timer_hdl = iomanager.schedule_global_timer(
+        HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */, nullptr,
+        iomgr::reactor_regex::all_worker,
+        [this](void*) {
+            LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
+            gc_repl_reqs();
+            gc_repl_devs();
+        },
+        true /* wait_to_schedule */);
 
-            // Check for queued fetches at the minimum every second
-            uint64_t interval_ns =
-                std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
-            m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
-                                                                     [this](void*) { fetch_pending_data(); });
+    // Check for queued fetches at the minimum every second
+    uint64_t interval_ns =
+        std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
+    m_rdev_fetch_timer_hdl = iomanager.schedule_global_timer(
+        interval_ns, true /* recurring */, nullptr, iomgr::reactor_regex::all_worker,
+        [this](void*) { fetch_pending_data(); }, true /* wait_to_schedule */);
 
-            // Flush durable commit lsns to superblock
-            // FIXUP: what is the best value for flush_durable_commit_interval_ms?
-            m_flush_durable_commit_timer_hdl = iomanager.schedule_thread_timer(
-                HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void*) { flush_durable_commit_lsn(); });
+    // Flush durable commit lsns to superblock
+    // FIXUP: what is the best value for flush_durable_commit_interval_ms?
+    m_flush_durable_commit_timer_hdl = iomanager.schedule_global_timer(
+        HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */, nullptr,
+        iomgr::reactor_regex::all_worker, [this](void*) { flush_durable_commit_lsn(); }, true /* wait_to_schedule */);
 
-            // Check replace_member sync status to see a new member is fully synced up and ready to remove the old
-            // member
-            m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
-                HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void*) { monitor_replace_member_replication_status(); });
-
-            p.setValue();
-        } else {
-            // Cancel all recurring timers started
-            iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
-            iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
-            iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true /* wait */);
-            iomanager.cancel_timer(m_replace_member_sync_check_timer_hdl, true /* wait */);
-        }
-    });
-    std::move(f).get();
+    m_replace_member_sync_check_timer_hdl = iomanager.schedule_global_timer(
+        HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */, nullptr,
+        iomgr::reactor_regex::all_worker, [this](void*) { monitor_replace_member_replication_status(); },
+        true /* wait_to_schedule */);
 }
 
-void RaftReplService::stop_reaper_thread() {
-    iomanager.run_on_wait(m_reaper_fiber, [] { iomanager.stop_io_loop(); });
+void RaftReplService::stop_repl_service_timers() {
+    iomanager.cancel_timer(m_rdev_gc_timer_hdl, true);
+    iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true);
+    iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true);
+    iomanager.cancel_timer(m_replace_member_sync_check_timer_hdl, true);
 }
 
 void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs) {

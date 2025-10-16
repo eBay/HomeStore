@@ -234,8 +234,6 @@ TEST_F(RaftReplDevTest, Resync_From_Non_Originator) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
-
 TEST_F(RaftReplDevTest, Leader_Restart) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -260,6 +258,7 @@ TEST_F(RaftReplDevTest, Leader_Restart) {
     g_helper->sync_for_cleanup_start();
 }
 
+#ifdef _PRERELEASE
 TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -269,21 +268,21 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2");
-        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 2, 75);
+        g_helper->set_basic_flip("fake_drop_append_raft_channel", 2, 75);
     }
 
     uint64_t exp_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
-    if (g_helper->replica_num() == 0) { this->write_on_leader(); }
+    if (g_helper->replica_num() == 0) { this->write_on_leader(exp_entries, true); }
     LOGINFO(
         "Even after drop on replica=2, lets validate that data written is synced on all members (after retry to 2)");
     this->wait_for_all_commits();
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2 again");
-        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 1, 100);
+        g_helper->set_basic_flip("fake_drop_append_raft_channel", 1, 100);
     } else {
         g_helper->sync_dataset_size(1);
-        if (g_helper->replica_num() == 0) { this->write_on_leader(); }
+        if (g_helper->replica_num() == 0) { this->write_on_leader(exp_entries, true); }
 
         exp_entries += 1;
         this->wait_for_all_commits();
@@ -310,7 +309,6 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
 TEST_F(RaftReplDevTest, RemoveReplDev) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
 
@@ -361,7 +359,6 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
     // see if records are being removed
     g_helper->sync_for_cleanup_start();
 }
-#endif
 
 #ifdef _PRERELEASE
 // Garbage collect the replication requests
@@ -468,6 +465,14 @@ TEST_F(RaftReplDevTest, BaselineTest) {
     LOGINFO("BaselineTest done");
 }
 
+#if 0
+// in raft_repl_dev test, we use the varsize_blk_allocator as the default allocator, so multiple blkids probably be
+// allocated for one single async_allocate_write call(partial_alloc_ok is set to true in VirtualDev::alloc_blks),
+// especially for large data. however, raft_repl_dev now only support one blkid for one rreq. that is, in follower side,
+// it can not deserialize multiple blkids from log entry.
+
+// TODO: enable me after raft_repl_dev supports deserializing multiple blkids from log entry, also need to support
+// fetching multiple blkids.
 TEST_F(RaftReplDevTest, LargeDataWrite) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -483,6 +488,7 @@ TEST_F(RaftReplDevTest, LargeDataWrite) {
     this->validate_data();
     g_helper->sync_for_cleanup_start();
 }
+#endif
 
 TEST_F(RaftReplDevTest, PriorityLeaderElection) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
