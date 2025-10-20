@@ -618,16 +618,21 @@ protected:
             K last_child_last_key;
             K last_child_neighbor_key;
             BtreeNodePtr cur_child = child_node;
+            auto sibling_first_child = true_sibling_first_child(parent_node);
+            LOGTRACEMOD(wbcache, "Sibling first child id is {}", sibling_first_child);
 
             // We find the last child node by starting from the leftmost child and traversing through the
             // next_bnode links until we reach the end or find a sibling first child.
             bool found_child = false;
-            auto sibling_first_child = true_sibling_first_child(parent_node);
-            LOGTRACEMOD(wbcache, "Sibling first child id is {}", sibling_first_child);
             while (cur_child != nullptr) {
                 LOGTRACEMOD(wbcache, "Processing child node [{}]", cur_child->to_string());
                 if (!cur_child->is_node_deleted() && cur_child->total_entries() > 0) {
                     last_child_last_key = cur_child->get_last_key< K >();
+                    found_child = true;
+                }
+
+                if (child_node->total_entries() == 0 && orig_child_infos.contains(child_node->node_id())) {
+                    last_child_last_key = orig_child_infos[child_node->node_id()];
                     found_child = true;
                 }
 
@@ -685,7 +690,6 @@ protected:
                     LOGTRACEMOD(wbcache,
                                 "No undeleted child found for parent_node [{}], keep normal repair (regular recovery)",
                                 parent_node->to_string());
-                    next_cur_child = nullptr;
                 }
             }
         }
@@ -700,6 +704,7 @@ protected:
         // Walk across all child nodes until it gets the last_parent_key and keep fixing them.
         auto cur_parent = parent_node;
         BtreeNodeList new_parent_nodes;
+        BtreeNodeList child_nodes_to_free;
         do {
             if (child_node->has_valid_edge() || (child_node->is_leaf() && child_node->next_bnode() == empty_bnodeid)) {
                 LOGTRACEMOD(wbcache, "Child node [{}] is an edge node or a leaf with no next", child_node->to_string());
@@ -760,61 +765,6 @@ protected:
             LOGTRACEMOD(wbcache, "Repairing node={}, child_node=[{}] child_last_key={}", cur_parent->node_id(),
                         child_node->to_string(), child_last_key.to_string());
 
-            // Check if we are beyond the last child node.
-            //
-            // There can be cases where the child level merge is successfully persisted but the parent level is
-            // not. In this case, you may have your rightmost child node with last key greater than the
-            // last_parent_key. That's why here we have to check if the child node is one of the original child
-            // nodes first.
-            if (!is_parent_edge_node && !orig_child_infos.contains(child_node->node_id())) {
-                LOGTRACEMOD(
-                    wbcache,
-                    "Child node [{}] is not one of the original child nodes, so we need to check if it is beyond the "
-                    "last parent key {}",
-                    child_node->to_string(), last_parent_key.to_string());
-                if (child_last_key.compare(last_parent_key) > 0) {
-                    // We have reached a child beyond this parent, we can stop now
-                    // TODO this case if child last key is less than last parent key to update the parent node.
-                    // this case can potentially break the btree for put and remove op.
-                    break;
-                }
-                if (child_node->total_entries() == 0) {
-                    // this child has no entries, but maybe in the middle of the parent node, we need to update the key
-                    // of parent as previous one and go on
-                    LOGTRACEMOD(wbcache,
-                                "Reach to an empty child node {}, and this child doesn't belong to this parent; Hence "
-                                "loop ends",
-                                child_node->to_string());
-                    // now update  the next of parent node by skipping all deleted siblings of this parent node
-                    auto valid_sibling = cur_parent->next_bnode();
-                    while (valid_sibling != empty_bnodeid) {
-                        BtreeNodePtr sibling;
-                        if (read_node_impl(valid_sibling, sibling) == btree_status_t::success) {
-                            if (sibling->is_node_deleted()) {
-                                valid_sibling = sibling->next_bnode();
-                                continue;
-                            }
-                            // cur_parent->set_next_bnode(sibling->node_id());
-                            break;
-                        }
-                        LOGTRACEMOD(wbcache, "Failed to read child node {} for parent node [{}] reason {}",
-                                    valid_sibling, cur_parent->to_string(), ret);
-                    }
-                    if (valid_sibling != empty_bnodeid) {
-                        cur_parent->set_next_bnode(valid_sibling);
-                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
-                                    cur_parent->to_string(), child_node->to_string());
-
-                    } else {
-                        cur_parent->set_next_bnode(empty_bnodeid);
-                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
-                                    cur_parent->to_string(), child_node->to_string());
-                    }
-
-                    break;
-                }
-            }
-
             if (!cur_parent->has_room_for_put(btree_put_type::INSERT, K::get_max_size(),
                                               BtreeLinkInfo::get_fixed_size())) {
                 // No room in the parent_node, let us split the parent_node and continue
@@ -836,22 +786,25 @@ protected:
                 cur_parent = std::move(new_parent);
             }
 
+            // If the child node is empty, we mark it as deleted and remove them after the repair loop
+            if (child_node->total_entries() == 0) {
+                LOGTRACEMOD(wbcache, "Found an empty child node {}, marking it deleted",
+                            child_node->to_string());
+                child_node->set_node_deleted();
+                child_nodes_to_free.push_back(child_node);
+                // the links to the previous child node will be fixed in the next code block
+            }
+            
+
             // Insert the last key of the child node into parent node
             if (!child_node->is_node_deleted()) {
                 if (child_node->total_entries() == 0) {
-                    if (orig_child_infos.contains(child_node->node_id())) {
-                        child_last_key = orig_child_infos[child_node->node_id()];
-                        LOGTRACEMOD(wbcache,
-                                    "Reach to an empty child node [{}], but not the end of the parent node, so we need "
-                                    "to update the key of parent node as original one {}",
-                                    child_node->to_string(), child_last_key.to_string());
-                    } else {
-                        LOGTRACEMOD(wbcache,
-                                    "Reach to an empty child node [{}] but not belonging to this parent (probably next "
-                                    "parent sibling); Hence end loop",
-                                    child_node->to_string());
-                        break;
-                    }
+                    BT_LOG_ASSERT(false,
+                                    "Child node [{}] is empty but not deleted and not an edge, while it doesn't "
+                                    "belong to this parent node {}",
+                                    child_node->to_string(), parent_node->to_string());
+                    ret = btree_status_t::not_found;
+                    break;
                 }
                 cur_parent->insert(cur_parent->total_entries(), child_last_key,
                                    BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
@@ -873,13 +826,6 @@ protected:
                     IndexBtreeNode* idx_node = static_cast< IndexBtreeNode* >(pre_child_node.get());
                     idx_node->m_idx_buf->set_state(index_buf_state_t::CLEAN);
                     write_node_impl(pre_child_node, cp_ctx);
-                    // update the key of last entry of the parent with the last key of deleted child
-                    child_last_key = orig_child_infos[child_node->node_id()];
-                    LOGTRACEMOD(wbcache, "updating parent [{}] current last key with {}", cur_parent->to_string(),
-                                child_last_key.to_string());
-                    // update it here to go to the next child node and unlock this node
-                    LOGTRACEMOD(wbcache, "update the child node next to the next of previous child node");
-                    child_node->set_next_bnode(child_node->next_bnode());
                 }
             }
 
@@ -914,6 +860,7 @@ protected:
                 child_node = nullptr;
                 break;
             }
+
             ret = this->read_and_lock_node(next_node_id, child_node, locktype_t::READ, locktype_t::READ, cp_ctx);
             if (ret != btree_status_t::success) {
                 BT_LOG_ASSERT(false, "Parent node={} repair is partial, because child_node get has failed with ret={}",
@@ -925,6 +872,10 @@ protected:
         } while (true);
 
         if (child_node) { this->unlock_node(child_node, locktype_t::READ); }
+
+        // free the deleted child nodes
+        for (const auto& cnode : child_nodes_to_free) { free_node_impl(cnode, cp_ctx); }
+
         // if last parent has the key less than the last child key, then we need to update the parent node with
         // the last child key if it doesn't have edge.
         auto last_parent = parent_node;
@@ -996,7 +947,7 @@ protected:
             }
 
             if (sibling_node->is_node_deleted()) {
-                LOGTRACEMOD(wbcache, "Sibling node [{}] is not the sibling for parent_node {}",
+                LOGTRACEMOD(wbcache, "Sibling node [{}] is not the true sibling for parent_node {}",
                             sibling_node->to_string(), node->to_string());
                 return find_true_sibling(sibling_node);
             } else {

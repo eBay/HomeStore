@@ -236,6 +236,10 @@ public:
 
     void reset() { keyStates.clear(); }
 
+    std::map< uint64_t, bool >& getKeyStates() { return keyStates; }
+    std::atomic< uint64_t >& getInUseKeyCount() { return in_use_key_cnt_; }
+    std::uniform_int_distribution<>& getKeyDistribution() { return keyDist_; }
+
 private:
     int putFreq_;
     int removeFreq_;
@@ -264,6 +268,7 @@ struct long_running_crash_options {
     uint32_t num_entries_per_rounds{SISL_OPTIONS["num_entries_per_rounds"].as< uint32_t >()};
     bool load_mode{SISL_OPTIONS.count("load_from_file") > 0};
     bool save_mode{SISL_OPTIONS.count("save_to_file") > 0};
+    bool range_remove_{false};
 };
 
 template < typename TestType >
@@ -416,7 +421,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         this->m_shadow_map.save(m_shadow_filename);
     }
 
-    void reapply_after_crash(OperationList& operations) {
+    void reapply_after_crash(OperationList& operations, std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys) {
         for (const auto& [key, opType] : operations) {
             switch (opType) {
             case OperationType::Put:
@@ -428,6 +433,11 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                 this->remove_one(key, false);
                 break;
             }
+        }
+        if (range_remove_keys) {
+            auto [s_key, e_key] = *range_remove_keys;
+            LOGDEBUG("Reapply: Range removing keys [{}, {})", s_key, e_key);
+            this->range_remove_all(s_key, e_key, false /* expect_success*/);
         }
         trigger_cp(true);
     }
@@ -489,7 +499,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Sanity check passed for {} keys!", count);
     }
 
-    void crash_and_recover_common(OperationList& operations, std::string filename = "") {
+    void crash_and_recover_common(OperationList& operations, std::string filename = "", std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt) {
         print_keys_logging("Btree prior to CP and susbsequent simulated crash: ");
         LOGINFO("Before Crash: {} keys in shadow map and it is actually {} keys in tree - operations size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
@@ -516,7 +526,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         //        test_common::HSTestHelper::trigger_cp(true);
         LOGINFO("Before Reapply: {} keys in shadow map and actually {} in trees operation size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
-        this->reapply_after_crash(operations);
+        this->reapply_after_crash(operations, range_remove_keys);
         if (!filename.empty()) {
             std::string re_filename = filename + "_after_reapply.dot";
             LOGINFO("Visualize the tree after reapply {}", re_filename);
@@ -536,14 +546,25 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         this->crash_and_recover_common(operations, filename);
     }
 
-    void crash_and_recover(std::vector< std::string >& flips, OperationList& operations, std::string filename = "") {
+    void crash_and_recover(std::vector< std::string >& flips, OperationList& operations, std::string filename = "", std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt) {
         for (auto const& flip : flips) {
             this->remove_flip(flip);
         }
-        this->crash_and_recover_common(operations, filename);
+        this->crash_and_recover_common(operations, filename, range_remove_keys);
     }
 
     uint32_t tree_key_count() { return this->m_bt->count_keys(this->m_bt->root_node_id()); }
+
+    std::optional< std::pair< uint32_t, uint32_t > > range_remove_op(SequenceGenerator& generator, uint32_t range_remove_count) {
+        uint32_t key = generator.getKeyDistribution()(g_re); 
+        auto range_opt = this->m_shadow_map.pick_existing_range(K{key}, range_remove_count,
+                [&generator](const K& key) { generator.getKeyStates()[key.key()] = false; generator.getInUseKeyCount().fetch_sub(1); });
+        std::optional< std::pair< uint32_t, uint32_t > > ret = std::nullopt;
+        if (range_opt) {
+            ret = std::make_pair(range_opt->first.key(), range_opt->second.key());
+        }
+        return ret;
+    }
 
     void long_running_crash(long_running_crash_options const& crash_test_options) {
         // set putFreq 100 for the initial load
@@ -719,6 +740,15 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     }
                 }
             }
+            std::optional< std::pair< uint32_t, uint32_t > > range_remove_keys = std::nullopt;
+            if (crash_test_options.range_remove_) {
+                // add one range remove operation
+                range_remove_keys = this->range_remove_op(generator, crash_test_options.num_entries_per_rounds);
+                if (range_remove_keys) {
+                    LOGDEBUG("Range removing keys [{}, {})", range_remove_keys->first, range_remove_keys->second);
+                    this->range_remove_all(range_remove_keys->first, range_remove_keys->second);
+                }
+            }
             if (normal_execution) {
                 if (clean_shutdown) {
                     this->m_shadow_map.save(this->m_shadow_filename);
@@ -728,8 +758,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
                     this->get_all();
                 }
             } else {
-                // remove the flips so that they do not get triggered erroneously
-                this->crash_and_recover(flips, operations, fmt::format("long_tree_{}", round));
+                this->crash_and_recover(flips, operations, fmt::format("long_tree_{}", round), range_remove_keys);
             }
             if (elapsed_time - last_progress_time > 30) {
                 last_progress_time = elapsed_time;
@@ -877,6 +906,19 @@ TYPED_TEST(IndexCrashTest, long_running_put_remove_crash) {
                       "crash_flush_on_split_at_right_child"},
         .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
                          /*, "crash_flush_on_freed_child"*/},
+    };
+    this->long_running_crash(crash_test_options);
+}
+
+TYPED_TEST(IndexCrashTest, long_running_put_range_remove_crash) {
+    long_running_crash_options crash_test_options{
+        // put freq should be 100 for range remove test
+        .put_freq = 100,
+        .put_flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
+                      "crash_flush_on_split_at_right_child"},
+        .remove_flips = {"crash_flush_on_merge_at_parent", "crash_flush_on_merge_at_left_child"
+                         /*, "crash_flush_on_freed_child"*/},
+        .range_remove_ = true,
     };
     this->long_running_crash(crash_test_options);
 }

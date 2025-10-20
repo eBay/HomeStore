@@ -50,6 +50,7 @@ struct BtreeTestHelper {
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
 
         if (m_is_multi_threaded) {
+            m_fibers.clear();
             std::mutex mtx;
             m_run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
             iomanager.run_on_wait(iomgr::reactor_regex::all_worker, [this, &mtx]() {
@@ -328,6 +329,10 @@ public:
         do_range_remove(start_k, end_k, false /* removing_all_existing */);
     }
 
+    void range_remove_all(uint32_t start_k, uint32_t end_k, bool expect_success = true) {
+        do_range_remove(start_k, end_k, true /* removing_all_existing */, expect_success);
+    }
+
     ////////////////////// All query operation variants ///////////////////////////////
     void query_all() { do_query(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, UINT32_MAX); }
 
@@ -527,7 +532,7 @@ private:
         if (expect_success) { m_shadow_map.put_and_check(key, value, *existing_v, done); }
     }
 
-    void do_range_remove(uint64_t start_k, uint64_t end_k, bool all_existing) {
+    void do_range_remove(uint64_t start_k, uint64_t end_k, bool all_existing, bool expect_success = true) {
         K start_key = K{start_k};
         K end_key = K{end_k};
 
@@ -537,8 +542,10 @@ private:
 
         if (all_existing) {
             m_shadow_map.range_erase(start_key, end_key);
-            ASSERT_EQ((ret == btree_status_t::success), true)
-                << "not a successful remove op for range " << start_k << "-" << end_k;
+            if (expect_success) {
+                ASSERT_EQ(ret, btree_status_t::success)
+                    << "not a successful remove op for range " << start_k << "-" << end_k;
+            }
         } else if (start_k < m_max_range_input) {
             K end_range{std::min(end_k, uint64_cast(m_max_range_input - 1))};
             m_shadow_map.range_erase(start_key, end_range);
