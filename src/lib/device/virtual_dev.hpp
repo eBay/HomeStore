@@ -172,7 +172,7 @@ public:
     /// @return Allocation Status
     virtual BlkAllocStatus commit_blk(BlkId const& blkid);
 
-    virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr);
+    virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr, bool free_now = false);
 
     /////////////////////// Write API related methods /////////////////////////////
     /// @brief Asynchornously write the buffer to the device on a given blkid
