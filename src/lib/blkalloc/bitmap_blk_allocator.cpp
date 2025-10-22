@@ -157,7 +157,7 @@ sisl::byte_array BitmapBlkAllocator::acquire_underlying_buffer() {
     synchronize_rcu();
 
     BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Multiple acquires concurrently?");
-    return (m_disk_bm->serialize(m_align_size));
+    return (m_disk_bm->serialize(m_align_size, true));
 }
 
 void BitmapBlkAllocator::release_underlying_buffer() {
