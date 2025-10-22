@@ -202,6 +202,22 @@ public:
     folly::Future< std::error_code > async_free_blk(MultiBlkId const& bid);
 
     /**
+     * @brief Frees the specified block IDs immediately. Used during log replay on commit only.
+     *
+     * @param bid The block ID to free.
+     * @return An error code indicating the result of the operation.
+     */
+    std::error_code free_blk_now(MultiBlkId const& bid);
+
+    /**
+     * @brief Check if the blk id is free or not.
+     *
+     * @param bid The block ID to check.
+     * @return Return whether blkid is alloced or not.
+     */
+    bool is_blk_alloced(BlkId const& blkid) const;
+
+    /**
      * @brief : get the blk size of this data service;
      *
      * @return : blk size
