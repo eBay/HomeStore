@@ -2364,8 +2364,11 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->set_lentry(lentry);
     auto status = init_req_ctx(rreq, rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry),
                                entry_to_key(jentry), data_size, m_listener);
+
     if (status != ReplServiceError::OK) {
-        RD_LOGE(jentry->traceID, "Initializing rreq failed, rreq=[{}], error={}", rreq->to_string(), status);
+        // we need make sure all the logs are replayed successfully, otherwise we may miss some logs
+        RELEASE_ASSERT(false, "Initializing rreq failed when replaying log, rkey={}, error={}, trace_id={}",
+                       rkey.to_string(), status, jentry->traceID);
     }
 
     // we load the log from log device, implies log flushed.  We only flush log after data is written to data device.

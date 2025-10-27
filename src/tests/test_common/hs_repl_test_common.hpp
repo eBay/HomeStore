@@ -224,7 +224,14 @@ public:
         start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
+             {HS_SERVICE::REPLICATION,
+              {.size_pct = 70.0,
+               // for now , we only support append blk allocator for replication service
+               // TODO: let raft_repl_dev supports other blk allocator type after we support deserializing multiple
+               // multiblkid from log entry, see
+               // https://github.com/JacksonYao287/HomeStore/blob/727699625a4699efb222ebed9d6bc2887875aa42/src/lib/replication/repl_dev/raft_state_machine.cpp#L89
+               .blkalloc_type = blk_allocator_type_t::append,
+               .repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {.size_pct = 20.0}}},
             nullptr /*hs_before_svc_start_cb*/, dev_list_);
     }

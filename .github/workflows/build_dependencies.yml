@@ -155,7 +155,13 @@ jobs:
     - name: Export Recipes
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
+
+        # make the following removed directory configurable, for example, using an environment variable.
         sudo rm -rf $ANDROID_HOME
+        sudo rm -rf /usr/lib/llvm*
+        sudo rm -rf /usr/lib/jvm
+        sudo rm -rf /usr/lib/google-cloud-sdk
+        
         python -m pip install pyelftools
         conan export import/iomgr oss/master
         conan export import/nuraft_mesg oss/main
