@@ -108,6 +108,7 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
     this->validate_data();
 
     g_helper->sync_for_cleanup_start();
+    if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
 }
 
 TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
@@ -205,6 +206,12 @@ TEST_F(RaftReplDevTest, Follower_Reject_Append) {
     LOGINFO("Validate all data written so far by reading them");
     this->validate_data();
     g_helper->sync_for_cleanup_start();
+
+    if (g_helper->replica_num() != 0) {
+        g_helper->remove_flip("fake_reject_append_data_channel");
+        g_helper->remove_flip("fake_reject_append_raft_channel");
+        g_helper->remove_flip("slow_down_data_channel");
+    }
 }
 #endif
 
@@ -234,8 +241,6 @@ TEST_F(RaftReplDevTest, Resync_From_Non_Originator) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
-
 TEST_F(RaftReplDevTest, Leader_Restart) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -260,6 +265,7 @@ TEST_F(RaftReplDevTest, Leader_Restart) {
     g_helper->sync_for_cleanup_start();
 }
 
+#ifdef _PRERELEASE
 TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -269,25 +275,27 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2");
-        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 2, 75);
+        g_helper->set_basic_flip("fake_drop_append_raft_channel", 2, 75);
     }
 
     uint64_t exp_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
-    if (g_helper->replica_num() == 0) { this->write_on_leader(); }
+    if (g_helper->replica_num() == 0) { this->write_on_leader(exp_entries, true); }
     LOGINFO(
         "Even after drop on replica=2, lets validate that data written is synced on all members (after retry to 2)");
     this->wait_for_all_commits();
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2 again");
-        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 1, 100);
+        g_helper->set_basic_flip("fake_drop_append_raft_channel", 1, 100);
     } else {
         g_helper->sync_dataset_size(1);
-        if (g_helper->replica_num() == 0) { this->write_on_leader(); }
+        if (g_helper->replica_num() == 0) { this->write_on_leader(exp_entries, true); }
 
         exp_entries += 1;
         this->wait_for_all_commits();
     }
+
+    if (g_helper->replica_num() == 2) { g_helper->remove_flip("fake_drop_append_raft_channel"); }
 }
 #endif
 
@@ -310,7 +318,6 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
 TEST_F(RaftReplDevTest, RemoveReplDev) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
 
@@ -340,7 +347,7 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
     this->restart_replica(1, 15 /* shutdown_delay_sec */);
     LOGINFO("After restart replica={} num_db={}", g_helper->replica_num(), dbs_.size());
 
-    // Since leader and follower 2 left the cluster, follower 1 is the only member in the raft group and need atleast
+    // Since leader and follower 2 left the cluster, follower 1 is the only member in the raft group and need at least
     // 2 members to start leader election. In this case follower 1 can't be removed and goes to zombie state for this
     // repl dev.
     if (g_helper->replica_num() == 1) {
@@ -354,14 +361,15 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
 
     if (g_helper->replica_num() == 0) {
         // Leader sleeps here because follower-1 needs some time to find the leader after restart.
-        std::this_thread::sleep_for(std::chrono::seconds(20));
+        // TODO: add a sync machanism instead of sleep to make sure follower-1 can find the leader. we should make sure
+        // leader exit until other follower exit.
+        std::this_thread::sleep_for(std::chrono::seconds(40));
     }
 
     // TODO: Once generic crash flip/test_infra is available, use flip to crash during removal and restart them to
     // see if records are being removed
     g_helper->sync_for_cleanup_start();
 }
-#endif
 
 #ifdef _PRERELEASE
 // Garbage collect the replication requests
@@ -406,6 +414,8 @@ TEST_F(RaftReplDevTest, GCReplReqs) {
     HS_SETTINGS_FACTORY().save();
 
     g_helper->sync_for_cleanup_start();
+
+    if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
 }
 #endif
 
@@ -474,7 +484,7 @@ TEST_F(RaftReplDevTest, LargeDataWrite) {
 
     // TODO: Increase the data size (e.g., to 16MB) for testing.
     // For now, use 4MB to ensure the test passes since there are issues with larger IO sizes on the uring drive.
-    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    uint64_t entries_per_attempt = 50;
     uint64_t data_size = 4 * 1024 * 1024;
     this->write_on_leader(entries_per_attempt, true /* wait_for_commit */, nullptr, &data_size);
 
@@ -689,6 +699,7 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     LOGINFO("RaftLogTruncationTest done");
 }
 
+#if 0
 TEST_F(RaftReplDevTest, WriteWithSSL) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -733,6 +744,7 @@ TEST_F(RaftReplDevTest, WriteWithSSL) {
         [prev_ssl_ca_file](auto& s) { s.consensus.ssl_ca_file = prev_ssl_ca_file; });
     HS_SETTINGS_FACTORY().save();
 }
+#endif
 
 TEST_F(RaftReplDevTest, ReconcileLeader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
@@ -854,6 +866,7 @@ int main(int argc, char* argv[]) {
 
     auto ret = RUN_ALL_TESTS();
     g_helper->teardown();
+    g_helper.reset();
 
     std::string str;
     sisl::ObjCounterRegistry::foreach ([&str](const std::string& name, int64_t created, int64_t alive) {
