@@ -197,7 +197,7 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
         do_start();
         return false;
     } else {
-        return true;
+        RELEASE_ASSERT(false, "refactor mode should not bu used for the first time boot");
     }
 }
 
@@ -292,21 +292,8 @@ void HomeStore::do_start() {
 
     if (has_repl_data_service()) {
         s_cast< GenericReplService* >(m_repl_service.get())->start(); // Replservice starts logstore & data service
-    } else {
-        if (has_data_service()) { m_data_service->start(); }
-        if (has_log_service() && inp_params.auto_recovery) {
-            // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
-            // to start log store
-            m_log_service->start(is_first_time_boot() /* format */);
-        }
-    }
-
-    // If this is the first time boot, we need to commit the formatting so that it will not be considered as first time
-    // boot going forward on next reboot.
-    if (m_dev_mgr->is_first_time_boot()) {
-        // Take the first CP after we have initialized all subsystems and wait for it to complete.
-        m_cp_mgr->trigger_cp_flush(true /* force */).get();
-        m_dev_mgr->commit_formatting();
+        LOGINFO("Refactor mode enabled, skipping further HomeStore start steps after ReplicationService start");
+        return;
     }
 
     m_cp_mgr->start_timer();
@@ -316,14 +303,7 @@ void HomeStore::do_start() {
 }
 
 void HomeStore::shutdown() {
-    if (!m_init_done) {
-        LOGWARN("Homestore shutdown is called before init is completed");
-        return;
-    }
-
     LOGINFO("Homestore shutdown is started");
-
-    m_resource_mgr->stop();
 
     // 1 stop all the services, after which all the upper layer api call are rejected and there is not on-going request.
     // Note that, after stopping, all the service are alive.
@@ -340,7 +320,6 @@ void HomeStore::shutdown() {
     // 2 call cp_manager shutdown, which will which trigger cp flush to make sure all the in-memory data of all the
     // services are flushed to disk. since all the upper layer api call are rejected and there is not on-going request,
     // so after cp flush is done, we can guarantee all the necessary data are persisted to disk.
-    m_cp_mgr->shutdown();
     m_cp_mgr.reset();
 
     // 3 call reset/shutdown to clear all the services and after that all the services are dead, excluding metasevice

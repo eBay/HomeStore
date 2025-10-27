@@ -172,6 +172,7 @@ struct logstore_superblk {
 
     [[nodiscard]] static logstore_superblk default_value();
     static void init(logstore_superblk& m);
+    static void init(logstore_superblk& meta, logstore_seq_num_t first_seq_num);
     static void clear(logstore_superblk& m);
     [[nodiscard]] static bool is_valid(const logstore_superblk& m);
 

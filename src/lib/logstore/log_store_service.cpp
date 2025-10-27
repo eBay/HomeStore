@@ -119,6 +119,12 @@ void LogStoreService::start(bool format) {
     }
 }
 
+void LogStoreService::refactor() {
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        logdev->refactor();
+    }
+}
+
 void LogStoreService::stop() {
     start_stopping();
     while (true) {

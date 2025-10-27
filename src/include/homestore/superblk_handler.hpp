@@ -108,9 +108,12 @@ public:
     sisl::byte_array raw_buf() { return m_raw_buf; }
 
     void write() {
+        LOGINFO("Writing superblk {} of size {}", m_meta_sub_name, m_raw_buf->size());
         if (m_meta_blk) {
+            LOGINFO("Updating existing superblk {}", m_meta_sub_name);
             meta_service().update_sub_sb(m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_blk);
         } else {
+            LOGINFO("Adding new superblk {}", m_meta_sub_name);
             meta_service().add_sub_sb(m_meta_sub_name, m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_blk);
         }
     }

@@ -413,6 +413,9 @@ nlohmann::json HomeLogStore::get_status(int verbosity) const {
 
 logstore_superblk logstore_superblk::default_value() { return logstore_superblk{-1}; }
 void logstore_superblk::init(logstore_superblk& meta) { meta.m_first_seq_num = 0; }
+void logstore_superblk::init(logstore_superblk& meta, logstore_seq_num_t first_seq_num) {
+    meta.m_first_seq_num = first_seq_num;
+}
 void logstore_superblk::clear(logstore_superblk& meta) { meta.m_first_seq_num = -1; }
 bool logstore_superblk::is_valid(const logstore_superblk& meta) { return meta.m_first_seq_num >= 0; }
 

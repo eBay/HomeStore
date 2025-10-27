@@ -171,39 +171,8 @@ void RaftReplService::start() {
     LOGINFO("Starting LogStore service, fist_boot = {}", hs()->is_first_time_boot());
     hs()->logstore_service().start(hs()->is_first_time_boot());
     LOGINFO("Started LogStore service, log replay should already done till this point");
-    // all log stores are replayed, time to start data service.
-    LOGINFO("Starting DataService");
-    hs()->data_service().start();
 
-    // Step 6: Iterate all the repl devs and ask each one of them to join the raft group concurrently.
-    std::vector< std::future< bool > > join_group_futures;
-    for (const auto& [_, repl_dev] : m_rd_map) {
-        if (repl_dev->get_stage() == repl_dev_stage_t::UNREADY) {
-            LOGINFO("Repl dev is unready, skip join group, group_id={}", boost::uuids::to_string(repl_dev->group_id()));
-            continue;
-        }
-        join_group_futures.emplace_back(std::async(std::launch::async, [&repl_dev]() {
-            auto rdev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev);
-            rdev->wait_for_logstore_ready();
-
-            // upper layer can register a callback to be notified when log replay is done.
-            if (auto listener = rdev->get_listener(); listener) listener->on_log_replay_done(rdev->group_id());
-            return rdev->join_group();
-        }));
-    }
-
-    for (auto& future : join_group_futures) {
-        if (!future.get()) HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
-    }
-
-    // Step 7: Register to CPManager to ensure we can flush the superblk.
-    hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< RaftReplServiceCPHandler >());
-
-    // Step 8: Start a reaper thread which wakes up time-to-time and fetches pending data or cleans up old requests etc
-    start_reaper_thread();
-
-    // Delete any unopened logstores.
-    hs()->logstore_service().delete_unopened_logdevs();
+    LOGINFO("return directly for refactor mode");
 }
 
 void RaftReplService::stop() {
@@ -232,14 +201,11 @@ void RaftReplService::stop() {
     m_msg_mgr.reset();
 
     hs()->logstore_service().stop();
-    hs()->data_service().stop();
+    LOGINFO("In refactor mode, data service is not started, so not stopping it");
+    return;
 }
 
-RaftReplService::~RaftReplService() {
-    stop_reaper_thread();
-
-    // the base class destructor will clear the m_rd_map
-}
+RaftReplService::~RaftReplService() { LOGINFO("Destroying RaftReplService"); }
 
 void RaftReplService::monitor_cert_changes() {
     auto fw = ioenvironment.get_file_watcher();

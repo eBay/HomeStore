@@ -46,7 +46,11 @@ CPManager::CPManager() :
     start_cp_thread();
 }
 
-CPManager::~CPManager() { HS_REL_ASSERT(!m_cur_cp, "CPManager is tiering down without calling shutdown"); }
+CPManager::~CPManager() {
+    delete (m_cur_cp);
+    rcu_xchg_pointer(&m_cur_cp, nullptr);
+    LOGINFO("CPManager destroyed");
+}
 
 void CPManager::start(bool first_time_boot) {
     if (first_time_boot) {

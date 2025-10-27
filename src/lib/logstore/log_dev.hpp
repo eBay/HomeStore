@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
+#include <boost/uuid/nil_generator.hpp>
 #include <sisl/fds/id_reserver.hpp>
 #include <sisl/fds/stream_tracker.hpp>
 #include <sisl/fds/buffer.hpp>
@@ -428,6 +429,47 @@ struct logdev_superblk {
 #pragma pack()
 
 #pragma pack(1)
+struct new_logdev_superblk {
+    static constexpr uint32_t LOGDEV_SB_MAGIC{0xDABAF00D};
+    static constexpr uint32_t LOGDEV_SB_VERSION{1};
+
+    uint32_t magic{LOGDEV_SB_MAGIC};
+    uint32_t version{LOGDEV_SB_VERSION};
+    logdev_id_t logdev_id{0};
+    uint32_t num_stores{0};
+    uint64_t start_dev_offset{0};
+    logid_t key_idx{0};
+    flush_mode_t flush_mode;
+    uuid_t pid{boost::uuids::nil_uuid()};
+
+    new_logdev_superblk(logdev_superblk* old_sb) :
+            magic{old_sb->magic},
+            version{old_sb->version},
+            logdev_id{old_sb->logdev_id},
+            num_stores{old_sb->num_stores},
+            start_dev_offset{old_sb->start_dev_offset},
+            key_idx{old_sb->key_idx},
+            flush_mode{old_sb->flush_mode},
+            pid{boost::uuids::nil_uuid()} {}
+
+    uint32_t get_magic() const { return magic; }
+    uint32_t get_version() const { return version; }
+    off_t start_offset() const { return static_cast< off_t >(start_dev_offset); }
+    uint32_t num_stores_reserved() const { return num_stores; }
+
+    void set_start_offset(const off_t offset) { start_dev_offset = static_cast< uint64_t >(offset); }
+
+    logstore_superblk* get_logstore_superblk() {
+        return reinterpret_cast< logstore_superblk* >(reinterpret_cast< uint8_t* >(this) + sizeof(new_logdev_superblk));
+    }
+    const logstore_superblk* get_logstore_superblk() const {
+        return reinterpret_cast< const logstore_superblk* >(reinterpret_cast< const uint8_t* >(this) +
+                                                            sizeof(new_logdev_superblk));
+    }
+};
+#pragma pack()
+
+#pragma pack(1)
 typedef std::pair< logid_t, logid_t > logid_range_t;
 
 struct rollback_record {
@@ -486,6 +528,7 @@ public:
     logdev_superblk* create(logdev_id_t id, flush_mode_t);
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
+    void refactor_superblk();
     void persist();
 
     bool is_empty() const { return m_sb.is_empty(); }
@@ -598,6 +641,8 @@ public:
      * @param blk_store: The blk_store associated to this logdev
      */
     void start(bool format, std::shared_ptr< JournalVirtualDev > vdev);
+
+    void refactor();
 
     /**
      * @brief Stop the logdev. it waits for all the pending writes to be completed and reject new api calls.

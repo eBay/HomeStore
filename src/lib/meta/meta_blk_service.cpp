@@ -398,6 +398,7 @@ void MetaBlkService::register_handler(meta_sub_type type, const meta_blk_found_c
 }
 
 void MetaBlkService::add_sub_sb(meta_sub_type type, const uint8_t* context_data, uint64_t sz, void*& cookie) {
+    LOGINFO("Adding sub sb [type={}, sz={}]", type, in_bytes(sz));
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     HS_REL_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     HS_REL_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
@@ -538,6 +539,7 @@ void MetaBlkService::write_meta_blk_to_disk(meta_blk* mblk) {
         HS_REL_ASSERT(false, "error happens happen during write_meta_blk_to_disk: {}, buf address: {}", error.value(),
                       (const char*)mblk);
     }
+    LOGINFO("Successfully write meta blk to disk");
 }
 
 //
@@ -548,6 +550,7 @@ void MetaBlkService::write_meta_blk_to_disk(meta_blk* mblk) {
 // 3. update in-memory meta blks map;
 //
 meta_blk* MetaBlkService::init_meta_blk(BlkId& bid, meta_sub_type type, const uint8_t* context_data, size_t sz) {
+    LOGINFO("Initializing meta blk [type={}, sz={}]", type, in_bytes(sz));
     meta_blk* mblk{r_cast< meta_blk* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()))};
     mblk->hdr.h.compressed = 0;
     mblk->hdr.h.bid = bid;
@@ -577,6 +580,9 @@ meta_blk* MetaBlkService::init_meta_blk(BlkId& bid, meta_sub_type type, const ui
     mblk->hdr.h.next_bid.invalidate();
 
     // write this meta blk to disk
+    LOGINFO("Writing meta blk to disk [type={}, bid={}, prev_bid={}, next_bid={}, sz={}]", type,
+            mblk->hdr.h.bid.to_string(), mblk->hdr.h.prev_bid.to_string(), mblk->hdr.h.next_bid.to_string(),
+            in_bytes(sz));
     write_meta_blk_internal(mblk, context_data, sz);
 
     // now update previous last mblk or ssb. They can only be updated after meta blk is written to disk;
@@ -750,6 +756,9 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
     }
 
     // write meta blk;
+    LOGINFO("Writing meta block to disk, type={}, bid={}, context_sz={}, compressed={}, ovf_bid={}", mblk->hdr.h.type,
+            mblk->hdr.h.bid, uint64_cast(mblk->hdr.h.context_sz), unsigned(mblk->hdr.h.compressed),
+            mblk->hdr.h.ovf_bid.to_string());
     write_meta_blk_to_disk(mblk);
 
 #ifdef _PRERELEASE
@@ -802,6 +811,7 @@ void MetaBlkService::_cookie_sanity_check(const void* cookie) const {
 // 3. free old ovf_bid if there is any
 //
 void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, void* cookie) {
+    LOGINFO("Updating sub super block, context_sz={}", sz);
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     HS_REL_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
 
@@ -839,6 +849,7 @@ void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, voi
     mblk->hdr.h.gen_cnt += 1;
 
     // write this meta blk to disk
+    LOGINFO("Writing updated sub super block, context_sz={}", sz);
     write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE

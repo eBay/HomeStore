@@ -82,6 +82,8 @@ public:
      */
     void start(bool format);
 
+    void refactor();
+
     /**
      * @brief Stop the LogStoreService. It resets all parameters and can be restarted with start method.
      *

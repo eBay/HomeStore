@@ -70,41 +70,14 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(),
                       "Expected meta data to be read already before loading this log dev id: {}", m_logdev_id);
         auto const store_list = m_logdev_meta.load();
-
-        // Notify to the caller that a new log store was reserved earlier and it is being loaded, with its meta info
-        for (const auto& spair : store_list) {
-            on_log_store_found(spair.first, spair.second);
-        }
-
-        THIS_LOGDEV_LOG(INFO, "get start vdev offset during recovery {} log indx {} ",
-                        m_logdev_meta.get_start_dev_offset(), m_logdev_meta.get_start_log_idx());
-
-        m_vdev_jd->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
-        m_log_idx = m_logdev_meta.get_start_log_idx();
-        do_load(m_logdev_meta.get_start_dev_offset());
-        m_log_records->reinit(m_log_idx);
-        m_last_flush_idx = m_log_idx - 1;
+        m_logdev_meta.refactor_superblk();
+        LOGINFO("just refactor for lgodev {}, donot need rebuild logstore and load logs, return directly", m_logdev_id);
     }
+}
 
-    // Now that we have create/load logdev metablk, so the log dev is ready to be used
-    m_is_ready = true;
-
-    if (allow_timer_flush()) start_timer();
-    handle_unopened_log_stores(format);
-
-    {
-        // Also call the logstore to inform that start/replay is completed.
-        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
-        if (!format) {
-            for (auto& p : m_id_logstore_map) {
-                auto& lstore{p.second.log_store};
-                if (lstore && lstore->get_log_replay_done_cb()) {
-                    lstore->get_log_replay_done_cb()(lstore, lstore->start_lsn() - 1);
-                    lstore->truncate(lstore->truncated_upto());
-                }
-            }
-        }
-    }
+void LogDev::refactor() {
+    std::unique_lock lg{m_meta_mutex};
+    m_logdev_meta.refactor_superblk();
 }
 
 LogDev::~LogDev() {
@@ -146,21 +119,8 @@ void LogDev::stop() {
         }
     }
 
-    folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
-    for (auto& [_, store] : m_id_logstore_map) {
-        store.log_store->stop();
-    }
-
-    // trigger a new flush to make sure all pending writes are flushed
-    flush_under_guard();
-
-    // after we call stop, we need to do any pending device truncations
-    truncate();
-    m_id_logstore_map.clear();
-    if (allow_timer_flush()) {
-        auto f = stop_timer();
-        std::move(f).get();
-    }
+    THIS_LOGDEV_LOG(INFO, "no need to stop logstore in refactor mode, return directly");
+    return;
 }
 
 void LogDev::destroy() {
@@ -899,6 +859,72 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
     }
 
     return ret_list;
+}
+
+void LogDevMetadata::refactor_superblk() {
+    // save current logstore superblks
+    std::vector< std::pair< logstore_id_t, logstore_superblk > > reserved_stores;
+    const logstore_superblk* store_sb = m_sb->get_logstore_superblk();
+    for (const auto& store_id : m_store_info) {
+        HS_REL_ASSERT(logstore_superblk::is_valid(store_sb[store_id]),
+                      "Refactoring logdev superblk with invalid logstore superblk for store id {}-{}", m_sb->logdev_id,
+                      store_id);
+        reserved_stores.push_back(std::make_pair<>(store_id, store_sb[store_id]));
+    }
+
+    // increase size if needed
+    auto nstores = (m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1;
+    auto req_sz = sizeof(new_logdev_superblk) + (nstores * sizeof(logstore_superblk));
+    if (meta_service().is_aligned_buf_needed(req_sz)) { req_sz = sisl::round_up(req_sz, meta_service().align_size()); }
+    LOGINFO("Refactoring logdev_superblk log_dev={}, current_size={}, required_size={}, nstores={}", m_sb->logdev_id,
+            m_sb.size(), req_sz, nstores);
+    if (req_sz != m_sb.size()) {
+        const auto old_buf = m_sb.raw_buf();
+        m_sb.create(req_sz);
+        logstore_superblk* sb_area = m_sb->get_logstore_superblk();
+        std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
+        std::memcpy(voidptr_cast(m_sb.raw_buf()->bytes()), static_cast< const void* >(old_buf->cbytes()),
+                    std::min(old_buf->size(), m_sb.size()));
+    }
+
+    // convert old superblk to new superblk
+    new_logdev_superblk new_sb(m_sb.get());
+    std::memcpy(voidptr_cast(m_sb.raw_buf()->bytes()), static_cast< const void* >(&new_sb),
+                sizeof(new_logdev_superblk));
+
+    // initialize all logstore superblks to default value
+    logstore_superblk* sb_area =
+        reinterpret_cast< logstore_superblk* >(m_sb.raw_buf()->bytes() + sizeof(new_logdev_superblk));
+    uint32_t store_cap = (m_sb.size() - sizeof(new_logdev_superblk)) / sizeof(logstore_superblk);
+    std::fill_n(sb_area, store_cap, logstore_superblk::default_value());
+
+    // copy log store superblks
+    for (const auto& [store_id, store_sb] : reserved_stores) {
+        HS_REL_ASSERT(logstore_superblk::is_valid(store_sb),
+                      "Refactoring logdev superblk with invalid logstore superblk for store id {}-{}", new_sb.logdev_id,
+                      store_id);
+        LOGINFO("Refactoring logdev_superblk log_dev={}, store_id={} start_lsn={}", new_sb.logdev_id, store_id,
+                store_sb.m_first_seq_num);
+        logstore_superblk::init(sb_area[store_id], store_sb.m_first_seq_num);
+    }
+    m_sb.write();
+    LOGINFO("Refactored logdev_superblk written to disk, log_dev={}", new_sb.logdev_id);
+
+    // check if refactor is successful
+    new_logdev_superblk* test_sb = reinterpret_cast< new_logdev_superblk* >(m_sb.raw_buf()->bytes());
+    LOGINFO("Verifying refactored logdev_superblk log_dev={}, num_stores={}, start_dev_offset={}", test_sb->logdev_id,
+            test_sb->num_stores, test_sb->start_dev_offset);
+    const logstore_superblk* test_store_sb =
+        reinterpret_cast< logstore_superblk* >(m_sb.raw_buf()->bytes() + sizeof(new_logdev_superblk));
+    for (const auto& [store_id, store_sb] : reserved_stores) {
+        if (test_store_sb[store_id].m_first_seq_num != store_sb.m_first_seq_num) {
+            LOGERROR("Refactored logdev superblk verification failed for store id {}, expected is {}, actual is {}",
+                     store_id, store_sb.m_first_seq_num, test_store_sb[store_id].m_first_seq_num);
+        } else {
+            LOGINFO("Refactored logdev={} superblk verification succeeded for store id {}, lsn={}", test_sb->logdev_id,
+                    store_id, test_store_sb[store_id].m_first_seq_num);
+        }
+    }
 }
 
 logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
