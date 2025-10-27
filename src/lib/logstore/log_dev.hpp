@@ -528,7 +528,7 @@ public:
     logdev_superblk* create(logdev_id_t id, flush_mode_t);
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
-    void refactor_superblk();
+    void refactor_superblk(const std::vector< std::pair< logstore_id_t, logstore_superblk > >& all_list);
     void persist();
 
     bool is_empty() const { return m_sb.is_empty(); }

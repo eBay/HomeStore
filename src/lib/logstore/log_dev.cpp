@@ -70,15 +70,11 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(),
                       "Expected meta data to be read already before loading this log dev id: {}", m_logdev_id);
         auto const store_list = m_logdev_meta.load();
-        m_logdev_meta.refactor_superblk();
         LOGINFO("just refactor for lgodev {}, donot need rebuild logstore and load logs, return directly", m_logdev_id);
     }
 }
 
-void LogDev::refactor() {
-    std::unique_lock lg{m_meta_mutex};
-    m_logdev_meta.refactor_superblk();
-}
+void LogDev::refactor() { LOGINFO("get all blks and call refactor superblk, not support now"); }
 
 LogDev::~LogDev() {
     THIS_LOGDEV_LOG(INFO, "Logdev stopping id {}", m_logdev_id);
@@ -829,7 +825,9 @@ void LogDevMetadata::rollback_super_blk_found(const sisl::byte_view& buf, void* 
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
     std::vector< std::pair< logstore_id_t, logstore_superblk > > ret_list;
+    std::vector< std::pair< logstore_id_t, logstore_superblk > > all_list;
     ret_list.reserve(1024);
+    all_list.reserve(1024);
     if (store_capacity()) {
         m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
     } else {
@@ -849,6 +847,12 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
             m_id_reserver->reserve(idx);
             ret_list.push_back(std::make_pair<>(idx, store_sb[idx]));
             ++n;
+            LOGINFO("Loaded valid logstore superblk for log_dev={}, store_id={} start_lsn={}", m_sb->logdev_id, idx,
+                    store_sb[idx].m_first_seq_num);
+            all_list.push_back(std::make_pair<>(idx, store_sb[idx]));
+        } else {
+            LOGINFO("Found invalid logstore superblk for log_dev={}, store_id={}", m_sb->logdev_id, idx);
+            all_list.push_back(std::make_pair<>(idx, store_sb[idx]));
         }
         ++idx;
     }
@@ -858,20 +862,14 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         m_rollback_info.insert({rec.store_id, rec.idx_range});
     }
 
+    LOGINFO("call refactor superblk for logdev={}, all_list_size={}, reserved_list_size={}", m_sb->logdev_id,
+            all_list.size(), ret_list.size());
+    refactor_superblk(all_list);
+
     return ret_list;
 }
 
-void LogDevMetadata::refactor_superblk() {
-    // save current logstore superblks
-    std::vector< std::pair< logstore_id_t, logstore_superblk > > reserved_stores;
-    const logstore_superblk* store_sb = m_sb->get_logstore_superblk();
-    for (const auto& store_id : m_store_info) {
-        HS_REL_ASSERT(logstore_superblk::is_valid(store_sb[store_id]),
-                      "Refactoring logdev superblk with invalid logstore superblk for store id {}-{}", m_sb->logdev_id,
-                      store_id);
-        reserved_stores.push_back(std::make_pair<>(store_id, store_sb[store_id]));
-    }
-
+void LogDevMetadata::refactor_superblk(const std::vector< std::pair< logstore_id_t, logstore_superblk > >& all_list) {
     // increase size if needed
     auto nstores = (m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1;
     auto req_sz = sizeof(new_logdev_superblk) + (nstores * sizeof(logstore_superblk));
@@ -899,7 +897,7 @@ void LogDevMetadata::refactor_superblk() {
     std::fill_n(sb_area, store_cap, logstore_superblk::default_value());
 
     // copy log store superblks
-    for (const auto& [store_id, store_sb] : reserved_stores) {
+    for (const auto& [store_id, store_sb] : all_list) {
         HS_REL_ASSERT(logstore_superblk::is_valid(store_sb),
                       "Refactoring logdev superblk with invalid logstore superblk for store id {}-{}", new_sb.logdev_id,
                       store_id);
@@ -916,7 +914,7 @@ void LogDevMetadata::refactor_superblk() {
             test_sb->num_stores, test_sb->start_dev_offset);
     const logstore_superblk* test_store_sb =
         reinterpret_cast< logstore_superblk* >(m_sb.raw_buf()->bytes() + sizeof(new_logdev_superblk));
-    for (const auto& [store_id, store_sb] : reserved_stores) {
+    for (const auto& [store_id, store_sb] : all_list) {
         if (test_store_sb[store_id].m_first_seq_num != store_sb.m_first_seq_num) {
             LOGERROR("Refactored logdev superblk verification failed for store id {}, expected is {}, actual is {}",
                      store_id, store_sb.m_first_seq_num, test_store_sb[store_id].m_first_seq_num);
