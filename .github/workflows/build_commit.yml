@@ -43,9 +43,9 @@ jobs:
 
   IOMgrDeps:
     needs: SislDeps
-    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@dev/12.x
+    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@dev/v12.x
     with:
-      branch: dev/12.x
+      branch: dev/v12.x
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
