@@ -1005,7 +1005,9 @@ TYPED_TEST(IndexCrashTest, MetricsTest) {
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
     std::vector< uint32_t > vec(num_entries);
     iota(vec.begin(), vec.end(), 0);
-    std::random_shuffle(vec.begin(), vec.end());
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(vec.begin(), vec.end(), g);
     for (auto key : vec) {
         this->put(key, btree_put_type::INSERT, true /* expect_success */);
     }

@@ -109,7 +109,7 @@ jobs:
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Load Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conanv2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         load_any: 'True'
         key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
