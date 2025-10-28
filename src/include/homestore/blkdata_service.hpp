@@ -18,7 +18,11 @@
 #include <cstdint>
 
 #include <folly/small_vector.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include <folly/futures/Future.h>
+#pragma GCC diagnostic pop
 #include <sisl/fds/buffer.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 

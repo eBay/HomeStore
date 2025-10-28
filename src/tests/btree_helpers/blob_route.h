@@ -29,8 +29,8 @@ struct formatter< BlobRouteByChunk > {
 
     template < typename FormatContext >
     auto format(BlobRouteByChunk const& r, FormatContext& ctx) {
-        return format_to(ctx.out(), "{:04x}:{:04x}:{:012x}:{:016x}", r.chunk, (r.shard >>shard_width),
-                         (r.shard & shard_mask), r.blob);
+        return fmt::v10::format_to(ctx.out(), "{:04x}:{:04x}:{:012x}:{:016x}", r.chunk, (r.shard >> shard_width),
+                                   (r.shard & shard_mask), r.blob);
     }
 };
 

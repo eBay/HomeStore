@@ -27,7 +27,6 @@
 #include <vector>
 
 #include <sisl/fds/buffer.hpp>
-#include <sisl/fds/obj_allocator.hpp>
 #include <folly/Synchronized.h>
 #include <nlohmann/json.hpp>
 

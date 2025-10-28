@@ -193,7 +193,7 @@ bool ResourceMgr::check_journal_vdev_size(const uint64_t used_size, const uint64
         const uint32_t used_pct = (100 * used_size / total_size);
         if (used_pct >= get_journal_vdev_size_limit()) {
             m_journal_vdev_exceed_cb(used_size, used_pct >= get_journal_vdev_size_critical_limit() /* is_critical */);
-            HS_LOG_EVERY_N(WARN, base, 50, "high watermark hit, used percentage: {}, high watermark percentage: {}",
+            HS_LOG_EVERY_N(WARN, base, unmove(50), "high watermark hit, used percentage: {}, high watermark percentage: {}",
                            used_pct, get_journal_vdev_size_limit());
             return true;
         }

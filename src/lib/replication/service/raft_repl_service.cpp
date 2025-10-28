@@ -636,7 +636,7 @@ void RaftReplService::fetch_pending_data() {
         if (get_elapsed_time_ms(rreqs.at(0)->created_time()) < HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms)) {
             break;
         }
-        auto const next_batch = std::move(rreqs);
+        auto const next_batch = rreqs;
         auto rdev = d;
         m_pending_fetch_batches.pop();
         lg.unlock();

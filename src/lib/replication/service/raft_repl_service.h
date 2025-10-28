@@ -20,7 +20,11 @@
 #include <shared_mutex>
 
 #include <folly/Expected.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include <folly/futures/Future.h>
+#pragma GCC diagnostic pop
 #include <nuraft_mesg/nuraft_mesg.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>

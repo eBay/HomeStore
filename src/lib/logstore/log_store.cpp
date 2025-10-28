@@ -176,7 +176,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_k
         trunc_key = m_records.at(m_tail_lsn).m_trunc_key;
     }
 
-    atomic_update_max(m_next_lsn, req->seq_num + 1, std::memory_order_acq_rel);
+    atomic_update_max(m_next_lsn, req->seq_num + 1, std::memory_order_acquire);
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&ld_key, &trunc_key](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
@@ -200,7 +200,7 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld
     // Create the mapping between seq_num and log dev key
     m_records.create_and_complete(seq_num, logstore_record(ld_key, trunc_key));
 
-    atomic_update_max(m_next_lsn, seq_num + 1, std::memory_order_acq_rel);
+    atomic_update_max(m_next_lsn, seq_num + 1, std::memory_order_acquire);
 
     if (m_found_cb != nullptr) { m_found_cb(seq_num, buf, nullptr); }
 }

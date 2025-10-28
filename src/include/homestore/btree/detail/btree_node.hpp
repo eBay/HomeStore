@@ -221,6 +221,8 @@ public:
         return true;
     }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual btree_status_t insert(const BtreeKey& key, const BtreeValue& val) {
         const auto [found, idx] = find(key, nullptr, false);
         DEBUG_ASSERT(!is_leaf() || (!found), "Invalid node"); // We do not support duplicate keys yet
@@ -228,6 +230,7 @@ public:
         DEBUG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "{}", get_persistent_header_const()->to_string());
         return btree_status_t::success;
     }
+#pragma GCC diagnostic pop
 
     virtual bool remove_one(const BtreeKey& key, BtreeKey* outkey, BtreeValue* outval) {
         const auto [found, idx] = find(key, outval, true);
@@ -401,7 +404,10 @@ public:
 
 public:
     // Public method which needs to be implemented by variants
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
+#pragma GCC diagnostic pop
     virtual void remove(uint32_t ind) { remove(ind, ind); }
     virtual void remove(uint32_t ind_s, uint32_t ind_e) = 0;
     virtual void remove_all(const BtreeConfig& cfg) = 0;

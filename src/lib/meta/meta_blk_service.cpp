@@ -465,7 +465,7 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
     size_t write_size = ovf_hdr->h.context_sz;
     uint8_t* context_data_aligned{nullptr};
     if (!hs_utils::is_ptr_aligned(write_context_data, align_sz) || !hs_utils::mod_aligned_sz(write_size, align_sz)) {
-        HS_LOG_EVERY_N(WARN, metablk, 50,
+        HS_LOG_EVERY_N(WARN, metablk, unmove(50),
                        "[type={}] Unaligned address found for input context_data, ptr {}, size {}, align {} ", type,
                        (void*)write_context_data, write_size, align_sz);
         const size_t aligned_write_size = uint64_cast(sisl::round_up(write_size, align_sz));
@@ -495,8 +495,9 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
             cur_size = remain_sz_to_write;
             // pad last write to dma boundary size if needed
             if (!hs_utils::mod_aligned_sz(remain_sz_to_write, align_sz)) {
-                HS_LOG_EVERY_N(DEBUG, metablk, 50, "[type={}] Unaligned input sz:{} found for input context_data.",
-                               type, ovf_hdr->h.context_sz);
+                HS_LOG_EVERY_N(DEBUG, metablk, unmove(50),
+                               "[type={}] Unaligned input sz:{} found for input context_data.", type,
+                               ovf_hdr->h.context_sz);
                 const size_t round_sz = uint64_cast(sisl::round_up(remain_sz_to_write, align_sz));
                 cur_size = round_sz;
                 data_buf = hs_utils::iobuf_alloc(round_sz, sisl::buftag::metablk, align_size());
@@ -1542,7 +1543,7 @@ nlohmann::json MetaBlkService::populate_json(int log_level, meta_blk_map_t& meta
                         if (free_space < buf->size()) {
                             j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
                                 "Not_able_to_dump_to_file_exceeding_allowed_space";
-                            HS_LOG_EVERY_N(WARN, metablk, 100,
+                            HS_LOG_EVERY_N(WARN, metablk, unmove(100),
                                            "[type={}] Skip dumping to file, exceeding allowed space: {}, "
                                            "requested_size: {}, "
                                            "total_free: {}, free_fs_percent: {}",

@@ -504,7 +504,9 @@ public:
         {
             std::unique_lock lock{m_completion_mtx};
             if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
-            atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
+            auto prev_value{m_highest_log_idx[fid].load(std::memory_order_acquire)};
+            while (prev_value < ld_key.idx &&
+                   !m_highest_log_idx[fid].compare_exchange_weak(prev_value, ld_key.idx, std::memory_order_release)) {}
         }
 
         if (m_io_closure) m_io_closure(fid, lsn, ld_key);

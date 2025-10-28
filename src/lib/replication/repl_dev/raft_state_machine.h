@@ -34,9 +34,10 @@ class StateMachineStore;
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}:{}] "},                                   \
-                                fmt::make_format_args(file_name(__FILE__), __LINE__, __FUNCTION__));                   \
-                sisl::logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);      \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "}, fmt::make_format_args(identify_str())); \
+                                fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__), __FUNCTION__));   \
+                sisl::logging::default_cmp_assert_formatter(buf, msgcb, args...);                                      \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "},                                         \
+                                fmt::make_format_args(unmove(identify_str())));                                        \
                 return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \
@@ -46,10 +47,10 @@ class StateMachineStore;
         assert_type##_ASSERT_FMT(                                                                                      \
             cond, ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                     \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}:{}] "},                                   \
-                                fmt::make_format_args(file_name(__FILE__), __LINE__, __FUNCTION__));                   \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "}, fmt::make_format_args(identify_str())); \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                                           \
-                                fmt::make_format_args(std::forward< decltype(args) >(args)...));                       \
+                                fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__), __FUNCTION__));   \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}] "},                                         \
+                                fmt::make_format_args(unmove(identify_str())));                                        \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
                 return true;                                                                                           \
             }),                                                                                                        \
             ##__VA_ARGS__);                                                                                            \

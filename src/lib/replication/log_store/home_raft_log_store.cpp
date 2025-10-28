@@ -27,11 +27,11 @@ SISL_LOGGING_DECL(replication)
 #define REPL_STORE_LOG(level, msg, ...)                                                                                \
     LOG##level##MOD_FMT(replication, ([&](fmt::memory_buffer& buf, const char* msgcb, auto&&... args) -> bool {        \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                          \
-                                            fmt::make_format_args(file_name(__FILE__), __LINE__));                     \
+                                            fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__)));     \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                          \
                                             fmt::make_format_args("replstore", m_logstore_id));                        \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                               \
-                                            fmt::make_format_args(std::forward< decltype(args) >(args)...));           \
+                                            fmt::make_format_args(args...));                                           \
                             return true;                                                                               \
                         }),                                                                                            \
                         msg, ##__VA_ARGS__);

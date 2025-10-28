@@ -5,7 +5,7 @@ on:
     inputs:
       platform:
         required: false
-        default: 'ubuntu-22.04'
+        default: 'ubuntu-24.04'
         type: string
       branch:
         required: true
@@ -33,11 +33,8 @@ on:
         required: true
         type: choice
         options:
-          - ubuntu-22.04
-          - ubuntu-20.04
-          - macos-13
-          - macos-12
-        default: 'ubuntu-22.04'
+          - ubuntu-24.04
+        default: 'ubuntu-24.04'
       branch:
         required: true
         type: string
@@ -98,18 +95,24 @@ jobs:
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'False' }}
 
+    - name: Setup Conan
+      uses: ebay/sisl/.github/actions/setup_conan2@dev/v13.x
+      with:
+        platform: ${{ inputs.platform }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+
     - name: Load Homestore Cache
       id: restore-cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         testing: ${{ inputs.testing }}
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Load Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conanv2@dev/v13.x
       with:
         load_any: 'True'
-        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
@@ -117,7 +120,7 @@ jobs:
       with:
         repository: eBay/iomanager
         path: import/iomgr
-        ref: master
+        ref: dev/v12.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
@@ -129,7 +132,7 @@ jobs:
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         testing: 'False'
         path: import/iomgr
@@ -138,18 +141,12 @@ jobs:
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         testing: 'False'
         path: import/nuraft_mesg
-        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
         fail_on_cache_miss: true
-      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
-
-    - name: Setup Conan
-      uses: eBay/sisl/.github/actions/setup_conan@master
-      with:
-        platform: ${{ inputs.platform }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Export Recipes
@@ -157,10 +154,8 @@ jobs:
         sudo apt-get install -y python3-pyelftools libaio-dev
         sudo rm -rf $ANDROID_HOME
         python -m pip install pyelftools
-        conan export import/iomgr oss/master
-        conan export import/nuraft_mesg oss/main
-        cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
-        echo "::info:: Pre-cached: ${cached_pkgs}"
+        conan export --user oss --channel dev import/iomgr
+        conan export --user oss --channel dev import/nuraft_mesg
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
@@ -169,29 +164,32 @@ jobs:
         conan install \
             -c tools.build:skip_test=True \
             ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
-            -o testing=off \
-            -s build_type=${{ inputs.build-type }} \
+            -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr/*:testing=off \
+            -o homestore/*:testing=off \
+            -s:h build_type=${{ inputs.build-type }} \
+            -c tools.build:skip_test=True \
+            --format=json \
             --build missing \
-            .
+            . > ~/build.json
+        conan list --graph ~/build.json --graph-binaries=build --format=json > ~/pkglist.json
       if: ${{ steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Save Conan Cache
-      uses: eBay/sisl/.github/actions/store_conan@master
+      uses: eBay/sisl/.github/actions/store_conan2@dev/v13.x
       with:
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         load_any: 'True'
-        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         testing: 'False'
         path: import/iomgr
@@ -200,11 +198,11 @@ jobs:
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan@master
+      uses: eBay/sisl/.github/actions/load_conan@dev/v13.x
       with:
         testing: 'False'
         path: import/nuraft_mesg
-        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
@@ -223,10 +221,10 @@ jobs:
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
         conan create \
             ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
-            -o homestore:sanitize=${sanitize} \
-            -s build_type=${{ inputs.build-type }} \
+            -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr/*:testing=off \
+            -o homestore/*:sanitize=${sanitize} \
+            -s:h build_type=${{ inputs.build-type }} \
             --build missing \
             .
       if: ${{ inputs.testing == 'True' && inputs.tooling != 'Coverage' }}
@@ -234,20 +232,19 @@ jobs:
     - name: Code Coverage Run
       run: |
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
-        conan install \
+        conan build \
             ${pre} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o iomgr:testing=off \
-            -o coverage=True \
-            -s build_type=${{ inputs.build-type }} \
+            -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr/*:testing=off \
+            -o homestore/*:coverage=True \
+            -s:h build_type=${{ inputs.build-type }} \
             --build missing \
             .
-        conan build .
       if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
 
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        gcov: true
+        verbose: true
       if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}

@@ -51,7 +51,10 @@ public:
 
     virtual sisl::blob serialize() const = 0;
     virtual uint32_t serialized_size() const = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual void deserialize(sisl::blob const& b, bool copy) = 0;
+#pragma GCC diagnostic pop
 
     virtual std::string to_string() const = 0;
     virtual bool is_interval_key() const { return false; }
@@ -70,7 +73,10 @@ public:
 
     virtual uint32_t serialized_prefix_size() const = 0;
     virtual uint32_t serialized_suffix_size() const = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual void deserialize(sisl::blob const& prefix, sisl::blob const& suffix, bool copy) = 0;
+#pragma GCC diagnostic pop
 };
 
 template < typename K >
@@ -135,7 +141,10 @@ public:
 
     virtual sisl::blob serialize() const = 0;
     virtual uint32_t serialized_size() const = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual void deserialize(const sisl::blob& b, bool copy) = 0;
+#pragma GCC diagnostic pop
 
     virtual std::string to_string() const { return ""; }
 };
@@ -149,7 +158,10 @@ public:
 
     virtual uint32_t serialized_prefix_size() const = 0;
     virtual uint32_t serialized_suffix_size() const = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
     virtual void deserialize(sisl::blob const& prefix, sisl::blob const& suffix, bool copy) = 0;
+#pragma GCC diagnostic pop
 };
 
 struct BtreeLockTracker;

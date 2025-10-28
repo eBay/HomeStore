@@ -193,7 +193,10 @@ TYPED_TEST(BtreeTest, RandomInsert) {
     // make keys [0, num_entries)
     iota(vec.begin(), vec.end(), 0);
     // shuffle keys
-    std::random_shuffle(vec.begin(), vec.end());
+    std::random_device rd;
+    std::mt19937 g(rd());
+
+    std::shuffle(vec.begin(), vec.end(), g);
     LOGINFO("Step 1: Do forward random insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(vec[i], btree_put_type::INSERT);
@@ -257,7 +260,9 @@ TYPED_TEST(BtreeTest, RandomRemove) {
     iota(vec.begin(), vec.end(), 0);
 
     // shuffle keys in [0, num_entries)
-    std::random_shuffle(vec.begin(), vec.end());
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(vec.begin(), vec.end(), g);
     LOGINFO("Step 2: Do remove one by one for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->remove_one(vec[i]);

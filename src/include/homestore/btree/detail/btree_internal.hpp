@@ -27,10 +27,10 @@ namespace homestore {
 #define _BT_LOG_METHOD_IMPL(req, btcfg, node)                                                                          \
     ([&](fmt::memory_buffer& buf, const char* msgcb, auto&&... args) -> bool {                                         \
         fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                              \
-                        fmt::make_format_args(file_name(__FILE__), __LINE__));                                         \
+                        fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__)));                         \
         BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                           \
                     BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req={}] "},               \
-                                                      fmt::make_format_args(req->to_string()))))                       \
+                                                      fmt::make_format_args(unmove(req->to_string())))))               \
         ();                                                                                                            \
         BOOST_PP_IF(BOOST_VMD_IS_EMPTY(btcfg), BOOST_PP_EMPTY,                                                         \
                     BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[btree={}] "},             \
@@ -38,10 +38,9 @@ namespace homestore {
         ();                                                                                                            \
         BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY,                                                          \
                     BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[node={}] "},              \
-                                                      fmt::make_format_args(node->to_string()))))                      \
+                                                      fmt::make_format_args(unmove(node->to_string())))))              \
         ();                                                                                                            \
-        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                                                   \
-                        fmt::make_format_args(std::forward< decltype(args) >(args)...));                               \
+        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));                  \
         return true;                                                                                                   \
     })
 

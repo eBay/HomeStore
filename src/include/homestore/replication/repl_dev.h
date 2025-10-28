@@ -5,7 +5,11 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <flatbuffers/flatbuffers.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include <folly/futures/Future.h>
+#pragma GCC diagnostic pop
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/grpc/generic_service.hpp>

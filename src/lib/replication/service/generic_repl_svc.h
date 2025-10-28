@@ -22,7 +22,11 @@
 #include <sisl/logging/logging.h>
 
 #include <folly/Expected.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include <folly/futures/Future.h>
+#pragma GCC diagnostic pop
 #include <homestore/homestore.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>

@@ -831,7 +831,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
             LOGINFO("First time boot cp, we shall flush the vdev to ensure all cp information is created");
             m_vdev->cp_flush(cp_ctx);
         } else {
-            CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
+            CP_PERIODIC_LOG(DEBUG, unmove(cp_ctx->id()), "Btree does not have any dirty buffers to flush");
         }
         return folly::makeFuture< bool >(true); // nothing to flush
     }
@@ -869,7 +869,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
             m_vdev->submit_batch();
         });
     }
-    return std::move(cp_ctx->get_future());
+    return cp_ctx->get_future();
 }
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {

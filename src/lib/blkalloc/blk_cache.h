@@ -168,7 +168,7 @@ struct formatter< homestore::blk_cache_refill_status > {
 
     template < typename FormatContext >
     auto format(const homestore::blk_cache_refill_status& s, FormatContext& ctx) {
-        return format_to(ctx.out(), "{}/{}", s.slab_refilled_count, s.slab_required_count);
+        return fmt::v10::format_to(ctx.out(), "{}/{}", s.slab_refilled_count, s.slab_required_count);
     }
 };
 } // namespace fmt

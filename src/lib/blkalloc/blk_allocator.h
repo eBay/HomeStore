@@ -38,20 +38,21 @@ SISL_LOGGING_DECL(blkalloc)
 SISL_LOGGING_DECL(transient)
 
 namespace homestore {
-#define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_LOG(level, msg, ...)                                                                                  \
+    HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", unmove(get_name()), msg, ##__VA_ARGS__)
 #define BLKALLOC_DBG_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, , "blkalloc", unmove(get_name()), msg, ##__VA_ARGS__)
 #define BLKALLOC_REL_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, , "blkalloc", unmove(get_name()), msg, ##__VA_ARGS__)
 #define BLKALLOC_LOG_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, , "blkalloc", unmove(get_name()), msg, ##__VA_ARGS__)
 
 #define BLKALLOC_REL_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, , "blkalloc", unmove(get_name()), ##__VA_ARGS__)
 #define BLKALLOC_DBG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", unmove(get_name()), ##__VA_ARGS__)
 #define BLKALLOC_LOG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", unmove(get_name()), ##__VA_ARGS__)
 
 struct blkalloc_cp;
 
