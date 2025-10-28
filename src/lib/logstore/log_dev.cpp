@@ -888,6 +888,10 @@ void LogDevMetadata::refactor_superblk(const std::vector< std::pair< logstore_id
         return;
     }
 
+    LOGINFO("before refactor, the sb is: log_dev={}, num_stores={}, start_dev_offset={}, key_idx={}, flush_mode={}",
+            m_sb->logdev_id, m_sb->num_stores, m_sb->start_dev_offset, m_sb->key_idx,
+            static_cast< int >(m_sb->flush_mode));
+
     // convert old superblk to new superblk
     new_logdev_superblk new_sb(m_sb.get());
     std::memcpy(voidptr_cast(m_sb.raw_buf()->bytes()), static_cast< const void* >(&new_sb),
@@ -908,24 +912,28 @@ void LogDevMetadata::refactor_superblk(const std::vector< std::pair< logstore_id
                 store_sb.m_first_seq_num);
         logstore_superblk::init(sb_area[store_id], store_sb.m_first_seq_num);
     }
-    m_sb.write();
-    LOGINFO("Refactored logdev_superblk written to disk, log_dev={}", new_sb.logdev_id);
 
     // check if refactor is successful
     new_logdev_superblk* test_sb = reinterpret_cast< new_logdev_superblk* >(m_sb.raw_buf()->bytes());
-    LOGINFO("Verifying refactored logdev_superblk log_dev={}, num_stores={}, start_dev_offset={}", test_sb->logdev_id,
-            test_sb->num_stores, test_sb->start_dev_offset);
+    LOGINFO("Verifying refactored logdev_superblk log_dev={}, num_stores={}, start_dev_offset={}, key_idx={}, "
+            "flush_mode={}",
+            test_sb->logdev_id, test_sb->num_stores, test_sb->start_dev_offset, test_sb->key_idx,
+            static_cast< int >(test_sb->flush_mode));
     const logstore_superblk* test_store_sb =
         reinterpret_cast< logstore_superblk* >(m_sb.raw_buf()->bytes() + sizeof(new_logdev_superblk));
     for (const auto& [store_id, store_sb] : all_list) {
         if (test_store_sb[store_id].m_first_seq_num != store_sb.m_first_seq_num) {
             LOGERROR("Refactored logdev superblk verification failed for store id {}, expected is {}, actual is {}",
                      store_id, store_sb.m_first_seq_num, test_store_sb[store_id].m_first_seq_num);
+            RELEASE_ASSERT(false, "Refactored logdev superblk verification failed");
         } else {
             LOGINFO("Refactored logdev={} superblk verification succeeded for store id {}, lsn={}", test_sb->logdev_id,
                     store_id, test_store_sb[store_id].m_first_seq_num);
         }
     }
+    m_sb.write();
+    LOGINFO("Refactored logdev_superblk written to disk, log_dev={}", new_sb.logdev_id);
+
 }
 
 logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {

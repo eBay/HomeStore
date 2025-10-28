@@ -5,7 +5,14 @@ CLUSTER=908
 NAMESPACE="nuobject2sh-dev"
 DEPLOYMENT_COUNT=4
 REFACTOR_IMAGE="hub.tess.io/yawzhang/storage_mgr:refactor_new-RelWithDebInfo"
-NEW_IMAGE="hub.tess.io/yawzhang/storage_mgr:crc_1027-RelWithDebInfo"
+NEW_IMAGE="hub.tess.io/sds/storage_mgr:1.0-pre.0.2.6.6-RelWithDebInfo"
+NODE_NAME=""
+DEPLOYMENT_REGEX="sm-long-running[1-4]-1007"
+
+if [[ -z "$NODE_NAME" ]]; then
+  echo "please update node name in the script"
+  exit 1
+fi
 
 # Function to check deployment status
 check_deployment_status() {
@@ -27,10 +34,24 @@ check_pod_logs() {
   return $?
 }
 
-start_idx=1
-for i in $(seq "$start_idx" "$DEPLOYMENT_COUNT"); do
-  DEPLOYMENT="sm-long-running$i-1007"
-  POD=$(tess kubectl --context="$CLUSTER" -n "$NAMESPACE" get pods -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep "$DEPLOYMENT")
+PODS=$(tess kubectl --context="$CLUSTER" -n "$NAMESPACE" get pods --field-selector spec.nodeName="$NODE_NAME" -o jsonpath='{.items[*].metadata.name}')
+if [[ -z "$PODS" ]]; then
+  echo "No pods found on node $NODE_NAME."
+  exit 0
+fi
+
+echo "node $NODE_NAME has pods [$PODS]"
+
+process_cnt=0
+for POD in $PODS; do
+  DEPLOYMENT=$(tess kubectl --context="$CLUSTER" -n "$NAMESPACE" get pod "$POD" -o jsonpath='{.metadata.ownerReferences[?(@.kind=="ReplicaSet")].name}' | sed 's/-[a-z0-9]*$//')
+  if [[ -z "$DEPLOYMENT" ]]; then
+    echo "No deployment found for pod $POD. Skipping..."
+    continue
+  elif ! [[ $DEPLOYMENT =~ $DEPLOYMENT_REGEX ]]; then
+    echo "Skipping pod $POD as its deployment $DEPLOYMENT does not match the expected pattern."
+    continue
+  fi
   echo "Processing deployment $DEPLOYMENT pod $POD..."
 
   # PRE-CHECK
@@ -38,6 +59,11 @@ for i in $(seq "$start_idx" "$DEPLOYMENT_COUNT"); do
   if [[ "$CURRENT_IMAGE" == "$NEW_IMAGE" ]]; then
     echo "[PRE-CHECK] Pod $POD is already using the new image $NEW_IMAGE. Skipping..."
     continue
+  fi
+
+  if [[ $process_cnt -ge $DEPLOYMENT_COUNT ]]; then
+    echo "Reached the maximum number of deployments to process: $DEPLOYMENT_COUNT. Stopping further processing."
+    break
   fi
 
   # Step 1: Update deployment strategy to Recreate and set sm-app image to refactor image
@@ -101,6 +127,7 @@ for i in $(seq "$start_idx" "$DEPLOYMENT_COUNT"); do
   done
 
   echo "[Step 6]. Deployment $DEPLOYMENT processed successfully."
+  process_cnt=$((process_cnt + 1))
 done
 
 echo "All pods processed successfully."
