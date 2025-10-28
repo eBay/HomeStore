@@ -198,7 +198,7 @@ jobs:
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
       with:
         testing: 'False'
         path: import/nuraft_mesg
