@@ -128,7 +128,7 @@ jobs:
       with:
         repository: eBay/nuraft_mesg
         path: import/nuraft_mesg
-        ref: main
+        ref: dev/v4.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
