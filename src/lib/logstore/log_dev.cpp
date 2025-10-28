@@ -883,6 +883,9 @@ void LogDevMetadata::refactor_superblk(const std::vector< std::pair< logstore_id
         std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
         std::memcpy(voidptr_cast(m_sb.raw_buf()->bytes()), static_cast< const void* >(old_buf->cbytes()),
                     std::min(old_buf->size(), m_sb.size()));
+    } else {
+        LOGINFO("No need to resize logdev_superblk log_dev={}, skip refactor", m_sb->logdev_id);
+        return;
     }
 
     // convert old superblk to new superblk
