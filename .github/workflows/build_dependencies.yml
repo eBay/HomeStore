@@ -160,7 +160,7 @@ jobs:
 
     - name: Build Cache
       run: |
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o iomgr/*:prerelease=${{ inputs.prerelease }}" || echo "")
         conan install \
             -c tools.build:skip_test=True \
             ${pre} \
@@ -218,7 +218,7 @@ jobs:
     - name: Create and Test Package
       run: |
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o iomgr/*:prerelease=${{ inputs.prerelease }}" || echo "")
         conan create \
             ${pre} \
             -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
@@ -231,7 +231,7 @@ jobs:
 
     - name: Code Coverage Run
       run: |
-        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o iomgr/*:prerelease=${{ inputs.prerelease }}" || echo "")
         conan build \
             ${pre} \
             -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
