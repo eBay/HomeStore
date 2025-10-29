@@ -21,9 +21,9 @@ on:
 
 jobs:
   SislDeps:
-    uses: ebay/sisl/.github/workflows/build_dependencies.yml@dev/v13.x
+    uses: ebay/sisl/.github/workflows/build_dependencies.yml@master
     with:
-      branch: dev/v13.x
+      branch: master
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
@@ -32,9 +32,9 @@ jobs:
 
   NuraftMesgDeps:
     needs: SislDeps
-    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@dev/v4.x
+    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@master
     with:
-      branch: dev/v4.x
+      branch: master
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
@@ -43,9 +43,9 @@ jobs:
 
   IOMgrDeps:
     needs: SislDeps
-    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@dev/v12.x
+    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
     with:
-      branch: dev/v12.x
+      branch: master
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}

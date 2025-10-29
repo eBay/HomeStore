@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - dev/v7.x
+      - stable/v6.x
       - master
 
 jobs:

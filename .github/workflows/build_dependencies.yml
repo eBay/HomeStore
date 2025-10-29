@@ -96,20 +96,20 @@ jobs:
       if: ${{ inputs.testing == 'False' }}
 
     - name: Setup Conan
-      uses: ebay/sisl/.github/actions/setup_conan2@dev/v13.x
+      uses: ebay/sisl/.github/actions/setup_conan2@master
       with:
         platform: ${{ inputs.platform }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load Homestore Cache
       id: restore-cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         testing: ${{ inputs.testing }}
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Load Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         load_any: 'True'
         key_prefix: SislDeps13-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
@@ -120,7 +120,7 @@ jobs:
       with:
         repository: eBay/iomanager
         path: import/iomgr
-        ref: dev/v12.x
+        ref: master
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
@@ -128,11 +128,11 @@ jobs:
       with:
         repository: eBay/nuraft_mesg
         path: import/nuraft_mesg
-        ref: dev/v4.x
+        ref: main
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         testing: 'False'
         path: import/iomgr
@@ -141,7 +141,7 @@ jobs:
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         testing: 'False'
         path: import/nuraft_mesg
@@ -160,8 +160,8 @@ jobs:
         sudo rm -rf /usr/lib/google-cloud-sdk
         
         python -m pip install pyelftools
-        conan export --user oss --channel dev import/iomgr
-        conan export --user oss --channel dev import/nuraft_mesg
+        conan export --user oss --channel master import/iomgr
+        conan export --user oss --channel main import/nuraft_mesg
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
@@ -182,20 +182,20 @@ jobs:
       if: ${{ steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Save Conan Cache
-      uses: eBay/sisl/.github/actions/store_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/store_conan2@master
       with:
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         load_any: 'True'
         key_prefix: SislDeps13-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         testing: 'False'
         path: import/iomgr
@@ -204,7 +204,7 @@ jobs:
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan2@dev/v13.x
+      uses: eBay/sisl/.github/actions/load_conan2@master
       with:
         testing: 'False'
         path: import/nuraft_mesg
