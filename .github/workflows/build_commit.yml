@@ -34,7 +34,7 @@ jobs:
     needs: SislDeps
     uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@master
     with:
-      branch: master
+      branch: main
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
