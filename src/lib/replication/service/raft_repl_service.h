@@ -100,8 +100,8 @@ protected:
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
-    void start_reaper_thread();
-    void stop_reaper_thread();
+    void start_repl_service_timers();
+    void stop_repl_service_timers();
     void fetch_pending_data();
     void gc_repl_devs();
     void gc_repl_reqs();

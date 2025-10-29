@@ -76,7 +76,8 @@ struct repl_key {
 
     bool operator==(repl_key const& other) const = default;
     std::string to_string() const {
-        return fmt::format("server={}, term={}, dsn={}, hash={}", server_id, term, dsn, Hasher()(*this));
+        return fmt::format("server={}, term={}, dsn={}, hash={}, trace_id={}", server_id, term, dsn, Hasher()(*this),
+                           traceID);
     }
 };
 

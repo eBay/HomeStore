@@ -111,6 +111,21 @@ public:
             jheader.key_id = key_id;
         }
 
+        test_req(const std::map< Key, Value >& already_exist_key_ids) {
+            write_sgs.size = 0;
+            read_sgs.size = 0;
+            while (true) {
+                key_id = (uint64_t)rand() << 32 | rand();
+                if (already_exist_key_ids.find(Key{.id_ = key_id}) == already_exist_key_ids.end()) {
+                    break; // found a unique key_id
+                } else {
+                    LOGDEBUGMOD(replication, "Found duplicate key_id={} in already_exist_key_ids, retrying", key_id);
+                }
+            }
+
+            jheader.key_id = key_id;
+        }
+
         ~test_req() {
             for (auto const& iov : write_sgs.iovs) {
                 iomanager.iobuf_free(uintptr_cast(iov.iov_base));
@@ -363,7 +378,7 @@ public:
 
     void db_write(uint64_t data_size, uint32_t max_size_per_iov) {
         static std::atomic< uint32_t > s_uniq_num{0};
-        auto req = intrusive< test_req >(new test_req());
+        auto req = intrusive< test_req >(new test_req(inmem_db_));
         req->jheader.data_size = data_size;
         req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
         req->jheader.key_id = req->key_id;
@@ -453,7 +468,7 @@ public:
 
     void set_zombie() { zombie_ = true; }
     bool is_zombie() {
-        // Wether a group is zombie(non recoverable)
+        // Whether a group is zombie(non recoverable)
         return zombie_;
     }
 
