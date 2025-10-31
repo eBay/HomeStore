@@ -107,6 +107,12 @@ struct replica_member_info {
     int32_t priority{0};
 };
 
+struct replace_member_task {
+    std::string task_id;      // Unique task id for this replace member operation
+    replica_id_t replica_out; // The replica which is going to be replaced
+    replica_id_t replica_in;  // The replica which is going to be added in place of replica_out
+};
+
 } // namespace homestore
 
 // hash function definitions
