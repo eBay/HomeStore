@@ -699,7 +699,6 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     LOGINFO("RaftLogTruncationTest done");
 }
 
-#if 0
 TEST_F(RaftReplDevTest, WriteWithSSL) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -744,7 +743,6 @@ TEST_F(RaftReplDevTest, WriteWithSSL) {
         [prev_ssl_ca_file](auto& s) { s.consensus.ssl_ca_file = prev_ssl_ca_file; });
     HS_SETTINGS_FACTORY().save();
 }
-#endif
 
 TEST_F(RaftReplDevTest, ReconcileLeader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
