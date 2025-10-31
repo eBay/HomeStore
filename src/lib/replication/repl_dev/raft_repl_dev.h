@@ -256,8 +256,12 @@ public:
                                                   uint64_t trace_id = 0);
     AsyncReplResult<> flip_learner_flag(const replica_member_info& member, bool target, uint32_t commit_quorum,
                                         bool wait_and_verify = true, uint64_t trace_id = 0);
+    AsyncReplResult<> remove_member(const replica_id_t& member, uint32_t commit_quorum, bool wait_and_verify,
+                                    uint64_t trace_id = 0);
+    AsyncReplResult<> clean_replace_member_task(const std::string& task_id, uint32_t commit_quorum,
+                                                uint64_t trace_id = 0);
     ReplServiceError do_add_member(const replica_member_info& member, uint64_t trace_id = 0);
-    ReplServiceError do_remove_member(const replica_member_info& member, uint64_t trace_id = 0);
+    ReplServiceError do_remove_member(const replica_id_t& member, bool wait_and_verify = true, uint64_t trace_id = 0);
     ReplServiceError do_flip_learner(const replica_member_info& member, bool target, bool wait_and_verify,
                                      uint64_t trace_id = 0);
     ReplServiceError set_priority(const replica_id_t& member, int32_t priority, uint64_t trace_id = 0);
@@ -265,6 +269,7 @@ public:
                                                        uint64_t trace_id = 0);
     bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);
 
+    ReplResult< replace_member_task > get_ongoing_replace_member_task(uint64_t trace_id = 0) const;
     std::string get_replace_member_task_id() const { return {m_rd_sb->replace_member_task.task_id}; }
 
     folly::SemiFuture< ReplServiceError > destroy_group();
@@ -477,6 +482,8 @@ private:
     void commit_blk(repl_req_ptr_t rreq);
     void start_replace_member(repl_req_ptr_t rreq);
     void complete_replace_member(repl_req_ptr_t rreq);
+    void remove_member(repl_req_ptr_t rreq);
+    void clean_replace_member_task(repl_req_ptr_t rreq);
     void reset_quorum_size(uint32_t commit_quorum, uint64_t trace_id);
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);

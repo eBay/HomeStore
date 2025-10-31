@@ -79,7 +79,7 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
+SoloReplService::~SoloReplService(){};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -204,6 +204,21 @@ AsyncReplResult<> SoloReplService::flip_learner_flag(group_id_t group_id, const 
                                                      bool target, uint32_t commit_quorum, bool wait_and_verify,
                                                      uint64_t trace_id) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+AsyncReplResult<> SoloReplService::remove_member(group_id_t group_id, const replica_id_t& member,
+                                                 uint32_t commit_quorum, bool wait_and_verify,
+                                                 uint64_t trace_id) const {
+    return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+AsyncReplResult<> SoloReplService::clean_replace_member_task(group_id_t group_id, const std::string& task_id,
+                                                             uint32_t commit_quorum, uint64_t trace_id) const {
+    return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+ReplResult< std::vector< replace_member_task > > SoloReplService::list_replace_member_tasks(uint64_t trace_id) const {
+    return folly::makeUnexpected(ReplServiceError::NOT_IMPLEMENTED);
 }
 
 ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_id, std::string& task_id,

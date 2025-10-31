@@ -101,6 +101,11 @@ public:
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
                                         uint64_t trace_id = 0) const override;
+    AsyncReplResult<> remove_member(group_id_t group_id, const replica_id_t& member, uint32_t commit_quorum,
+                                    bool wait_and_verify = true, uint64_t trace_id = 0) const override;
+    AsyncReplResult<> clean_replace_member_task(group_id_t group_id, const std::string& task_id, uint32_t commit_quorum,
+                                                uint64_t trace_id = 0) const override;
+    ReplResult< std::vector< replace_member_task > > list_replace_member_tasks(uint64_t trace_id = 0) const override;
     ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                   const replica_member_info& member_out,
                                                   const replica_member_info& member_in,

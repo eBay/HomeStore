@@ -559,6 +559,70 @@ AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const 
         });
 }
 
+AsyncReplResult<> RaftReplService::remove_member(group_id_t group_id, const replica_id_t& member,
+                                                 uint32_t commit_quorum, bool wait_and_verify,
+                                                 uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    incr_pending_request_num();
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
+    }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->remove_member(member, commit_quorum, wait_and_verify, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this](auto&& e) mutable {
+            if (e.hasError()) {
+                decr_pending_request_num();
+                return make_async_error<>(e.error());
+            }
+            decr_pending_request_num();
+            return make_async_success<>();
+        });
+}
+
+AsyncReplResult<> RaftReplService::clean_replace_member_task(group_id_t group_id, const std::string& task_id,
+                                                             uint32_t commit_quorum, uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    incr_pending_request_num();
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        decr_pending_request_num();
+        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
+    }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->clean_replace_member_task(task_id, commit_quorum, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this](auto&& e) mutable {
+            if (e.hasError()) {
+                decr_pending_request_num();
+                return make_async_error<>(e.error());
+            }
+            decr_pending_request_num();
+            return make_async_success<>();
+        });
+}
+
+ReplResult< std::vector< replace_member_task > > RaftReplService::list_replace_member_tasks(uint64_t trace_id) const {
+    if (is_stopping()) return folly::makeUnexpected<>(ReplServiceError::STOPPING);
+    incr_pending_request_num();
+    std::vector< replace_member_task > tasks;
+    std::shared_lock lg(m_rd_map_mtx);
+    for (const auto& [uuid, rd] : m_rd_map) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rd);
+        if (!rdev) {
+            LOGWARNMOD(replication, "RaftReplDev for group_id={} is not found", boost::uuids::to_string(uuid));
+            continue;
+        }
+        auto task = rdev->get_ongoing_replace_member_task(trace_id);
+        // ignore error
+        if (task.hasValue()) { tasks.emplace_back(task.value()); }
+    }
+    decr_pending_request_num();
+    return tasks;
+}
+
 // This query should always be called on leader to avoid misleading results due to lagging status on some followers.
 ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                                const replica_member_info& member_out,
