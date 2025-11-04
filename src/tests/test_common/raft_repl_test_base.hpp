@@ -596,7 +596,7 @@ public:
     }
 
     void run_on_leader(std::shared_ptr< TestReplicatedDB > db, auto&& lambda) {
-        if (!db || !db->repl_dev()) {
+        if (!db || !db->repl_dev() || db->is_zombie()) {
             // Spare which are not added to group will not have repl dev.
             return;
         }

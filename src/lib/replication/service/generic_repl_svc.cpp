@@ -119,6 +119,9 @@ void SoloReplService::stop() {
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
                                                                       std::set< replica_id_t > const& members) {
+    if (is_stopping()) return make_async_error< shared< ReplDev > >(ReplServiceError::STOPPING);
+    init_req_counter counter(pending_request_num);
+
     superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
@@ -127,7 +130,6 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
     listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
-    incr_pending_request_num();
 
     {
         std::unique_lock lg(m_rd_map_mtx);
@@ -135,12 +137,10 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
         if (!happened) {
             // We should never reach here, as we have failed to emplace in map, but couldn't find entry
             DEBUG_ASSERT(false, "Unable to put the repl_dev in rd map");
-            decr_pending_request_num();
             return make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_ALREADY_EXISTS);
         }
     }
 
-    decr_pending_request_num();
     return make_async_success< shared< ReplDev > >(rdev);
 }
 
