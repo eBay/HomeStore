@@ -174,19 +174,6 @@ class RaftReplDev : public ReplDev,
                     public nuraft_mesg::mesg_state_mgr,
                     public std::enable_shared_from_this< RaftReplDev > {
 private:
-    class init_req_counter {
-    public:
-        init_req_counter(std::atomic_uint64_t& counter) : my_counter(counter) {
-            my_counter.fetch_add(1, std::memory_order_acq_rel);
-        }
-
-        ~init_req_counter() { my_counter.fetch_sub(1, std::memory_order_acq_rel); }
-
-    private:
-        std::atomic_uint64_t& my_counter;
-    };
-
-private:
     shared< RaftStateMachine > m_state_machine;
     RaftReplService& m_repl_svc;
     folly::ConcurrentHashMap< repl_key, repl_req_ptr_t, repl_key::Hasher > m_repl_key_req_map;

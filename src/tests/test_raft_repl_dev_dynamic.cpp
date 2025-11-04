@@ -151,7 +151,8 @@ TEST_F(ReplDevDynamicTest, ReplaceMemberRollback) {
             raft_repl_svc.gc_repl_devs();
             LOGINFO("Waiting for repl dev to get destroyed on out member replica={}", g_helper->replica_num());
         }
-        LOGINFO("Repl dev destroyed on out member replica={}", g_helper->replica_num());
+        db->set_zombie();
+        LOGINFO("Repl dev destroyed on in member replica={}", g_helper->replica_num());
     } else {
         check_replace_member_rollback_result(db, task_id, g_helper->replica_id(member_out),
                                              g_helper->replica_id(member_in));

@@ -66,7 +66,7 @@ public:
                                                 uint32_t commit_quorum, bool wait_and_verify = true,
                                                 uint64_t trace_id = 0) const = 0;
 
-    /// @brief Remove th specific replica member from the group.
+    /// @brief Remove the specific replica member from the group.
     /// @param group_id The ID of the replica group.
     /// @param member The replica id to be removed.
     /// @param commit_quorum The commit quorum required for this operation.

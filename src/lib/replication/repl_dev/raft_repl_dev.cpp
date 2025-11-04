@@ -177,9 +177,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}", task_id);
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
-    if (m_my_repl_id != get_leader_id()) {
-        return make_async_error<>(ReplServiceError::NOT_LEADER);
-    }
+    if (m_my_repl_id != get_leader_id()) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
     // Check if leader itself is requested to move out.
     if (m_my_repl_id == member_out.id) {
         // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
@@ -383,9 +381,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(std::string& task_id,
     }
     init_req_counter counter(pending_request_num);
 
-    if (!m_repl_svc_ctx || !is_leader()) {
-        return ReplaceMemberStatus::NOT_LEADER;
-    }
+    if (!m_repl_svc_ctx || !is_leader()) { return ReplaceMemberStatus::NOT_LEADER; }
 
     auto peers = get_replication_status();
     peer_info out_peer_info;
@@ -501,6 +497,9 @@ AsyncReplResult<> RaftReplDev::remove_member(const replica_id_t& member, uint32_
     }
     RD_LOGI(trace_id, "Remove member step1. Member has been removed, member={}", boost::uuids::to_string(member));
     // 2. propose to raft to remove member
+    // Note: The removed member will not receive this HS_CTRL_REMOVE_MEMBER log entry since it has already been
+    // removed from the raft group in step 1. Therefore, on_remove_member callback will only be executed on the
+    // remaining members.
     RD_LOGI(trace_id, "Remove member step2. Propose to raft for HS_CTRL_REMOVE_MEMBER req, group_id={}",
             group_id_str());
 
@@ -1578,20 +1577,28 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     }
 
     RD_LOGD(rreq->traceID(), "Raft channel: Commit rreq=[{}]", rreq->to_compact_string());
-    if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
+    switch (rreq->op_code()) {
+    case journal_type_t::HS_CTRL_DESTROY:
         leave();
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_START_REPLACE) {
+        break;
+    case journal_type_t::HS_CTRL_START_REPLACE:
         start_replace_member(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
+        break;
+    case journal_type_t::HS_CTRL_COMPLETE_REPLACE:
         complete_replace_member(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY) {
+        break;
+    case journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY:
         update_truncation_boundary(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_REMOVE_MEMBER) {
+        break;
+    case journal_type_t::HS_CTRL_REMOVE_MEMBER:
         remove_member(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_CLEAN_REPLACE_TASK) {
+        break;
+    case journal_type_t::HS_CTRL_CLEAN_REPLACE_TASK:
         clean_replace_member_task(rreq);
-    } else {
+        break;
+    default:
         m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), {rreq->local_blkid()}, rreq);
+        break;
     }
 
     if (!recovery) {
@@ -1821,13 +1828,15 @@ AsyncReplResult<> RaftReplDev::become_leader() {
     }
     init_req_counter counter(pending_request_num);
 
-    return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this, counter = std::move(counter)](auto&& e) {
-        if (e.hasError()) {
-            RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
-            return make_async_error<>(RaftReplService::to_repl_error(e.error()));
-        }
-        return make_async_success<>();
-    });
+    return m_msg_mgr.become_leader(m_group_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) {
+            if (e.hasError()) {
+                RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
+                return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+            }
+            return make_async_success<>();
+        });
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx && m_repl_svc_ctx->is_raft_leader(); }
