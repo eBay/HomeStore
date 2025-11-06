@@ -214,6 +214,14 @@ public:
     nlohmann::json get_status(const int log_level);
 
 public:
+    /************************* metacli function **********************/
+    void scan(const std::string& scan_type, std::optional< uint16_t > debug_chunk_id = std::nullopt,
+              std::optional< uint32_t > debug_blk_num = std::nullopt);
+    void scan_blks_on_all_chunks(std::optional< uint16_t > debug_chunk_id = std::nullopt,
+                                 std::optional< uint32_t > debug_blk_num = std::nullopt) const;
+    void scan_blks_by_chain() const;
+
+public:
     /*********************** static public function **********************/
     uint64_t ovf_blk_max_num_data_blk() const;
 

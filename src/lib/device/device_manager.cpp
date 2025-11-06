@@ -115,7 +115,7 @@ void DeviceManager::format_devices() {
     // Get common iomgr_attributes
     for (auto& dinfo : m_dev_infos) {
         format_single_device(dinfo);
-    } 
+    }
 
     // Verify the first blocks to see if the devs are unique
     HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system");
@@ -186,7 +186,7 @@ bool DeviceManager::verify_unique_devs() const {
     return ret;
 }
 
-void DeviceManager::load_devices() {
+void DeviceManager::load_devices(bool ignore_unkown_vdevs) {
     RELEASE_ASSERT_EQ(m_first_blk_hdr.version, first_block_header::CURRENT_SUPERBLOCK_VERSION,
                       "We don't support superblock version upgrade yet");
 
@@ -241,7 +241,7 @@ void DeviceManager::load_devices() {
     }
 
     // 3. Recover vdevs from the physical devices.
-    load_vdevs();
+    load_vdevs(ignore_unkown_vdevs);
 
     if (pdevs_to_format.empty() && !stale_first_blk_found) return;
 
@@ -565,7 +565,7 @@ void DeviceManager::add_pdev_to_vdev(shared< VirtualDev > vdev, PhysicalDev* pde
     }
 }
 
-void DeviceManager::load_vdevs() {
+void DeviceManager::load_vdevs(bool ignore_unkown_vdevs) {
     std::unique_lock lg{m_vdev_mutex};
 
     for (auto& [dtype, pdevs] : m_pdevs_by_type) {
@@ -583,9 +583,14 @@ void DeviceManager::load_vdevs() {
             // we might have some missing pdevs in the sparse_vector m_all_pdevs, so skip them
             if (!pdev) continue;
             // Empty device will skip this callback.
-            pdev->load_chunks([this](cshared< Chunk >& chunk) -> bool {
+            pdev->load_chunks([this, &ignore_unkown_vdevs](cshared< Chunk >& chunk) -> bool {
                 // Found a chunk for which vdev information is missing
                 if (m_vdevs[chunk->vdev_id()] == nullptr) {
+                    if (ignore_unkown_vdevs) {
+                        LOGWARN("Ignoring chunk id={} belonging to unknown vdev_id={}", chunk->chunk_id(),
+                                chunk->vdev_id());
+                        return true;
+                    }
                     LOGWARN("Found a chunk id={}, which is expected to be part of vdev_id={}, but that vdev "
                             "information is missing, may be before vdev is created, system crashed. Need upper layer "
                             "to retry vdev create",
@@ -603,6 +608,10 @@ void DeviceManager::load_vdevs() {
 
     // Run initialization of all vdevs.
     for (auto& vdev : m_vdevs) {
+        if (ignore_unkown_vdevs && vdev == nullptr) {
+            LOGWARN("Ignoring initialization of vdev of unknown device type");
+            continue;
+        }
         vdev->init();
     }
 }

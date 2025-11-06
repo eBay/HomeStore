@@ -55,6 +55,10 @@ if (${build_nonio_tests})
     target_link_libraries(test_device_manager homestore ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME DeviceManager COMMAND test_device_manager)
 
+    set(TEST_SCAN_TOOL_SOURCES scan_tool.cpp)
+    add_executable(scan_tool ${TEST_SCAN_TOOL_SOURCES})
+    target_link_libraries(scan_tool homestore ${COMMON_TEST_DEPS} GTest::gmock)
+
     add_executable(test_append_blk_allocator)
     target_sources(test_append_blk_allocator PRIVATE test_append_blkalloc.cpp)
     target_link_libraries(test_append_blk_allocator homestore ${COMMON_TEST_DEPS} GTest::gmock)

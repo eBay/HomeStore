@@ -195,6 +195,14 @@ public:
     unique< CrashSimulator > m_crash_simulator;
 #endif
 
+public:
+    /*** for metacli tool ***/
+    bool start_tool(const hs_input_params& input, const std::string& scan_type,
+                    std::optional< uint16_t > debug_chunk_id = std::nullopt,
+                    std::optional< blk_num_t > debug_blk_num = std::nullopt);
+    void stop_tool();
+    shared< VirtualDev > create_vdev_cb_for_tool(const vdev_info& vinfo, bool load_existing);
+
 private:
     void init_cache();
     shared< VirtualDev > create_vdev_cb(const vdev_info& vinfo, bool load_existing);
