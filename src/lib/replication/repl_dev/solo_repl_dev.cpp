@@ -172,10 +172,19 @@ void SoloReplDev::async_write_journal(const std::vector< MultiBlkId >& blkids, s
 }
 
 void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+    auto cur_lsn = m_commit_upto.load();
+    if (cur_lsn >= lsn) {
+        // Already committed
+        LOGINFO("SoloReplDev skipping already committed log_entry lsn={}, m_commit_upto at lsn={}", lsn, cur_lsn);
+        return;
+    }
+
     repl_journal_entry const* entry = r_cast< repl_journal_entry const* >(buf.bytes());
     uint32_t remain_size = buf.size() - sizeof(repl_journal_entry);
     HS_REL_ASSERT_EQ(entry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                      "Mismatched version of journal entry found");
+    // HS_LOG(DEBUG, solorepl, "SoloReplDev found journal entry at lsn={}", lsn);
+    LOGINFO("SoloReplDev log replay found journal entry at lsn={}", lsn);
 
     uint8_t const* raw_ptr = r_cast< uint8_t const* >(entry) + sizeof(repl_journal_entry);
     sisl::blob header{raw_ptr, entry->user_header_size};
@@ -200,8 +209,10 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
 
     m_listener->on_pre_commit(lsn, header, key, nullptr);
 
-    auto cur_lsn = m_commit_upto.load();
-    if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
+    if (cur_lsn < lsn) {
+        // TODO: when will it happen?
+        m_commit_upto.compare_exchange_strong(cur_lsn, lsn);
+    }
 
     for (const auto& blkid : blkids) {
         data_service().commit_blk(blkid);
@@ -247,14 +258,13 @@ void SoloReplDev::cp_flush(CP*) {
 
 void SoloReplDev::truncate() {
     // Ignore truncate when HS is initializing. And we need atleast 3 checkpoints to start truncating.
-
     if (homestore::hs()->is_initializing() || m_rd_sb->last_checkpoint_lsn_2 <= 0) { return; }
 
     // Truncate is safe anything below last_checkpoint_lsn - 2 as all the free blks
     // before that will be flushed in the last_checkpoint.
     HS_LOG(INFO, solorepl, "dev={} truncating at lsn={}", boost::uuids::to_string(group_id()),
            m_rd_sb->last_checkpoint_lsn_2);
-    m_data_journal->truncate(m_rd_sb->last_checkpoint_lsn_2);
+    m_data_journal->truncate(m_rd_sb->last_checkpoint_lsn_2, false /*in-memory-only*/);
 }
 
 void SoloReplDev::cp_cleanup(CP*) {

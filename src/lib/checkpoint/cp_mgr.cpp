@@ -126,6 +126,9 @@ void CPManager::shutdown() {
     LOGINFO("Trigger cp flush at CP shutdown");
     auto success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
     HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
+
+    success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
+    HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
     LOGINFO("Trigger cp done");
 
     delete (m_cur_cp);
