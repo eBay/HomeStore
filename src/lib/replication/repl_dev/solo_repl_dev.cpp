@@ -207,10 +207,9 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
         blkids.push_back(blkid);
     }
 
-    m_listener->on_pre_commit(lsn, header, key, nullptr);
-
+    m_listener->on_pre_commit(lsn, header, key, nullptr /* context */);
     if (cur_lsn < lsn) {
-        // TODO: when will it happen?
+        // we will only be here when we experienced a crash recocovery;
         m_commit_upto.compare_exchange_strong(cur_lsn, lsn);
     }
 
@@ -218,7 +217,7 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
         data_service().commit_blk(blkid);
     }
 
-    m_listener->on_commit(lsn, header, key, blkids, nullptr);
+    m_listener->on_commit(lsn, header, key, blkids, nullptr /* context */);
 }
 
 folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
