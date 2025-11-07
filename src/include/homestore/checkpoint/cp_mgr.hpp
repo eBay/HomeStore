@@ -179,7 +179,7 @@ public:
     /// @brief Shutdown the checkpoint manager services. It will not trigger a flush, but cancels any existing
     /// checkpoint session abruptly. If caller needs clean shutdown, then they explicitly needs to trigger cp flush
     /// before calling shutdown.
-    void shutdown();
+    void shutdown(bool require_extra_cp = false);
 
     /// @brief Register a CP consumer to the checkpoint manager. CP consumer provides the callback they are interested
     /// in the checkpoint process. Each consumer gets a CPContext, which consumer can put its own dirty buffer info

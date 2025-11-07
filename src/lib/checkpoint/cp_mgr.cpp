@@ -114,7 +114,7 @@ void CPManager::create_first_cp() {
     m_cur_cp->m_cp_start_time = Clock::now();
 }
 
-void CPManager::shutdown() {
+void CPManager::shutdown(bool require_extra_cp) {
     LOGINFO("Stopping cp timer");
     stop_timer_thread();
 
@@ -127,8 +127,11 @@ void CPManager::shutdown() {
     auto success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
     HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
 
-    success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
-    HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
+    if (require_extra_cp) {
+        success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
+        HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
+    }
+
     LOGINFO("Trigger cp done");
 
     delete (m_cur_cp);
