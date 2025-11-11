@@ -229,6 +229,10 @@ ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_
     return ReplaceMemberStatus::UNKNOWN;
 }
 
+ReplServiceError SoloReplService::destroy_repl_dev(group_id_t group_id, uint64_t trace_id) {
+    return remove_repl_dev(group_id).get();
+}
+
 std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {
     return std::make_unique< CPContext >(new_cp);
 }
