@@ -234,62 +234,133 @@ void MetaBlkService::scan_meta_blks() {
     if (self_recover) { set_self_recover(); }
 }
 
+ENUM(PGState, uint8_t, ALIVE = 0, DESTROYED);
+
+struct pg_info_superblk {
+    uint16_t id;
+    PGState state;
+    // num_expected_members means how many members a  pg should have, while num_dynamic_members is the actual
+    // members count, as members might float during member replacement.
+    uint32_t num_expected_members;
+    uint32_t num_dynamic_members;
+    uint32_t num_chunks;
+    uint64_t chunk_size;
+    boost::uuids::uuid replica_set_uuid;
+    uint64_t pg_size;
+    boost::uuids::uuid index_table_uuid;
+    uint64_t blob_sequence_num;
+    uint64_t active_blob_count;         // Total number of active blobs
+    uint64_t tombstone_blob_count;      // Total number of tombstones
+    uint64_t total_occupied_blk_count;  // Total number of occupied blocks
+    uint64_t total_reclaimed_blk_count; // Total number of reclaimed blocks
+    char data[1];                       // ISO C++ forbids zero-size array
+
+    pg_info_superblk() = default;
+    pg_info_superblk(pg_info_superblk const& rhs) { *this = rhs; }
+};
+
 void MetaBlkService::scan_blks_on_all_chunks() const {
-    // read chunks per 4k and get the hdr to check if it is meta blk/ovrf blk/ssb, if it is, print type and name, or
-    // print in-valid and continue after read chunk_size, print valid count and in-valid cnt for the chunk
-    m_sb_vdev->foreach_chunks([this](cshared< Chunk >& chunk) {
+    constexpr blk_num_t BATCH_SIZE = 1024;
+    const auto blk_sz = block_size();
+    const auto batch_size_bytes = BATCH_SIZE * blk_sz;
+
+    HS_LOG(INFO, metablk, "Starting batch scan with batch_size={} blocks ({} bytes)", BATCH_SIZE,
+           in_bytes(batch_size_bytes));
+
+    m_sb_vdev->foreach_chunks([this, blk_sz, batch_size_bytes, BATCH_SIZE](cshared< Chunk >& chunk) {
         HS_LOG(INFO, metablk, "Scanning chunk: {}, size: {}, start_offset: {}", chunk->chunk_id(),
                in_bytes(chunk->size()), chunk->start_offset());
-        blk_num_t nblks = chunk->size() / block_size();
-        HS_LOG(INFO, metablk, "Number of blocks in chunk {} : {}, chunk_size={} block_size={}", chunk->chunk_id(), nblks,
-               chunk->size(), block_size());
+
+        const blk_num_t total_blks = chunk->size() / blk_sz;
+        HS_LOG(INFO, metablk, "Number of blocks in chunk {}: {}, chunk_size={} block_size={}", chunk->chunk_id(),
+               total_blks, chunk->size(), blk_sz);
+
         int valid_cnt{0};
         int invalid_cnt{0};
         int ssb_cnt{0};
         int meta_blk_cnt{0};
         int ovf_blk_cnt{0};
-        for (blk_num_t i{0}; i < nblks; ++i) {
-            auto offset_in_chunk = i * block_size();
-            auto buf = hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size());
-            auto ec = m_sb_vdev->sync_read(r_cast< char* >(buf), block_size(), chunk, offset_in_chunk);
+
+        auto batch_buf = hs_utils::iobuf_alloc(batch_size_bytes, sisl::buftag::metablk, align_size());
+        for (blk_num_t batch_start = 0; batch_start < total_blks; batch_start += BATCH_SIZE) {
+            const blk_num_t blks_in_batch = std::min(BATCH_SIZE, total_blks - batch_start);
+            const size_t read_size = blks_in_batch * blk_sz;
+            const auto offset_in_chunk = batch_start * blk_sz;
+
+            // Read a batch of blocks
+            auto ec = m_sb_vdev->sync_read(r_cast< char* >(batch_buf), read_size, chunk, offset_in_chunk);
             if (ec.value()) {
-                HS_LOG(ERROR, metablk, "Failed to read blk at chunk: {}, offset_in_chunk: {}, error: {}",
-                       chunk->chunk_id(), offset_in_chunk, ec.message());
-                hs_utils::iobuf_free(buf, sisl::buftag::metablk);
+                HS_LOG(ERROR, metablk, "Failed to read batch at chunk: {}, offset: {}, size: {}, error: {}",
+                       chunk->chunk_id(), offset_in_chunk, read_size, ec.message());
+                hs_utils::iobuf_free(batch_buf, sisl::buftag::metablk);
                 return;
             }
-            uint32_t magic = *r_cast< uint32_t* >(buf);
-            switch (magic) {
-            case META_BLK_SB_MAGIC: {
-                ssb_cnt++;
-                auto* ssb = r_cast< meta_blk_sb* >(buf);
-                HS_LOG(INFO, metablk, "[SSB] found at blkid=[{}], blk={}", ssb->bid.to_string(), ssb->to_string());
-                valid_cnt++;
-                break;
+
+            // Process each block in the batch
+            for (blk_num_t i = 0; i < blks_in_batch; ++i) {
+                const auto blk_offset_in_batch = i * blk_sz;
+                auto* blk_ptr = r_cast< uint8_t* >(batch_buf) + blk_offset_in_batch;
+                const uint32_t magic = *r_cast< uint32_t* >(blk_ptr);
+                const blk_num_t global_blk_num = batch_start + i;
+
+                switch (magic) {
+                case META_BLK_SB_MAGIC: {
+                    ssb_cnt++;
+                    auto* ssb = r_cast< meta_blk_sb* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[SSB] found at blkid=[{}], blk={}", ssb->bid.to_string(), ssb->to_string());
+                    valid_cnt++;
+                    break;
+                }
+                case META_BLK_MAGIC: {
+                    meta_blk_cnt++;
+                    auto* mblk = r_cast< meta_blk* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[MetaBlk] found {}", mblk->to_string());
+
+                    // Check if this is a PGManager meta block
+                    if (std::string(mblk->hdr.h.type) == "PGManager") {
+                        // Get the context data (pg_info_superblk)
+                        const auto* pg_info = r_cast< const pg_info_superblk* >(mblk->get_context_data());
+                        HS_LOG(INFO, metablk,
+                               "[PGManager] pg_info: id={}, state={}, num_expected_members={}, "
+                               "num_dynamic_members={}, num_chunks={}, chunk_size={}, pg_size={}, "
+                               "blob_sequence_num={}, active_blob_count={}, tombstone_blob_count={}, "
+                               "total_occupied_blk_count={}, total_reclaimed_blk_count={}",
+                               pg_info->id, static_cast< uint8_t >(pg_info->state), pg_info->num_expected_members,
+                               pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
+                               pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
+                               pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
+                    }
+
+                    valid_cnt++;
+                    break;
+                }
+                case META_BLK_OVF_MAGIC: {
+                    ovf_blk_cnt++;
+                    auto* ovf_blk = r_cast< meta_blk_ovf_hdr* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[OvfBlk] found {}", ovf_blk->to_string());
+                    valid_cnt++;
+                    break;
+                }
+                default: {
+                    invalid_cnt++;
+                    HS_LOG(DEBUG, metablk, "Invalid blk at chunk: {}, blk_num={}, offset_in_chunk: {}, magic: {}",
+                           chunk->chunk_id(), global_blk_num, global_blk_num * blk_sz, magic);
+                    if (chunk->chunk_id() == 13 && global_blk_num == 606208) {
+                        HS_LOG(INFO, metablk, "try to read blk#606208@c13");
+                        auto* mblk = r_cast< meta_blk* >(blk_ptr);
+                        HS_LOG(INFO, metablk, "blk#606208@c13 hdr is {}", mblk->to_string());
+                    }
+                    if (chunk->chunk_id() == 12 && global_blk_num == 884772) {
+                        HS_LOG(INFO, metablk, "try to read blk#884772@c12");
+                        auto* mblk = r_cast< meta_blk* >(blk_ptr);
+                        HS_LOG(INFO, metablk, "blk#884772@c12 hdr is {}", mblk->to_string());
+                    }
+                }
+                }
             }
-            case META_BLK_MAGIC: {
-                meta_blk_cnt++;
-                auto* mblk = r_cast< meta_blk* >(buf);
-                HS_LOG(INFO, metablk, "[MetaBlk] found {}", mblk->to_string());
-                valid_cnt++;
-                break;
-            }
-            case META_BLK_OVF_MAGIC: {
-                ovf_blk_cnt++;
-                auto* ovf_blk = r_cast< meta_blk_ovf_hdr* >(buf);
-                HS_LOG(INFO, metablk, "[OvfBlk] found {}", ovf_blk->to_string());
-                valid_cnt++;
-                break;
-            }
-            default: {
-                invalid_cnt++;
-                HS_LOG(DEBUG, metablk, "Invalid blk at chunk: {}, blk_num={}, offset_in_chunk: {}, magic: {}", chunk->chunk_id(), i,
-                       offset_in_chunk, magic);
-                break;
-            }
-            }
-            hs_utils::iobuf_free(buf, sisl::buftag::metablk);
         }
+
+        hs_utils::iobuf_free(batch_buf, sisl::buftag::metablk);
         HS_LOG(INFO, metablk,
                "scanned chunk: {}, valid_cnt: {}, invalid_cnt: {}, ssb_cnt: {}, meta_blk_cnt: {}, ovf_blk_cnt: {}",
                chunk->chunk_id(), valid_cnt, invalid_cnt, ssb_cnt, meta_blk_cnt, ovf_blk_cnt);
@@ -315,6 +386,21 @@ void MetaBlkService::scan_blks_by_chain() const {
         read(bid, uintptr_cast(mblk), block_size());
         HS_LOG(INFO, metablk, "Scanned meta blk: {}", mblk->to_string());
         type_cnt[mblk->hdr.h.type] += 1;
+
+        // Check if this is a PGManager meta block
+        if (std::string(mblk->hdr.h.type) == "PGManager") {
+            // Get the context data (pg_info_superblk)
+            const auto* pg_info = r_cast< const pg_info_superblk* >(mblk->get_context_data());
+            HS_LOG(INFO, metablk,
+                   "[PGManager] pg_info: id={}, state={}, num_expected_members={}, "
+                   "num_dynamic_members={}, num_chunks={}, chunk_size={}, pg_size={}, "
+                   "blob_sequence_num={}, active_blob_count={}, tombstone_blob_count={}, "
+                   "total_occupied_blk_count={}, total_reclaimed_blk_count={}",
+                   pg_info->id, static_cast< uint8_t >(pg_info->state), pg_info->num_expected_members,
+                   pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
+                   pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
+                   pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
+        }
 
         if (prev_meta_bid.to_integer() != mblk->hdr.h.prev_bid.to_integer()) {
             HS_LOG(INFO, metablk, "[type={}], meta blk has wrong prev meta bid. expected={}, actual={}",
