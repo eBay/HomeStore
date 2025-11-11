@@ -50,12 +50,18 @@ public:
         LOGINFO("Initialize and start HS tool with app_mem_size = {}", homestore::in_bytes(app_mem_size));
 
         auto devices = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+        ASSERT_FALSE(devices.empty()) << "Device list is empty. Please provide a valid device list.";
+
         std::vector< homestore::dev_info > device_info;
         for (auto const& dev : devices) {
-            // dev format is dev_path:dev_type
             auto delimiter_pos = dev.find(':');
+            ASSERT_TRUE(delimiter_pos != std::string::npos && delimiter_pos != 0 && delimiter_pos != dev.size() - 1)
+                << "Invalid device format: " << dev << ". Expected format is 'path:type'.";
+
             std::string dev_path = dev.substr(0, delimiter_pos);
             std::string dev_type_str = dev.substr(delimiter_pos + 1);
+            ASSERT_TRUE(dev_type_str == "HDD" || dev_type_str == "SSD" || dev_type_str == "NVME")
+                << "Unknown device type: " << dev_type_str << ". Expected types are 'HDD', 'SSD', or 'NVME'.";
             LOGINFO("Adding device {} of type {}", dev_path, dev_type_str);
             auto hs_type = (dev_type_str == "HDD") ? homestore::HSDevType::Data : homestore::HSDevType::Fast;
             device_info.emplace_back(dev_path, hs_type);

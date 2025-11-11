@@ -288,6 +288,7 @@ void MetaBlkService::scan_blks_on_all_chunks() const {
                 break;
             }
             }
+            hs_utils::iobuf_free(buf, sisl::buftag::metablk);
         }
         HS_LOG(INFO, metablk,
                "scanned chunk: {}, valid_cnt: {}, invalid_cnt: {}, ssb_cnt: {}, meta_blk_cnt: {}, ovf_blk_cnt: {}",
@@ -333,6 +334,7 @@ void MetaBlkService::scan_blks_by_chain() const {
 
             read_sz += ovf_hdr->h.context_sz;
             obid = ovf_hdr->h.next_bid;
+            hs_utils::iobuf_free(uintptr_cast(ovf_hdr), sisl::buftag::metablk);
         }
 
         if (read_sz != static_cast< uint64_t >(mblk->hdr.h.context_sz)) {
@@ -344,6 +346,7 @@ void MetaBlkService::scan_blks_by_chain() const {
 
         // move on to next meta blk;
         bid = mblk->hdr.h.next_bid;
+        hs_utils::iobuf_free(uintptr_cast(mblk), sisl::buftag::metablk);
     }
 
     HS_LOG(INFO, metablk, "Meta blk scan summary:");
@@ -353,6 +356,8 @@ void MetaBlkService::scan_blks_by_chain() const {
         total_valid_count += cnt;
     }
     HS_LOG(INFO, metablk, "Total valid meta blk count: {}", total_valid_count);
+
+    hs_utils::iobuf_free(uintptr_cast(ssb), sisl::buftag::metablk);
 }
 
 bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
