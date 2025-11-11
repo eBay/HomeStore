@@ -103,6 +103,13 @@ public:
                                                           const std::vector< replica_member_info >& others,
                                                           uint64_t trace_id = 0) const = 0;
 
+    /// @brief Destroy the repl dev for a given group id
+    /// Compared to remove_repl_dev, this function will directly destroy the local repl dev, rather than go through the
+    /// raft and destroy all repl dev among members. This function is mainly used for cleaning up local resources when
+    /// the repl dev is leaked.
+    /// @param group_id Group where the replace member happens
+    virtual ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) = 0;
+
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in
     /// @return ReplDev is opened or ReplServiceError::SERVER_NOT_FOUND if it doesn't exist

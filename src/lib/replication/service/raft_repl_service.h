@@ -104,6 +104,7 @@ protected:
                                                   const replica_member_info& member_in,
                                                   const std::vector< replica_member_info >& others,
                                                   uint64_t trace_id = 0) const override;
+    ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) override;
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);

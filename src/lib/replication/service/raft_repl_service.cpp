@@ -635,6 +635,17 @@ ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_
         ->get_replace_member_status(task_id, member_out, member_in, others, trace_id);
 }
 
+ReplServiceError RaftReplService::destroy_repl_dev(group_id_t group_id, uint64_t trace_id) {
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        LOGINFOMOD(replication, "repl dev group_id={} not found, maybe already destroyed, trace_id={}",
+                   boost::uuids::to_string(group_id), trace_id);
+        return ReplServiceError::OK;
+    }
+    std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->force_leave();
+    return ReplServiceError::OK;
+}
+
 ////////////////////// Reaper Thread related //////////////////////////////////
 void RaftReplService::start_repl_service_timers() {
     // we need to explictly cancel the timers before we stop the repl_devs, but we cannot cancel a thread timer
