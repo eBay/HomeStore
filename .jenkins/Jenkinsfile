@@ -64,10 +64,10 @@ pipeline {
             steps {
                  sh "hostname ; \
                     echo $NODE_NAME ; \
-                    conan create ${BUILD_MISSING} -s:h build_type=Debug -o ${PROJECT}/*:sanitize=True ${CONAN_FLAGS} . ; \
-                    conan create ${BUILD_MISSING} -s:h build_type=Debug ${CONAN_FLAGS} . ; \
-                    conan create ${BUILD_MISSING} -s:h build_type=RelWithDebInfo -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
-                    conan create ${BUILD_MISSING} -s:h build_type=RelWithDebInfo -o sisl/*:prerelease=True -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
+                    conan build -s:h compiler.cppstd=23 ${BUILD_MISSING} -s:h build_type=Debug -o ${PROJECT}/*:sanitize=True ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h compiler.cppstd=23 -s:h build_type=Debug ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h compiler.cppstd=23 -s:h build_type=RelWithDebInfo -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h compiler.cppstd=23 -s:h build_type=RelWithDebInfo -o sisl/*:prerelease=True -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
                     "
             }
              post {

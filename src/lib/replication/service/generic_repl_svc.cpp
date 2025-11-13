@@ -54,7 +54,7 @@ GenericReplService::~GenericReplService() {
 ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
     std::shared_lock lg(m_rd_map_mtx);
     if (auto it = m_rd_map.find(group_id); it != m_rd_map.end()) { return it->second; }
-    return folly::makeUnexpected(ReplServiceError::SERVER_NOT_FOUND);
+    return std::unexpected(ReplServiceError::SERVER_NOT_FOUND);
 }
 
 void GenericReplService::iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) {
@@ -147,7 +147,7 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
 folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_t group_id) {
     // RD_LOGI("Removing repl dev for group_id={}", boost::uuids::to_string(group_id));
     auto rdev = get_repl_dev(group_id);
-    if (rdev.hasError()) { return folly::makeSemiFuture(rdev.error()); }
+    if (!rdev.has_value()) { return folly::makeSemiFuture(rdev.error()); }
 
     auto rdev_ptr = rdev.value();
 

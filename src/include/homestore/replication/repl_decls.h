@@ -1,4 +1,5 @@
 #pragma once
+#include <expected>
 #include <iostream>
 #include <string>
 
@@ -56,7 +57,7 @@ VENUM(ReplaceMemberStatus, int32_t,
 // clang-format on
 
 template < typename V, typename E >
-using Result = folly::Expected< V, E >;
+using Result = std::expected< V, E >;
 
 template < class V >
 using ReplResult = Result< V, ReplServiceError >;
@@ -64,7 +65,7 @@ using ReplResult = Result< V, ReplServiceError >;
 template < class V, class E >
 using AsyncResult = folly::SemiFuture< Result< V, E > >;
 
-template < class V = folly::Unit >
+template < class V = void >
 using AsyncReplResult = AsyncResult< V, ReplServiceError >;
 
 using blkid_list_t = folly::small_vector< BlkId, 4 >;

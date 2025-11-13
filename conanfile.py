@@ -5,11 +5,11 @@ from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake
 from conan.tools.files import copy
 from os.path import join
 
-required_conan_version = ">=1.60.0"
+required_conan_version = ">=2.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "7.0.0"
+    version = "7.0.1"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -47,6 +47,10 @@ class HomestoreConan(ConanFile):
                 if self.options.coverage or self.options.sanitize:
                     raise ConanInvalidConfiguration("Coverage/Sanitizer requires Testing!")
 
+    def validate(self):
+        if self.info.settings.compiler.cppstd:
+            check_min_cppstd(self, 23)
+
     def build_requirements(self):
         self.test_requires("benchmark/1.9.4")
         self.test_requires("gtest/1.17.0")
@@ -54,7 +58,7 @@ class HomestoreConan(ConanFile):
     def requirements(self):
         self.requires("iomgr/[^12]@oss/master", transitive_headers=True)
         self.requires("sisl/[^13]@oss/master", transitive_headers=True)
-        self.requires("nuraft_mesg/[^4]@oss/main", transitive_headers=True)
+        self.requires("nuraft_mesg/[^5]@oss/main", transitive_headers=True)
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:

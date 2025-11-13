@@ -81,9 +81,9 @@ struct repl_dev_superblk {
 
 #pragma pack()
 
-template < class V = folly::Unit >
+template < class V = void >
 auto make_async_error(ReplServiceError err) {
-    return folly::makeSemiFuture< ReplResult< V > >(folly::makeUnexpected(err));
+    return folly::makeSemiFuture< ReplResult< V > >(std::unexpected(err));
 }
 
 template < class V >
@@ -91,9 +91,9 @@ auto make_async_success(V v) {
     return folly::makeSemiFuture< ReplResult< V > >(std::move(v));
 }
 
-template < class V = folly::Unit >
+template < class V = void >
 auto make_async_success() {
-    return folly::makeSemiFuture< ReplResult< folly::Unit > >(folly::Unit{});
+    return folly::makeSemiFuture< ReplResult< void > >(ReplResult< void >());
 }
 
 inline uint64_t generateRandomTraceId() {

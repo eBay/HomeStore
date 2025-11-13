@@ -177,9 +177,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}", task_id);
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
-    if (m_my_repl_id != get_leader_id()) {
-        return make_async_error<>(ReplServiceError::NOT_LEADER);
-    }
+    if (m_my_repl_id != get_leader_id()) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
     // Check if leader itself is requested to move out.
     if (m_my_repl_id == member_out.id) {
         // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
@@ -405,9 +403,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(std::string& task_id,
     }
     init_req_counter counter(pending_request_num);
 
-    if (!m_repl_svc_ctx || !is_leader()) {
-        return ReplaceMemberStatus::NOT_LEADER;
-    }
+    if (!m_repl_svc_ctx || !is_leader()) { return ReplaceMemberStatus::NOT_LEADER; }
 
     auto peers = get_replication_status();
     peer_info out_peer_info;
@@ -480,7 +476,7 @@ ReplServiceError RaftReplDev::do_add_member(const replica_member_info& member, u
             auto add_ret = m_msg_mgr.add_member(m_group_id, srv_config)
                                .via(&folly::InlineExecutor::instance())
                                .thenValue([this, member, trace_id](auto&& e) -> nuraft::cmd_result_code {
-                                   return e.hasError() ? e.error() : nuraft::cmd_result_code::OK;
+                                   return (!e.has_value()) ? e.error() : nuraft::cmd_result_code::OK;
                                });
             return add_ret.value();
         },
@@ -517,7 +513,7 @@ ReplServiceError RaftReplDev::do_remove_member(const replica_member_info& member
             auto rem_ret = m_msg_mgr.rem_member(m_group_id, member.id)
                                .via(&folly::InlineExecutor::instance())
                                .thenValue([this, member, trace_id](auto&& e) -> nuraft::cmd_result_code {
-                                   return e.hasError() ? e.error() : nuraft::cmd_result_code::OK;
+                                   return (!e.has_value()) ? e.error() : nuraft::cmd_result_code::OK;
                                });
             return rem_ret.value();
         },
@@ -706,7 +702,7 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto result = m_listener->create_snapshot(snp_ctx).get();
     auto null_except = std::shared_ptr< std::exception >();
-    HS_REL_ASSERT(result.hasError() == false, "Not expecting creating snapshot to return false. ");
+    HS_REL_ASSERT((!result.has_value()) == false, "Not expecting creating snapshot to return false. ");
 
     // propose truncate boundary on leader if needed
     if (is_leader()) { propose_truncate_boundary(); }
@@ -890,7 +886,7 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
         for (auto const& res : v_res) {
             if (sisl_likely(res.value())) {
                 auto r = res.value();
-                if (r.hasError()) {
+                if (!r.has_value()) {
                     // Just logging PushData error, no action is needed as follower can try by fetchData.
                     RD_LOGI(rreq->traceID(), "Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
                             rreq->to_string(), r.error());
@@ -1692,13 +1688,15 @@ AsyncReplResult<> RaftReplDev::become_leader() {
     }
     init_req_counter counter(pending_request_num);
 
-    return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this, counter = std::move(counter)](auto&& e) {
-        if (e.hasError()) {
-            RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
-            return make_async_error<>(RaftReplService::to_repl_error(e.error()));
-        }
-        return make_async_success<>();
-    });
+    return m_msg_mgr.become_leader(m_group_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) {
+            if (!e.has_value()) {
+                RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
+                return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+            }
+            return make_async_success<>();
+        });
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx && m_repl_svc_ctx->is_raft_leader(); }
@@ -2159,7 +2157,7 @@ void RaftReplDev::monitor_replace_member_replication_status() {
     replica_member_info out{replica_out, ""};
     replica_member_info in{replica_in, ""};
     auto ret = complete_replace_member(task_id, out, in, 0, trace_id).get();
-    if (ret.hasError()) {
+    if (!ret.has_value()) {
         RD_LOGE(trace_id, "Failed to complete replace member, next time will retry it, task_id={}, error={}", task_id,
                 ret.error());
         return;

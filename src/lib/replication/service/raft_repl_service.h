@@ -19,7 +19,6 @@
 #include <string>
 #include <shared_mutex>
 
-#include <folly/Expected.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"

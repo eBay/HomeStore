@@ -310,7 +310,7 @@ public:
             }
 
             auto v = hs()->repl_service().create_repl_dev(repl_group_id, members).get();
-            ASSERT_EQ(v.hasValue(), true)
+            ASSERT_EQ(v.has_value(), true)
                 << "Error in creating repl dev for group_id=" << boost::uuids::to_string(repl_group_id).c_str()
                 << ", err=" << v.error();
             auto& raftService = dynamic_cast< RaftReplService& >(hs()->repl_service());
