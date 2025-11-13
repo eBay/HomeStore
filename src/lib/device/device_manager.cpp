@@ -115,7 +115,7 @@ void DeviceManager::format_devices() {
     // Get common iomgr_attributes
     for (auto& dinfo : m_dev_infos) {
         format_single_device(dinfo);
-    } 
+    }
 
     // Verify the first blocks to see if the devs are unique
     HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system");
@@ -163,7 +163,9 @@ bool DeviceManager::verify_unique_devs() const {
     for (auto& pdev : m_all_pdevs) {
         if (!pdev) { continue; }
         auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
-        if (auto err = pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset()); err) {
+        if (auto err =
+                pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset());
+            err) {
             LOGERROR("Failed to read first block from device={}, error={}", pdev->get_devname(), err.message());
             ret = false;
             continue;

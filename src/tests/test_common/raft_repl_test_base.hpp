@@ -566,7 +566,7 @@ public:
             for (auto const& db : dbs_) {
                 do {
                     auto result = db->repl_dev()->become_leader().get();
-                    if (result.hasError()) {
+                    if (!result.has_value()) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                     } else {
                         break;
@@ -778,9 +778,9 @@ public:
             auto result =
                 hs()->repl_service().replace_member(db->repl_dev()->group_id(), task_id, out, in, commit_quorum).get();
             if (error == ReplServiceError::OK) {
-                ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
+                ASSERT_EQ(!result.has_value(), false) << "Error in replacing member, err=" << result.error();
             } else {
-                ASSERT_EQ(result.hasError(), true);
+                ASSERT_EQ(!result.has_value(), true);
                 ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
             }
         });

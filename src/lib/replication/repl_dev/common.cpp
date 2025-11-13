@@ -133,7 +133,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     DEBUG_ASSERT(has_linked_data(), "Trying to allocate a block for non-inlined block");
 
     auto const hints_result = listener->get_blk_alloc_hints(m_header, data_size, repl_req_ptr_t(this));
-    if (hints_result.hasError()) { return hints_result.error(); }
+    if (!hints_result.has_value()) { return hints_result.error(); }
 
     if (hints_result.value().committed_blk_id.has_value()) {
         // if the committed_blk_id is already present, use it and skip allocation and commitment

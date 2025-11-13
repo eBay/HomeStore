@@ -527,7 +527,7 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::stri
         ->start_replace_member(task_id, member_out, member_in, commit_quorum, trace_id)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
-            if (e.hasError()) {
+            if (!e.has_value()) {
                 decr_pending_request_num();
                 return make_async_error<>(e.error());
             }
@@ -550,7 +550,7 @@ AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const 
         ->flip_learner_flag(member, target, commit_quorum, wait_and_verify, trace_id)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
-            if (e.hasError()) {
+            if (!e.has_value()) {
                 decr_pending_request_num();
                 return make_async_error<>(e.error());
             }
