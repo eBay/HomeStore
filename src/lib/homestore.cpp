@@ -324,9 +324,11 @@ void HomeStore::shutdown() {
     LOGINFO("Homestore shutdown is started");
 
     m_resource_mgr->stop();
-
-    auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
-    auto is_solo = repl_svc.get_impl_type() == repl_impl_type::solo;
+    bool is_solo = false;
+    if (hs()->has_repl_data_service()) {
+        auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
+        is_solo = repl_svc.get_impl_type() == repl_impl_type::solo;
+    }
 
     // 1 stop all the services, after which all the upper layer api call are rejected and there is not on-going request.
     // Note that, after stopping, all the service are alive.
