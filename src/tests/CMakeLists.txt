@@ -137,7 +137,7 @@ if (${io_tests})
         add_test(NAME DataService-Epoll COMMAND test_data_service)
         add_test(NAME RaftReplDev-Epoll COMMAND test_raft_repl_dev)
         add_test(NAME RaftReplDevDynamic-Epoll COMMAND test_raft_repl_dev_dynamic --override_config homestore_config.consensus.replace_member_sync_check_interval_ms=1000)
-        add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev)
+        add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev --solo_force_replay=true)
     endif()
 
     can_build_spdk_io_tests(spdk_tests)
