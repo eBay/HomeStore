@@ -197,7 +197,9 @@ public:
 
 public:
     /*** for metacli tool ***/
-    bool start_tool(const hs_input_params& input, const std::string& scan_type);
+    bool start_tool(const hs_input_params& input, const std::string& scan_type,
+                    std::optional< uint16_t > debug_chunk_id = std::nullopt,
+                    std::optional< blk_num_t > debug_blk_num = std::nullopt);
     void stop_tool();
     shared< VirtualDev > create_vdev_cb_for_tool(const vdev_info& vinfo, bool load_existing);
 

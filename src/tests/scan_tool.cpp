@@ -37,7 +37,11 @@ SISL_OPTION_GROUP(test_scan_tool,
                   (device_list, "", "device_list", "device list", ::cxxopts::value< std::vector< std::string > >(),
                    "[dev_path:dev_type,..]"),
                   (scan_type, "", "scan_type", "scan_type", ::cxxopts::value< std::string >()->default_value("chunk"),
-                   "chunk/chain"));
+                   "chunk/chain"),
+                  (debug_chunk_id, "", "debug_chunk_id", "chunk id for debug printing",
+                   ::cxxopts::value< uint16_t >(), "chunk_id"),
+                  (debug_blk_num, "", "debug_blk_num", "block number for debug printing",
+                   ::cxxopts::value< uint64_t >(), "blk_num"));
 
 class ScanTool : public ::testing::Test {
 public:
@@ -68,12 +72,27 @@ public:
         }
 
         auto scan_type = SISL_OPTIONS["scan_type"].as< std::string >();
+
+        // Parse optional debug parameters
+        std::optional< uint16_t > debug_chunk_id = std::nullopt;
+        std::optional< blk_num_t > debug_blk_num = std::nullopt;
+
+        if (SISL_OPTIONS.count("debug_chunk_id")) {
+            debug_chunk_id = SISL_OPTIONS["debug_chunk_id"].as< uint16_t >();
+            LOGINFO("Debug chunk_id set to: {}", debug_chunk_id.value());
+        }
+
+        if (SISL_OPTIONS.count("debug_blk_num")) {
+            debug_blk_num = SISL_OPTIONS["debug_blk_num"].as< uint64_t >();
+            LOGINFO("Debug blk_num set to: {}", debug_blk_num.value());
+        }
+
         bool success = HomeStore::instance()->start_tool(
             hs_input_params{.devices = device_info,
                             .app_mem_size = app_mem_size,
                             .max_data_size = max_data_size,
                             .max_snapshot_batch_size = max_snapshot_batch_size_in_bytes},
-            scan_type);
+            scan_type, debug_chunk_id, debug_blk_num);
         LOGINFO("HS tool started with status: {}", success ? "success" : "failure");
     }
 

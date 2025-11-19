@@ -104,10 +104,11 @@ void MetaBlkService::start(bool need_format) {
     recover();
 }
 
-void MetaBlkService::scan(const std::string& scan_type) {
+void MetaBlkService::scan(const std::string& scan_type, std::optional< uint16_t > debug_chunk_id,
+                          std::optional< blk_num_t > debug_blk_num) {
     if (scan_type == "chunk") {
         HS_LOG(INFO, metablk, "Scanning meta blks on all chunk");
-        scan_blks_on_all_chunks();
+        scan_blks_on_all_chunks(debug_chunk_id, debug_blk_num);
     } else if (scan_type == "chain") {
         HS_LOG(INFO, metablk, "Scanning meta blks by chain");
         scan_blks_by_chain();
@@ -259,7 +260,71 @@ struct pg_info_superblk {
     pg_info_superblk(pg_info_superblk const& rhs) { *this = rhs; }
 };
 
-void MetaBlkService::scan_blks_on_all_chunks() const {
+struct DataHeader {
+    static constexpr uint8_t data_header_version = 0x01;
+    static constexpr uint64_t data_header_magic = 0x21fdffdba8d68fc6; // echo "BlobHeader" | md5sum
+
+    enum class data_type_t : uint32_t { SHARD_INFO = 1, BLOB_INFO = 2 };
+
+    bool valid() const { return ((magic == data_header_magic) && (version <= data_header_version)); }
+
+    uint64_t magic{data_header_magic};
+    uint8_t version{data_header_version};
+    data_type_t type{data_type_t::BLOB_INFO};
+};
+
+struct ShardInfo {
+    enum class State : uint8_t {
+        OPEN = 0,
+        SEALED = 1,
+        DELETED = 2,
+    };
+
+    uint64_t id;
+    uint16_t placement_group;
+    State state;
+    uint64_t lsn; // created_lsn
+    uint64_t created_time;
+    uint64_t last_modified_time;
+    uint64_t available_capacity_bytes;
+    uint64_t total_capacity_bytes;
+    std::optional< boost::uuids::uuid > current_leader{std::nullopt};
+
+    auto operator<=>(ShardInfo const& rhs) const { return id <=> rhs.id; }
+    auto operator==(ShardInfo const& rhs) const { return id == rhs.id; }
+    bool is_open() const { return state == State::OPEN; }
+
+    // to_string method for printing shard info
+    std::string to_string() const {
+        return fmt::format("ShardInfo: id={}, placement_group={}, state={}, lsn={}, "
+                           "created_time={}, last_modified_time={}, available_capacity_bytes={}, "
+                           "total_capacity_bytes={}, current_leader={}",
+                           id, placement_group, static_cast< uint8_t >(state), lsn, created_time, last_modified_time,
+                           available_capacity_bytes, total_capacity_bytes,
+                           current_leader.has_value() ? boost::uuids::to_string(current_leader.value()) : "null");
+    }
+};
+
+struct shard_info_superblk : DataHeader {
+    ShardInfo info;
+    uint16_t p_chunk_id;
+    uint16_t v_chunk_id;
+
+    // to_string method for printing shard_info_superblk with DataHeader and chunk_ids
+    std::string to_string() const {
+        return fmt::format(
+            "shard_info_superblk: [DataHeader: magic=0x{:x}, version={}, type={}], [{}], p_chunk_id={}, v_chunk_id={}",
+            magic, version, static_cast< uint32_t >(type), info.to_string(), p_chunk_id, v_chunk_id);
+    }
+
+    // Helper method to print chunk ids
+    std::string chunk_ids_to_string() const {
+        return fmt::format("chunk_ids: [p_chunk_id={}, v_chunk_id={}]", p_chunk_id, v_chunk_id);
+    }
+};
+
+void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chunk_id,
+                                             std::optional< blk_num_t > debug_blk_num) const {
     constexpr blk_num_t BATCH_SIZE = 1024;
     const auto blk_sz = block_size();
     const auto batch_size_bytes = BATCH_SIZE * blk_sz;
@@ -267,7 +332,7 @@ void MetaBlkService::scan_blks_on_all_chunks() const {
     HS_LOG(INFO, metablk, "Starting batch scan with batch_size={} blocks ({} bytes)", BATCH_SIZE,
            in_bytes(batch_size_bytes));
 
-    m_sb_vdev->foreach_chunks([this, blk_sz, batch_size_bytes, BATCH_SIZE](cshared< Chunk >& chunk) {
+    m_sb_vdev->foreach_chunks([this, blk_sz, batch_size_bytes, BATCH_SIZE, debug_chunk_id, debug_blk_num](cshared< Chunk >& chunk) {
         HS_LOG(INFO, metablk, "Scanning chunk: {}, size: {}, start_offset: {}", chunk->chunk_id(),
                in_bytes(chunk->size()), chunk->start_offset());
 
@@ -329,6 +394,9 @@ void MetaBlkService::scan_blks_on_all_chunks() const {
                                pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
                                pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
                                pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
+                    } else if (std::string(mblk->hdr.h.type) == "ShardManager") {
+                        const auto* shard_info_blk = r_cast< const shard_info_superblk* >(mblk->get_context_data());
+                        HS_LOG(INFO, metablk, "[ShardManager] shard_info: {}", shard_info_blk->to_string());
                     }
 
                     valid_cnt++;
@@ -345,15 +413,26 @@ void MetaBlkService::scan_blks_on_all_chunks() const {
                     invalid_cnt++;
                     HS_LOG(DEBUG, metablk, "Invalid blk at chunk: {}, blk_num={}, offset_in_chunk: {}, magic: {}",
                            chunk->chunk_id(), global_blk_num, global_blk_num * blk_sz, magic);
-                    if (chunk->chunk_id() == 13 && global_blk_num == 606208) {
-                        HS_LOG(INFO, metablk, "try to read blk#606208@c13");
+
+                    // Debug specific block if parameters are provided
+                    if (debug_chunk_id.has_value() && debug_blk_num.has_value() &&
+                        chunk->chunk_id() == debug_chunk_id.value() && global_blk_num == debug_blk_num.value()) {
+                        HS_LOG(INFO, metablk, "try to read blk#{}@c{}", debug_blk_num.value(), debug_chunk_id.value());
                         auto* mblk = r_cast< meta_blk* >(blk_ptr);
-                        HS_LOG(INFO, metablk, "blk#606208@c13 hdr is {}", mblk->to_string());
-                    }
-                    if (chunk->chunk_id() == 12 && global_blk_num == 884772) {
-                        HS_LOG(INFO, metablk, "try to read blk#884772@c12");
-                        auto* mblk = r_cast< meta_blk* >(blk_ptr);
-                        HS_LOG(INFO, metablk, "blk#884772@c12 hdr is {}", mblk->to_string());
+                        HS_LOG(INFO, metablk, "blk#{}@c{} hdr is {}", debug_blk_num.value(), debug_chunk_id.value(),
+                               mblk->to_string());
+
+                        // Print whole 4k data
+                        HS_LOG(INFO, metablk, "blk#{}@c{} whole 4k data:", debug_blk_num.value(), debug_chunk_id.value());
+                        const uint8_t* data_ptr = blk_ptr;
+                        for (size_t i = 0; i < 4096; i += 16) {
+                            std::ostringstream oss;
+                            for (size_t j = 0; j < 16 && (i + j) < 4096; ++j) {
+                                oss << std::hex << std::setw(2) << std::setfill('0')
+                                    << static_cast< int >(data_ptr[i + j]) << " ";
+                            }
+                            HS_LOG(INFO, metablk, "{}", oss.str());
+                        }
                     }
                 }
                 }

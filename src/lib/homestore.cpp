@@ -202,7 +202,8 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 }
 
 // TODO: change to tool file with well structure and tool related parameters
-bool HomeStore::start_tool(const hs_input_params& input, const std::string& scan_type) {
+bool HomeStore::start_tool(const hs_input_params& input, const std::string& scan_type,
+                           std::optional< uint16_t > debug_chunk_id, std::optional< blk_num_t > debug_blk_num) {
     auto& hs_config = HomeStoreStaticConfig::instance();
     hs_config.input = input;
 
@@ -245,7 +246,7 @@ bool HomeStore::start_tool(const hs_input_params& input, const std::string& scan
     LOGINFO("HS tool loaded devices successfully");
     LOGINFO("HS tool starting scan meta blks, dynamic_config_version={}, static_config: {}", HS_DYNAMIC_CONFIG(version),
             HomeStoreStaticConfig::instance().to_json().dump(4));
-    m_meta_service->scan(scan_type);
+    m_meta_service->scan(scan_type, debug_chunk_id, debug_blk_num);
     return true;
 }
 
