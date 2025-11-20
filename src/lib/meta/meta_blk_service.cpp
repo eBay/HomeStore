@@ -237,6 +237,39 @@ void MetaBlkService::scan_meta_blks() {
 
 ENUM(PGState, uint8_t, ALIVE = 0, DESTROYED);
 
+struct ShardInfo {
+    enum class State : uint8_t {
+        OPEN = 0,
+        SEALED = 1,
+        DELETED = 2,
+    };
+
+    uint64_t id;
+    uint16_t placement_group;
+    State state;
+    uint64_t lsn; // created_lsn
+    uint64_t created_time;
+    uint64_t last_modified_time;
+    uint64_t available_capacity_bytes;
+    uint64_t total_capacity_bytes;
+    std::optional< boost::uuids::uuid > current_leader{std::nullopt};
+
+    auto operator<=>(ShardInfo const& rhs) const { return id <=> rhs.id; }
+    auto operator==(ShardInfo const& rhs) const { return id == rhs.id; }
+    bool is_open() const { return state == State::OPEN; }
+
+    // to_string method for printing shard info
+    std::string to_string() const {
+        return fmt::format("ShardInfo: id={}, placement_group={}, state={}, lsn={}, "
+                           "created_time={}, last_modified_time={}, available_capacity_bytes={}, "
+                           "total_capacity_bytes={}, current_leader={}",
+                           id, placement_group, static_cast< uint8_t >(state), lsn, created_time, last_modified_time,
+                           available_capacity_bytes, total_capacity_bytes,
+                           current_leader.has_value() ? boost::uuids::to_string(current_leader.value()) : "null");
+    }
+};
+
+#pragma pack(push, 1)
 struct pg_info_superblk {
     uint16_t id;
     PGState state;
@@ -273,38 +306,6 @@ struct DataHeader {
     data_type_t type{data_type_t::BLOB_INFO};
 };
 
-struct ShardInfo {
-    enum class State : uint8_t {
-        OPEN = 0,
-        SEALED = 1,
-        DELETED = 2,
-    };
-
-    uint64_t id;
-    uint16_t placement_group;
-    State state;
-    uint64_t lsn; // created_lsn
-    uint64_t created_time;
-    uint64_t last_modified_time;
-    uint64_t available_capacity_bytes;
-    uint64_t total_capacity_bytes;
-    std::optional< boost::uuids::uuid > current_leader{std::nullopt};
-
-    auto operator<=>(ShardInfo const& rhs) const { return id <=> rhs.id; }
-    auto operator==(ShardInfo const& rhs) const { return id == rhs.id; }
-    bool is_open() const { return state == State::OPEN; }
-
-    // to_string method for printing shard info
-    std::string to_string() const {
-        return fmt::format("ShardInfo: id={}, placement_group={}, state={}, lsn={}, "
-                           "created_time={}, last_modified_time={}, available_capacity_bytes={}, "
-                           "total_capacity_bytes={}, current_leader={}",
-                           id, placement_group, static_cast< uint8_t >(state), lsn, created_time, last_modified_time,
-                           available_capacity_bytes, total_capacity_bytes,
-                           current_leader.has_value() ? boost::uuids::to_string(current_leader.value()) : "null");
-    }
-};
-
 struct shard_info_superblk : DataHeader {
     ShardInfo info;
     uint16_t p_chunk_id;
@@ -322,6 +323,8 @@ struct shard_info_superblk : DataHeader {
         return fmt::format("chunk_ids: [p_chunk_id={}, v_chunk_id={}]", p_chunk_id, v_chunk_id);
     }
 };
+
+#pragma pack(pop)
 
 void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chunk_id,
                                              std::optional< blk_num_t > debug_blk_num) const {
@@ -386,17 +389,18 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
                         // Get the context data (pg_info_superblk)
                         const auto* pg_info = r_cast< const pg_info_superblk* >(mblk->get_context_data());
                         HS_LOG(INFO, metablk,
-                               "[PGManager] pg_info: id={}, state={}, num_expected_members={}, "
+                               "[PGManager] chunk={} blk={} pg_info: id={}, state={}, num_expected_members={}, "
                                "num_dynamic_members={}, num_chunks={}, chunk_size={}, pg_size={}, "
                                "blob_sequence_num={}, active_blob_count={}, tombstone_blob_count={}, "
                                "total_occupied_blk_count={}, total_reclaimed_blk_count={}",
-                               pg_info->id, static_cast< uint8_t >(pg_info->state), pg_info->num_expected_members,
-                               pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
+                               chunk->chunk_id(), global_blk_num, pg_info->id, static_cast< uint8_t >(pg_info->state),
+                               pg_info->num_expected_members, pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
                                pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
                                pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
                     } else if (std::string(mblk->hdr.h.type) == "ShardManager") {
                         const auto* shard_info_blk = r_cast< const shard_info_superblk* >(mblk->get_context_data());
-                        HS_LOG(INFO, metablk, "[ShardManager] shard_info: {}", shard_info_blk->to_string());
+                        HS_LOG(INFO, metablk, "[ShardManager] chunk={} blk={} shard_info: {}", chunk->chunk_id(),
+                               global_blk_num, shard_info_blk->to_string());
                     }
 
                     valid_cnt++;

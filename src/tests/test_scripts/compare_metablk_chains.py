@@ -12,12 +12,14 @@ from collections import defaultdict
 
 class MetaBlk:
     """Represents a meta block entry."""
-    def __init__(self, self_bid, next_bid, prev_bid, type_name, line):
+
+    def __init__(self, self_bid, next_bid, prev_bid, type_name, line, pg_shard_id=None):
         self.self_bid = self_bid
         self.next_bid = next_bid
         self.prev_bid = prev_bid
         self.type_name = type_name
         self.line = line
+        self.pg_shard_id = pg_shard_id  # Store PG ID or Shard ID
 
     def __repr__(self):
         return f"MetaBlk({self.self_bid}, type={self.type_name})"
@@ -35,6 +37,23 @@ def parse_type(line):
     """Extract type from a log line."""
     match = re.search(r'type:\s*(\w+)', line)
     return match.group(1) if match else 'unknown'
+
+
+def parse_pg_shard_id(line):
+    """Extract PG ID or Shard ID from log line."""
+    # For PGManager: [PGManager] chunk=X blk=Y pg_info: id=Z
+    if '[PGManager]' in line:
+        match = re.search(r'pg_info:\s*id=(\d+)', line)
+        if match:
+            return f"PG:{match.group(1)}"
+
+    # For ShardManager: [ShardManager] chunk=X blk=Y shard_info: ... [ShardInfo: id=Z
+    if '[ShardManager]' in line:
+        match = re.search(r'\[ShardInfo:\s*id=(\d+)', line)
+        if match:
+            return f"Shard:{match.group(1)}"
+
+    return None
 
 def parse_chunk_entries(log_file, target_ssb_bid):
     """Parse chunk traversal entries and find SSB matching the target."""
@@ -55,7 +74,7 @@ def parse_chunk_entries(log_file, target_ssb_bid):
                 continue
 
             # Parse MetaBlk entries
-            if 'MetaBlk] found' in line:
+            if '[MetaBlk] found' in line:
                 self_bid = parse_bid(line, 'self_bid')
                 if self_bid:
                     next_bid = parse_bid(line, 'next_bid')
@@ -63,7 +82,26 @@ def parse_chunk_entries(log_file, target_ssb_bid):
                     type_name = parse_type(line)
                     blocks[self_bid] = MetaBlk(self_bid, next_bid, prev_bid, type_name, line.strip())
 
+            # Parse PGManager and ShardManager entries
+            if '[PGManager]' in line or '[ShardManager]' in line:
+                # Extract chunk and blk from log
+                chunk_match = re.search(r'chunk=(\d+)', line)
+                blk_match = re.search(r'blk=(\d+)', line)
+                if chunk_match and blk_match:
+                    # Construct bid in the format used by the script
+                    chunk = chunk_match.group(1)
+                    blk = blk_match.group(1)
+                    # The bid format is "blk#=X count=1 chunk=Y"
+                    self_bid = f"blk#={blk} count=1 chunk={chunk}"
+
+                    # Check if this block already exists
+                    if self_bid in blocks:
+                        # Update with PG/Shard ID
+                        pg_shard_id = parse_pg_shard_id(line)
+                        blocks[self_bid].pg_shard_id = pg_shard_id
+
     return blocks, ssb_bid
+
 
 def parse_chain_entries(log_file):
     """Parse chain traversal entries and find SSB start."""
@@ -90,6 +128,24 @@ def parse_chain_entries(log_file):
                     prev_bid = parse_bid(line, 'prev_bid')
                     type_name = parse_type(line)
                     blocks[self_bid] = MetaBlk(self_bid, next_bid, prev_bid, type_name, line.strip())
+
+            # Parse PGManager and ShardManager entries
+            if '[PGManager]' in line or '[ShardManager]' in line:
+                # Extract chunk and blk from log
+                chunk_match = re.search(r'chunk=(\d+)', line)
+                blk_match = re.search(r'blk=(\d+)', line)
+                if chunk_match and blk_match:
+                    # Construct bid in the format used by the script
+                    chunk = chunk_match.group(1)
+                    blk = blk_match.group(1)
+                    # The bid format is "blk#=X count=1 chunk=Y"
+                    self_bid = f"blk#={blk} count=1 chunk={chunk}"
+
+                    # Check if this block already exists
+                    if self_bid in blocks:
+                        # Update with PG/Shard ID
+                        pg_shard_id = parse_pg_shard_id(line)
+                        blocks[self_bid].pg_shard_id = pg_shard_id
 
     return blocks, ssb_bid
 
@@ -143,22 +199,24 @@ def format_bid(bid):
 
 def print_chain(chain, title):
     """Print a chain with compact, table-like formatting."""
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 120)
     print(title)
-    print("=" * 100)
-    print(f"{'Idx':<5} {'Self BID':<20} {'Type':<25} {'Prev BID':<20} {'Next BID':<20}")
-    print("-" * 100)
+    print("=" * 120)
+    print(f"{'Idx':<5} {'Self BID':<20} {'Type':<25} {'Prev BID':<20} {'Next BID':<20} {'PGID/SHARDID':<15}")
+    print("-" * 120)
 
     for i, item in enumerate(chain):
         if isinstance(item, MetaBlk):
             self_short = format_bid(item.self_bid)
             prev_short = format_bid(item.prev_bid)
             next_short = format_bid(item.next_bid)
+            pg_shard_display = item.pg_shard_id if item.pg_shard_id else "-"
 
-            print(f"{i:<5} {self_short:<20} {item.type_name:<25} {prev_short:<20} {next_short:<20}")
+            print(
+                f"{i:<5} {self_short:<20} {item.type_name:<25} {prev_short:<20} {next_short:<20} {pg_shard_display:<15}")
         else:
             print(f"{i:<5} {str(item)}")
-    print("=" * 100 + "\n")
+    print("=" * 120 + "\n")
 
 def check_bidirectional(block, blocks):
     """Check if prev and next pointers are bidirectional."""
@@ -184,17 +242,18 @@ def print_orphaned(blocks, orphaned_bids, title):
     if not orphaned_bids:
         return
 
-    print("\n" + "=" * 120)
+    print("\n" + "=" * 140)
     print(title)
-    print("=" * 120)
-    print(f"{'ID':<5} {'Self BID':<20} {'Type':<25} {'Prev BID':<27} {'Next BID':<27}")
-    print("-" * 120)
+    print("=" * 140)
+    print(f"{'ID':<5} {'Self BID':<20} {'Type':<25} {'Prev BID':<27} {'Next BID':<27} {'PGID/SHARDID':<15}")
+    print("-" * 140)
 
     for idx, bid in enumerate(sorted(orphaned_bids)):
         block = blocks[bid]
         self_short = format_bid(block.self_bid)
         prev_short = format_bid(block.prev_bid)
         next_short = format_bid(block.next_bid)
+        pg_shard_display = block.pg_shard_id if block.pg_shard_id else "-"
 
         # Check bidirectional links
         prev_bidir, next_bidir = check_bidirectional(block, blocks)
@@ -212,9 +271,10 @@ def print_orphaned(blocks, orphaned_bids, title):
         else:
             next_display = "  NULL"
 
-        print(f"{idx:<5} {self_short:<20} {block.type_name:<25} {prev_display:<27} {next_display:<27}")
+        print(
+            f"{idx:<5} {self_short:<20} {block.type_name:<25} {prev_display:<27} {next_display:<27} {pg_shard_display:<15}")
 
-    print("\n" + "=" * 120 + "\n")
+    print("\n" + "=" * 140 + "\n")
 
 def compare_chains(chain1, chain2):
     """Compare two chains and report differences."""
