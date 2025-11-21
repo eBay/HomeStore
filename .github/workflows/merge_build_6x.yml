@@ -1,0 +1,39 @@
+name: Homestore 6.x Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - stable/v6.x
+      - improv_code_cov
+
+jobs:
+  Build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ["ubuntu-22.04"]
+        build-type: ["Debug", "Release"]
+        malloc-impl: ["libc", "tcmalloc"]
+        prerelease: ["True", "False"]
+        tooling: ["Sanitize", "Coverage", "None"]
+        exclude:
+          - build-type: Debug
+            prerelease: "False"
+          - build-type: Debug
+            tooling: None
+          - build-type: Debug
+            malloc-impl: tcmalloc
+          - build-type: Release
+            malloc-impl: libc
+          - build-type: Release
+            tooling: Sanitize
+          - build-type: Release
+            tooling: Coverage
+    uses: ./.github/workflows/build_commit.yml
+    with:
+      platform: ${{ matrix.platform }}
+      build-type: ${{ matrix.build-type }}
+      malloc-impl: ${{ matrix.malloc-impl }}
+      prerelease: ${{ matrix.prerelease }}
+      tooling: ${{ matrix.tooling }}
