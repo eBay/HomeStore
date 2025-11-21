@@ -117,7 +117,7 @@ jobs:
       with:
         repository: eBay/iomanager
         path: import/iomgr
-        ref: master
+        ref: stable/v11.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
@@ -125,7 +125,7 @@ jobs:
       with:
         repository: eBay/nuraft_mesg
         path: import/nuraft_mesg
-        ref: main
+        ref: stable/v3.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache

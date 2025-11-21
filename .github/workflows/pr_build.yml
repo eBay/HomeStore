@@ -1,10 +1,10 @@
-name: Homestore PR Build
+name: Homestore6 PR Build
 
 on:
   workflow_dispatch:
   pull_request:
     branches:
-      - master
+      - stable/v6.x
 
 jobs:
   Build:

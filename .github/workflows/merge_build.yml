@@ -1,10 +1,10 @@
-name: Homestore Build
+name: Homestore6 Build
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - stable/v6.x
 
 jobs:
   Build:
