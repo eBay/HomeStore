@@ -33,7 +33,7 @@ jobs:
 
   NuraftMesgDeps:
     needs: SislDeps
-    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@main
+    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@stable/v3.x
     with:
       branch: stable/v3.x
       platform: ${{ inputs.platform }}
