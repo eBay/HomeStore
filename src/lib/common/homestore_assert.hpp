@@ -309,7 +309,7 @@
 #define HS_REL_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, !=, val2, ##__VA_ARGS__)
 #define HS_REL_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, <, val2, ##__VA_ARGS__)
 #define HS_REL_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, <=, val2, ##__VA_ARGS__)
-#define HS_REL_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, >, val2, ##__VA_ARGS__) // LCOV_EXCL_LINE
+#define HS_REL_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, >, val2, ##__VA_ARGS__)
 #define HS_REL_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, >=, val2, ##__VA_ARGS__)
 #define HS_REL_ASSERT_NULL(val, ...) HS_ASSERT_NULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 #define HS_REL_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
