@@ -79,7 +79,7 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
+SoloReplService::~SoloReplService(){};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -119,6 +119,9 @@ void SoloReplService::stop() {
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
                                                                       std::set< replica_id_t > const& members) {
+    if (is_stopping()) return make_async_error< shared< ReplDev > >(ReplServiceError::STOPPING);
+    init_req_counter counter(pending_request_num);
+
     superblk< solo_repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.create();
     rd_sb->group_id = group_id;
@@ -127,7 +130,6 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
     listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
-    incr_pending_request_num();
 
     {
         std::unique_lock lg(m_rd_map_mtx);
@@ -135,12 +137,10 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
         if (!happened) {
             // We should never reach here, as we have failed to emplace in map, but couldn't find entry
             DEBUG_ASSERT(false, "Unable to put the repl_dev in rd map");
-            decr_pending_request_num();
             return make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_ALREADY_EXISTS);
         }
     }
 
-    decr_pending_request_num();
     return make_async_success< shared< ReplDev > >(rdev);
 }
 
@@ -206,12 +206,31 @@ AsyncReplResult<> SoloReplService::flip_learner_flag(group_id_t group_id, const 
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 
+AsyncReplResult<> SoloReplService::remove_member(group_id_t group_id, const replica_id_t& member,
+                                                 uint32_t commit_quorum, bool wait_and_verify,
+                                                 uint64_t trace_id) const {
+    return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+AsyncReplResult<> SoloReplService::clean_replace_member_task(group_id_t group_id, const std::string& task_id,
+                                                             uint32_t commit_quorum, uint64_t trace_id) const {
+    return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+}
+
+ReplResult< std::vector< replace_member_task > > SoloReplService::list_replace_member_tasks(uint64_t trace_id) const {
+    return folly::makeUnexpected(ReplServiceError::NOT_IMPLEMENTED);
+}
+
 ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                                const replica_member_info& member_out,
                                                                const replica_member_info& member_in,
                                                                const std::vector< replica_member_info >& others,
                                                                uint64_t trace_id) const {
     return ReplaceMemberStatus::UNKNOWN;
+}
+
+ReplServiceError SoloReplService::destroy_repl_dev(group_id_t group_id, uint64_t trace_id) {
+    return remove_repl_dev(group_id).get();
 }
 
 std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {
