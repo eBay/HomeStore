@@ -336,6 +336,9 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
            in_bytes(batch_size_bytes));
 
     m_sb_vdev->foreach_chunks([this, blk_sz, batch_size_bytes, BATCH_SIZE, debug_chunk_id, debug_blk_num](cshared< Chunk >& chunk) {
+        // Skip chunks that don't match debug_chunk_id if specified
+        if (debug_chunk_id.has_value() && chunk->chunk_id() != debug_chunk_id.value()) { return; }
+
         HS_LOG(INFO, metablk, "Scanning chunk: {}, size: {}, start_offset: {}", chunk->chunk_id(),
                in_bytes(chunk->size()), chunk->start_offset());
 
@@ -351,6 +354,13 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
 
         auto batch_buf = hs_utils::iobuf_alloc(batch_size_bytes, sisl::buftag::metablk, align_size());
         for (blk_num_t batch_start = 0; batch_start < total_blks; batch_start += BATCH_SIZE) {
+            // If debug_blk_num is specified, set batch_start to debug_blk_num
+            if (debug_blk_num.has_value()) {
+                batch_start = debug_blk_num.value();
+                HS_REL_ASSERT(batch_start < total_blks, "debug_blk_num {} exceeds total_blks {}", batch_start,
+                              total_blks);
+            }
+
             const blk_num_t blks_in_batch = std::min(BATCH_SIZE, total_blks - batch_start);
             const size_t read_size = blks_in_batch * blk_sz;
             const auto offset_in_chunk = batch_start * blk_sz;
@@ -441,6 +451,9 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
                 }
                 }
             }
+
+            // If debug_blk_num is specified, break after processing this batch
+            if (debug_blk_num.has_value()) { break; }
         }
 
         hs_utils::iobuf_free(batch_buf, sisl::buftag::metablk);
