@@ -240,6 +240,7 @@ jobs:
     - name: Code Coverage Run
       run: |
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        python -m pip install gcovr
         conan install \
             ${pre} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
@@ -249,11 +250,12 @@ jobs:
             --build missing \
             .
         conan build .
+        gcovr --cobertura ./coverage.xml
       if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
 
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        gcov: true
+        files: ./coverage.xml
+        disable_search: true
       if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
