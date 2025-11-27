@@ -295,6 +295,23 @@ folly::Future< std::error_code > BlkDataService::async_free_blk(MultiBlkId const
     return f;
 }
 
+std::error_code BlkDataService::free_blk_now(MultiBlkId const& bids) {
+    if (is_stopping()) return std::make_error_code(std::errc::operation_canceled);
+    incr_pending_request_num();
+
+    if (!m_vdev->is_blk_exist(bids)) {
+        decr_pending_request_num();
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    } else {
+        auto cpg = hs()->cp_mgr().cp_guard();
+        m_vdev->free_blk(bids, s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::BLK_DATA_SVC)), true /* free_now */);
+    }
+    decr_pending_request_num();
+    return std::error_code{};
+}
+
+bool BlkDataService::is_blk_alloced(BlkId const& blkid) const { return m_vdev->is_blk_alloced(blkid); }
+
 void BlkDataService::start() {
     // Register to CP for flush dirty buffers underlying virtual device layer;
     hs()->cp_mgr().register_consumer(cp_consumer_t::BLK_DATA_SVC,
