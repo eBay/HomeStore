@@ -618,23 +618,23 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 // (Up) buffer is not committed, node need to be kept and (potentially) repaired later
                 if (buf->m_created_cp_id != icp_ctx->id()) {
                     LOGTRACEMOD(wbcache,
-                                "NOT FREE committing buffer {} node deleted is false reason: node commited?= {} "
+                                "NOT FREE committing buffer {} node deleted is false reason: node committed?= {} "
                                 "up committed? {}",
                                 buf->to_string(), was_node_committed(buf), was_node_committed(buf->m_up_buffer));
                     buf->m_node_freed = false;
                     r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = false;
                     m_vdev->commit_blk(buf->m_blkid);
                     // it can happen when children moved to one of right parent sibling and then the previous node is
-                    // deleted but not commited during crash (upbuffer is not committed). but its children already
+                    // deleted but not committed during crash (upbuffer is not committed). but its children already
                     // committed. and freed (or changed)
                     if (buf->m_node_level) { potential_parent_recovered_bufs.insert(buf); }
                 } else {
                     LOGINFO("deleting and creating new buf {}", buf->to_string());
                     deleted_bufs.push_back(buf);
                 }
-                //  1- upbuffer was dirtied by the same cp, so it is not commited, so we don't need to repair it.
+                //  1- upbuffer was dirtied by the same cp, so it is not committed, so we don't need to repair it.
                 //  remove it from down_waiting list (probably recursively going up) 2- upbuffer was created and
-                //  freed at the same cp, so it is not commited, so we don't need to repair it.
+                //  freed at the same cp, so it is not committed, so we don't need to repair it.
                 if (buf->m_up_buffer) {
                     LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
                                 buf->m_up_buffer->to_string());
@@ -647,7 +647,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             LOGTRACEMOD(wbcache, "recovering new buf {}", buf->to_string());
             // New node
             if (was_node_committed(buf) && was_node_committed(buf->m_up_buffer)) {
-                // Both current and up buffer is commited, we can safely commit the current block
+                // Both current and up buffer is committed, we can safely commit the current block
                 LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
                             buf->m_up_buffer->to_string());
                 m_vdev->commit_blk(buf->m_blkid);

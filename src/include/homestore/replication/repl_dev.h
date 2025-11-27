@@ -486,7 +486,7 @@ public:
     /// @param header - Blob representing the header (it is opaque and will be copied
     /// as-is to the journal entry)
     /// @param key - Blob representing the key (it is opaque and will be copied as-is to
-    /// the journal entry). We are tracking this seperately to support consistent read use
+    /// the journal entry). We are tracking this separately to support consistent read use
     /// cases
     /// @param value - vector of io buffers that contain value for the key. It is an optional field and if the value
     /// list size is 0, then only key is written to replicadev without data.

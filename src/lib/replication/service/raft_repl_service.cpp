@@ -374,7 +374,7 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
     if (is_stopping()) return make_async_error< shared< ReplDev > >(ReplServiceError::STOPPING);
     incr_pending_request_num();
     // TODO: All operations are made sync here for convenience to caller. However, we should attempt to make this async
-    // and do deferValue to a seperate dedicated hs thread for these kind of operations and wakeup the caller. It
+    // and do deferValue to a separate dedicated hs thread for these kind of operations and wakeup the caller. It
     // probably needs iomanager executor for deferValue.
     if (members.size() > 0) {
         // Create a new RAFT group and add all members. create_group() will call the create_state_mgr which will create
@@ -574,14 +574,14 @@ ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_
 ////////////////////// Reaper Thread related //////////////////////////////////
 void RaftReplService::start_repl_service_timers() {
     // we need to explictly cancel the timers before we stop the repl_devs, but we cannot cancel a thread timer
-    // explictly(and exception will be threw out), so here we create a seperate gloable timer for each of them.
+    // explictly(and exception will be threw out), so here we create a separate gloable timer for each of them.
 
     //  Schedule the rdev garbage collector timer
     LOGINFOMOD(replication, "Reaper Thread: scheduling GC every {} seconds",
                HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
     m_rdev_gc_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */, nullptr,
-        iomgr::reactor_regex::all_worker,
+        iomgr::reactor_regex::random_worker,
         [this](void*) {
             LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
             gc_repl_reqs();
@@ -593,18 +593,18 @@ void RaftReplService::start_repl_service_timers() {
     uint64_t interval_ns =
         std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
     m_rdev_fetch_timer_hdl = iomanager.schedule_global_timer(
-        interval_ns, true /* recurring */, nullptr, iomgr::reactor_regex::all_worker,
+        interval_ns, true /* recurring */, nullptr, iomgr::reactor_regex::random_worker,
         [this](void*) { fetch_pending_data(); }, true /* wait_to_schedule */);
 
     // Flush durable commit lsns to superblock
     // FIXUP: what is the best value for flush_durable_commit_interval_ms?
     m_flush_durable_commit_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */, nullptr,
-        iomgr::reactor_regex::all_worker, [this](void*) { flush_durable_commit_lsn(); }, true /* wait_to_schedule */);
+        iomgr::reactor_regex::random_worker, [this](void*) { flush_durable_commit_lsn(); }, true /* wait_to_schedule */);
 
     m_replace_member_sync_check_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */, nullptr,
-        iomgr::reactor_regex::all_worker, [this](void*) { monitor_replace_member_replication_status(); },
+        iomgr::reactor_regex::random_worker, [this](void*) { monitor_replace_member_replication_status(); },
         true /* wait_to_schedule */);
 }
 

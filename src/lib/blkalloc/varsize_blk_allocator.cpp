@@ -450,7 +450,7 @@ out:
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(blk_count_t nblks, blk_alloc_hints const& hints,
                                           std::vector< BlkId >& out_blkids) {
-    // Regular alloc blks will allocate in MultiBlkId, but there is an upper limit on how many it can accomodate in a
+    // Regular alloc blks will allocate in MultiBlkId, but there is an upper limit on how many it can accommodate in a
     // single MultiBlkId, if caller is ok to generate multiple MultiBlkids, this method is called.
     auto h = hints;
     h.partial_alloc_ok = true;

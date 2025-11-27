@@ -90,7 +90,7 @@ void ResourceMgr::start_timer() {
     }
 
     m_res_audit_timer_hdl = iomanager.schedule_global_timer(
-        res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
+        res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::random_worker,
         [this](void*) {
             // all resource timely audit routine should arrive here;
             this->trigger_truncate();
@@ -193,8 +193,9 @@ bool ResourceMgr::check_journal_vdev_size(const uint64_t used_size, const uint64
         const uint32_t used_pct = (100 * used_size / total_size);
         if (used_pct >= get_journal_vdev_size_limit()) {
             m_journal_vdev_exceed_cb(used_size, used_pct >= get_journal_vdev_size_critical_limit() /* is_critical */);
-            HS_LOG_EVERY_N(WARN, base, unmove(50), "high watermark hit, used percentage: {}, high watermark percentage: {}",
-                           used_pct, get_journal_vdev_size_limit());
+            HS_LOG_EVERY_N(WARN, base, unmove(50),
+                           "high watermark hit, used percentage: {}, high watermark percentage: {}", used_pct,
+                           get_journal_vdev_size_limit());
             return true;
         }
     }

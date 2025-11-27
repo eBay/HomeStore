@@ -85,7 +85,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     m_identify_str = m_rdev_name + ":" + group_id_str();
 
     RD_LOGI(NO_TRACE_ID,
-            "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, "
+            "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} committed_lsn={}, "
             "compact_lsn={}, checkpoint_lsn:{}, next_dsn={} "
             "log_dev={} log_store={}",
             (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
@@ -177,9 +177,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}", task_id);
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
-    if (m_my_repl_id != get_leader_id()) {
-        return make_async_error<>(ReplServiceError::NOT_LEADER);
-    }
+    if (m_my_repl_id != get_leader_id()) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
     // Check if leader itself is requested to move out.
     if (m_my_repl_id == member_out.id) {
         // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
@@ -405,9 +403,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(std::string& task_id,
     }
     init_req_counter counter(pending_request_num);
 
-    if (!m_repl_svc_ctx || !is_leader()) {
-        return ReplaceMemberStatus::NOT_LEADER;
-    }
+    if (!m_repl_svc_ctx || !is_leader()) { return ReplaceMemberStatus::NOT_LEADER; }
 
     auto peers = get_replication_status();
     peer_info out_peer_info;
@@ -489,7 +485,7 @@ ReplServiceError RaftReplDev::do_add_member(const replica_member_info& member, u
         RD_LOGW(trace_id, "Ignoring error returned from nuraft add_member, member={}, err={}",
                 boost::uuids::to_string(member.id), ret);
     } else if (ret == nuraft::cmd_result_code::CANCELLED) {
-        // nuraft mesg will return cancelled if the change is not commited after waiting for
+        // nuraft mesg will return cancelled if the change is not committed after waiting for
         // raft_leader_change_timeout_ms(default 3200).
         RD_LOGE(trace_id, "Add member failed, member={}, err={}", boost::uuids::to_string(member.id), ret);
         return ReplServiceError::CANCELLED;
@@ -637,7 +633,7 @@ ReplServiceError RaftReplDev::set_priority(const replica_id_t& member, int32_t p
     auto priority_ret = raft_server()->set_priority(nuraft_mesg::to_server_id(member), priority);
     // Set_priority should be handled by leader, but if the intent is to set the leader's priority to 0, it returns
     // BROADCAST. In this case return NOT_LEADER to let client retry new leader.
-    // If there is an uncommited_config, nuraft set_priority will honor this uncommited config and generate new
+    // If there is an uncommitted_config, nuraft set_priority will honor this uncommitted config and generate new
     // config based on it and won't have config_changing error.
     if (priority_ret != nuraft::raft_server::PrioritySetResult::SET) {
         RD_LOGE(trace_id, "Propose to raft to set priority failed, result: {}",
@@ -1514,7 +1510,7 @@ void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config
     (void)new_conf;
     auto prev_lsn = m_commit_upto_lsn.load(std::memory_order_relaxed);
     if (prev_lsn >= lsn || !m_commit_upto_lsn.compare_exchange_strong(prev_lsn, lsn)) {
-        RD_LOGE(NO_TRACE_ID, "Raft Channel: unexpected log {} commited before config {} committed", prev_lsn, lsn);
+        RD_LOGE(NO_TRACE_ID, "Raft Channel: unexpected log {} committed before config {} committed", prev_lsn, lsn);
     }
 }
 
@@ -1692,13 +1688,15 @@ AsyncReplResult<> RaftReplDev::become_leader() {
     }
     init_req_counter counter(pending_request_num);
 
-    return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this, counter = std::move(counter)](auto&& e) {
-        if (e.hasError()) {
-            RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
-            return make_async_error<>(RaftReplService::to_repl_error(e.error()));
-        }
-        return make_async_success<>();
-    });
+    return m_msg_mgr.become_leader(m_group_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) {
+            if (e.hasError()) {
+                RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
+                return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+            }
+            return make_async_success<>();
+        });
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx && m_repl_svc_ctx->is_raft_leader(); }
@@ -2216,7 +2214,7 @@ void RaftReplDev::cp_cleanup(CP*) {}
 void RaftReplDev::gc_repl_reqs() {
     auto cur_dsn = m_next_dsn.load();
     if (cur_dsn != 0) cur_dsn = cur_dsn - 1;
-    // On follower, DSN below cur_dsn should very likely be commited.
+    // On follower, DSN below cur_dsn should very likely be committed.
     // It is not guaranteed because DSN and LSN are generated separately,
     // DSN in async_alloc_write before pushing data, LSN later when
     // proposing to raft. Two simultaneous write requests on leader can have
@@ -2235,7 +2233,7 @@ void RaftReplDev::gc_repl_reqs() {
         if (rreq->dsn() < cur_dsn && rreq->is_expired()) {
             // The DSN can be out of order, wait till rreq expired.
             RD_LOGD(rreq->traceID(),
-                    "legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_time_sec {}",
+                    "legacy req with committed DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_time_sec {}",
                     rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
                     get_elapsed_time_sec(rreq->created_time()));
             expired_rreqs.push_back(rreq);
@@ -2445,13 +2443,13 @@ bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s
 void RaftReplDev::on_restart() { m_listener->on_restart(); }
 
 bool RaftReplDev::is_resync_mode() {
-    int64_t const leader_commited_lsn = raft_server()->get_leader_committed_log_idx();
+    int64_t const leader_committed_lsn = raft_server()->get_leader_committed_log_idx();
     int64_t const my_log_idx = raft_server()->get_last_log_idx();
-    auto diff = leader_commited_lsn - my_log_idx;
+    auto diff = leader_committed_lsn - my_log_idx;
     bool resync_mode = (diff > HS_DYNAMIC_CONFIG(consensus.resync_log_idx_threshold));
     if (resync_mode) {
-        RD_LOGD(NO_TRACE_ID, "Raft Channel: Resync mode, leader_commited_lsn={}, my_log_idx={}, diff={}",
-                leader_commited_lsn, my_log_idx, diff);
+        RD_LOGD(NO_TRACE_ID, "Raft Channel: Resync mode, leader_committed_lsn={}, my_log_idx={}, diff={}",
+                leader_committed_lsn, my_log_idx, diff);
     }
     return resync_mode;
 }

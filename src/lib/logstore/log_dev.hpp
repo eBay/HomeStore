@@ -253,7 +253,7 @@ public:
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
     bool add_record(log_record& record, const int64_t log_idx);
-    bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
+    bool can_accommodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
 
     const iovec_array& finish(logdev_id_t logdev_id, const crc32_t prev_crc);
     crc32_t compute_crc();

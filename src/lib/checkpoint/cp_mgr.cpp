@@ -423,9 +423,9 @@ CP* CPGuard::get() {
 CPWatchdog::CPWatchdog(CPManager* cp_mgr) :
         m_cp{nullptr}, m_cp_mgr{cp_mgr}, m_timer_sec{HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec)} {
     LOGINFO("CP watchdog timer setting to : {} seconds", m_timer_sec);
-    m_timer_hdl =
-        iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::reactor_regex::all_user,
-                                        [this](void* cookie) { cp_watchdog_timer(); });
+    m_timer_hdl = iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr,
+                                                  iomgr::reactor_regex::random_worker,
+                                                  [this](void* cookie) { cp_watchdog_timer(); });
 }
 
 void CPWatchdog::reset_cp() {
