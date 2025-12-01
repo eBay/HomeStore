@@ -185,8 +185,7 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     uint32_t remain_size = buf.size() - sizeof(repl_journal_entry);
     HS_REL_ASSERT_EQ(entry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                      "Mismatched version of journal entry found");
-    // HS_LOG(DEBUG, solorepl, "SoloReplDev found journal entry at lsn={}", lsn);
-    LOGINFO("SoloReplDev log replay found journal entry at lsn={}", lsn);
+    HS_LOG(DEBUG, solorepl, "SoloReplDev found journal entry at lsn={}", lsn);
 
     uint8_t const* raw_ptr = r_cast< uint8_t const* >(entry) + sizeof(repl_journal_entry);
     sisl::blob header{raw_ptr, entry->user_header_size};
