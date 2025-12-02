@@ -174,7 +174,9 @@ void SoloReplDev::async_write_journal(const std::vector< MultiBlkId >& blkids, s
 void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto cur_lsn = m_commit_upto.load();
 
-    auto force_replay = SISL_OPTIONS["solo_force_replay"].as< bool >();
+    bool force_replay = false;
+    if (SISL_OPTIONS.count("solo_force_replay")) { force_replay = SISL_OPTIONS["solo_force_replay"].as< bool >(); }
+
     if (cur_lsn >= lsn and !force_replay) {
         // Already committed
         LOGINFO("SoloReplDev skipping already committed log_entry lsn={}, m_commit_upto at lsn={}", lsn, cur_lsn);
