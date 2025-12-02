@@ -324,6 +324,11 @@ void HomeStore::shutdown() {
     LOGINFO("Homestore shutdown is started");
 
     m_resource_mgr->stop();
+    bool is_solo = false;
+    if (hs()->has_repl_data_service()) {
+        auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
+        is_solo = repl_svc.get_impl_type() == repl_impl_type::solo;
+    }
 
     // 1 stop all the services, after which all the upper layer api call are rejected and there is not on-going request.
     // Note that, after stopping, all the service are alive.
@@ -340,7 +345,11 @@ void HomeStore::shutdown() {
     // 2 call cp_manager shutdown, which will which trigger cp flush to make sure all the in-memory data of all the
     // services are flushed to disk. since all the upper layer api call are rejected and there is not on-going request,
     // so after cp flush is done, we can guarantee all the necessary data are persisted to disk.
-    m_cp_mgr->shutdown();
+    //
+    // For varsize bitmap allocator (which is used by solo repl dev), the free blks are only made persistent on the cp
+    // after next, so we need to make sure we do extra cp to have the diskbitmap persisted on disk to avoid log reply on
+    // a graceful shutdown;;
+    m_cp_mgr->shutdown(is_solo /*require_extra_cp*/);
     m_cp_mgr.reset();
 
     // 3 call reset/shutdown to clear all the services and after that all the services are dead, excluding metasevice
