@@ -55,28 +55,55 @@ def parse_pg_shard_id(line):
 
     return None
 
+def parse_found_at_bid(line):
+    """Extract the 'found at' bid from the log line (e.g., 'found at blk#229376@c2')."""
+    match = re.search(r'found at (?:blkid=)?blk#(\d+)@c(\d+)', line)
+    if match:
+        blk_num, chunk = match.groups()
+        return f"blk#={blk_num} count=1 chunk={chunk}"
+    return None
+
 def parse_chunk_entries(log_file, target_ssb_bid):
     """Parse chunk traversal entries and find SSB matching the target."""
     blocks = {}
+    inconsistent_blocks = []
     ssb_bid = None
 
     with open(log_file, 'r') as f:
         for line in f:
             # Find SSB - look for "[SSB] found at blkid=" matching target
-            if '[SSB] found at blkid=' in line:
-                # SSB info is all in one line
+            if '[SSB] found at blkid=' in line or '[SSB] found at blk#' in line:
+                # Extract the found_at_bid from the log line
+                found_at_bid = parse_found_at_bid(line)
                 self_bid = parse_bid(line, 'self_bid')
-                if self_bid and self_bid == target_ssb_bid:
-                    ssb_bid = self_bid
-                    next_bid = parse_bid(line, 'next_bid')
-                    prev_bid = parse_bid(line, 'prev_bid')
-                    blocks[self_bid] = MetaBlk(self_bid, next_bid, prev_bid, 'SSB', line.strip())
+
+                # Check consistency
+                if found_at_bid and self_bid:
+                    if found_at_bid != self_bid:
+                        inconsistent_blocks.append((line.strip(), found_at_bid, self_bid))
+                        continue
+
+                    if self_bid == target_ssb_bid:
+                        ssb_bid = self_bid
+                        next_bid = parse_bid(line, 'next_bid')
+                        prev_bid = parse_bid(line, 'prev_bid')
+                        blocks[self_bid] = MetaBlk(self_bid, next_bid, prev_bid, 'SSB', line.strip())
                 continue
 
-            # Parse MetaBlk entries
-            if '[MetaBlk] found' in line:
+            # Parse MetaBlk entries - new format: "[MetaBlk] found at blk#X@cY"
+            if '[MetaBlk] found at' in line:
+                # Extract the found_at_bid from the log line
+                found_at_bid = parse_found_at_bid(line)
                 self_bid = parse_bid(line, 'self_bid')
-                if self_bid:
+
+                # Check consistency: self_bid should match found_at_bid
+                if found_at_bid and self_bid:
+                    if found_at_bid != self_bid:
+                        # Inconsistent block - self_bid doesn't match the location where it was found
+                        inconsistent_blocks.append((line.strip(), found_at_bid, self_bid))
+                        continue
+
+                    # Consistent block - add it
                     next_bid = parse_bid(line, 'next_bid')
                     prev_bid = parse_bid(line, 'prev_bid')
                     type_name = parse_type(line)
@@ -100,7 +127,7 @@ def parse_chunk_entries(log_file, target_ssb_bid):
                         pg_shard_id = parse_pg_shard_id(line)
                         blocks[self_bid].pg_shard_id = pg_shard_id
 
-    return blocks, ssb_bid
+    return blocks, ssb_bid, inconsistent_blocks
 
 
 def parse_chain_entries(log_file):
@@ -276,6 +303,32 @@ def print_orphaned(blocks, orphaned_bids, title):
 
     print("\n" + "=" * 140 + "\n")
 
+def print_inconsistent_blocks(inconsistent_blocks):
+    """Print blocks where self_bid doesn't match the location where they were found."""
+    if not inconsistent_blocks:
+        return
+
+    print("\n" + "=" * 140)
+    print(f"INCONSISTENT BLOCKS ({len(inconsistent_blocks)} blocks)")
+    print("=" * 140)
+    print("These blocks have self_bid that doesn't match the location where they were found.")
+    print("This indicates corrupted or invalid metadata.")
+    print("-" * 140)
+    print(f"{'ID':<5} {'Found At':<20} {'Self BID':<20} {'Type':<25}")
+    print("-" * 140)
+
+    for idx, (line, found_at_bid, self_bid) in enumerate(inconsistent_blocks):
+        # Extract type from line
+        type_match = re.search(r'type:\s*(\w+)', line)
+        type_name = type_match.group(1) if type_match else 'unknown'
+
+        found_at_short = format_bid(found_at_bid)
+        self_short = format_bid(self_bid)
+
+        print(f"{idx:<5} {found_at_short:<20} {self_short:<20} {type_name:<25}")
+
+    print("\n" + "=" * 140 + "\n")
+
 def compare_chains(chain1, chain2):
     """Compare two chains and report differences."""
     print("\n" + "=" * 100)
@@ -371,8 +424,9 @@ def main():
 
     # Parse chunk entries using the SSB from chain
     print(f"Parsing chunk traversal entries using SSB from chain: {chain_ssb}...")
-    chunk_blocks, chunk_ssb = parse_chunk_entries(chunk_log_file, chain_ssb)
+    chunk_blocks, chunk_ssb, inconsistent_blocks = parse_chunk_entries(chunk_log_file, chain_ssb)
     print(f"  Found {len(chunk_blocks)} blocks")
+    print(f"  Found {len(inconsistent_blocks)} inconsistent blocks")
     print(f"  SSB start: {chunk_ssb}")
     print()
 
@@ -405,6 +459,9 @@ def main():
     if orphaned1:
         print_orphaned(chunk_blocks, orphaned1, f"ORPHANED BLOCKS IN CHUNK TRAVERSAL ({len(orphaned1)} blocks)")
 
+    # Print inconsistent blocks
+    print_inconsistent_blocks(inconsistent_blocks)
+
     # Compare chains
     compare_chains(chain1, chain2)
 
@@ -416,9 +473,10 @@ def main():
     chain2_count = len([b for b in chain2 if isinstance(b, MetaBlk)])
 
     print(f"\nChunk traversal:")
-    print(f"  Blocks in chain: {chain1_count}")
-    print(f"  Orphaned blocks: {len(orphaned1)}")
-    print(f"  Total blocks:    {chain1_count + len(orphaned1)}")
+    print(f"  Blocks in chain:      {chain1_count}")
+    print(f"  Orphaned blocks:      {len(orphaned1)}")
+    print(f"  Inconsistent blocks:  {len(inconsistent_blocks)}")
+    print(f"  Total blocks:         {chain1_count + len(orphaned1)}")
 
     print(f"\nChain traversal:")
     print(f"  Blocks in chain: {chain2_count}")

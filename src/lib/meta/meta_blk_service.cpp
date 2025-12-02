@@ -385,14 +385,16 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
                 case META_BLK_SB_MAGIC: {
                     ssb_cnt++;
                     auto* ssb = r_cast< meta_blk_sb* >(blk_ptr);
-                    HS_LOG(INFO, metablk, "[SSB] found at blkid=[{}], blk={}", ssb->bid.to_string(), ssb->to_string());
+                    HS_LOG(INFO, metablk, "[SSB] found at blk#{}@c{}, blkid=[{}], blk={}", global_blk_num,
+                           chunk->chunk_id(), ssb->bid.to_string(), ssb->to_string());
                     valid_cnt++;
                     break;
                 }
                 case META_BLK_MAGIC: {
                     meta_blk_cnt++;
                     auto* mblk = r_cast< meta_blk* >(blk_ptr);
-                    HS_LOG(INFO, metablk, "[MetaBlk] found {}", mblk->to_string());
+                    HS_LOG(INFO, metablk, "[MetaBlk] found at blk#{}@c{} blk_content=[{}]", global_blk_num,
+                           chunk->chunk_id(), mblk->to_string());
 
                     // Check if this is a PGManager meta block
                     if (std::string(mblk->hdr.h.type) == "PGManager") {
@@ -419,7 +421,8 @@ void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chu
                 case META_BLK_OVF_MAGIC: {
                     ovf_blk_cnt++;
                     auto* ovf_blk = r_cast< meta_blk_ovf_hdr* >(blk_ptr);
-                    HS_LOG(INFO, metablk, "[OvfBlk] found {}", ovf_blk->to_string());
+                    HS_LOG(INFO, metablk, "[OvfBlk] found at blk#{}@c{} {}", global_blk_num, chunk->chunk_id(),
+                           ovf_blk->to_string());
                     valid_cnt++;
                     break;
                 }
