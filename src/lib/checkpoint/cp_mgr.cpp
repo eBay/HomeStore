@@ -39,8 +39,10 @@ CPManager::CPManager() :
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
 
-    resource_mgr().register_dirty_buf_exceed_cb(
-        [this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) { this->trigger_cp_flush(false /* force */); });
+    resource_mgr().register_dirty_buf_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
+        LOGINFO("Dirty buffer exceeded count {} critical {}", dirty_buf_count, critical);
+        this->trigger_cp_flush(false /* force */);
+    });
 
     start_timer_thread();
     start_cp_thread();

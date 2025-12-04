@@ -18,7 +18,7 @@ SoloReplDev::SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_e
     auto const gid = m_rd_sb->group_id;
     if (load_existing) {
         m_logdev_id = m_rd_sb->logdev_id;
-        logstore_service().open_logdev(m_rd_sb->logdev_id, flush_mode_t::TIMER, gid);
+        logstore_service().open_logdev(m_rd_sb->logdev_id, flush_mode_t::TIMER | flush_mode_t::INLINE, gid);
         logstore_service()
             .open_log_store(m_rd_sb->logdev_id, m_rd_sb->logstore_id, true /* append_mode */)
             .thenValue([this](auto log_store) {
@@ -29,7 +29,7 @@ SoloReplDev::SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_e
             });
         m_commit_upto = m_rd_sb->durable_commit_lsn;
     } else {
-        m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::TIMER, gid);
+        m_logdev_id = logstore_service().create_new_logdev(flush_mode_t::TIMER | flush_mode_t::INLINE, gid);
         m_data_journal = logstore_service().create_new_log_store(m_logdev_id, true /* append_mode */);
         m_rd_sb->logstore_id = m_data_journal->get_store_id();
         m_rd_sb->logdev_id = m_logdev_id;
