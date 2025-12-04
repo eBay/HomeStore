@@ -2013,6 +2013,14 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
                 entries.size(), raft_req->get_last_log_term(), start_lsn, start_lsn + entries.size() - 1,
                 m_commit_upto_lsn.load(), raft_req->get_commit_idx());
 
+        if (need_skip_processing(start_lsn)) {
+            RD_LOGI(NO_TRACE_ID,
+                    "Raft channel: there are logs expected to be handled by snapshot, skip handle this batch, "
+                    "term {}, lsn {} ~ {} ",
+                    raft_req->get_last_log_term(), start_lsn, start_lsn + entries.size() - 1);
+            return nuraft::cb_func::ReturnCode::ReturnNull;
+        }
+
         auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
         auto last_commit_lsn = uint64_cast(get_last_commit_lsn());
         for (unsigned long i = 0; i < entries.size(); i++) {
