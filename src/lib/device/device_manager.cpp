@@ -115,7 +115,7 @@ void DeviceManager::format_devices() {
     // Get common iomgr_attributes
     for (auto& dinfo : m_dev_infos) {
         format_single_device(dinfo);
-    } 
+    }
 
     // Verify the first blocks to see if the devs are unique
     HS_REL_ASSERT(verify_unique_devs(), "Found duplicate physical devices in the system");
@@ -163,7 +163,9 @@ bool DeviceManager::verify_unique_devs() const {
     for (auto& pdev : m_all_pdevs) {
         if (!pdev) { continue; }
         auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
-        if (auto err = pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset()); err) {
+        if (auto err =
+                pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset());
+            err) {
             LOGERROR("Failed to read first block from device={}, error={}", pdev->get_devname(), err.message());
             ret = false;
             continue;
@@ -704,7 +706,10 @@ uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::d
     pinfo.max_pdev_chunks = hs_super_blk::max_chunks_in_pdev(dinfo);
 
     auto sb_size = hs_super_blk::total_size(dinfo);
-    pinfo.data_offset = hs_super_blk::first_block_offset() + sb_size;
+    // Data offset is the data start offset of a pdev. First chunk's is created at data start
+    // offset and remainings chunks are created contiguously one after the other.
+    // Align the data start offset so that chunk start is also aligned to physical page size.
+    pinfo.data_offset = sisl::round_up(hs_super_blk::first_block_offset() + sb_size, attr.phys_page_size);
     pinfo.size = dinfo.dev_size - pinfo.data_offset - (hdd ? sb_size : 0);
     pinfo.dev_attr = attr;
     pinfo.system_uuid = uuid;

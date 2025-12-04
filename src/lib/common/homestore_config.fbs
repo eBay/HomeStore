@@ -107,7 +107,7 @@ table LogStore {
     try_flush_iteration: uint64 = 10240(hotswap);
 
     // Logdev flushes in multiples of this size, setting to 0 will make it use default device optimal size
-    flush_size_multiple_logdev: uint64 = 512;
+    flush_size_multiple_logdev: uint64 = 0;
 
     // Logdev will flush the logs only in a dedicated thread. Turn this on, if flush IO doesn't want to
     // intervene with data IO path.
@@ -165,7 +165,7 @@ table Generic {
 
 table ResourceLimits {
     /* it is going to use 2 times of this space because of two concurrent cps */
-    dirty_buf_percent: uint32 = 1 (hotswap);
+    dirty_buf_percent: uint32 = 10 (hotswap);
 
     /* it is going to use 2 times of this space because of two concurrent cps */
     free_blk_cnt: uint32 = 10000000 (hotswap);
@@ -190,7 +190,7 @@ table ResourceLimits {
     /* 0 means HomeStore doesn't reserve anything and let nuraft controlls the truncation */
     /* default reserve 1 million logs */
     raft_logstore_reserve_threshold: uint32 = 1000000 (hotswap);
-    
+
     /* resource audit timer in ms */
     resource_audit_timer_ms: uint32 = 120000;
 
@@ -262,10 +262,10 @@ table Consensus {
     // Minimum log gap a replica has to be from leader before joining the replica set.
     // 0 indicates the new member will join in cluster immediately.
     min_log_gap_to_join: int32 = 0;
-    
+
     // amount of time in millis to wait on data write before fetch data from remote;
     wait_data_write_timer_ms: uint64 = 1500 (hotswap);
-    
+
     // Leadership expiry (=0 indicates 20 times heartbeat period), set -1 to never expire
     leadership_expiry_ms: int32 = 0;
 
