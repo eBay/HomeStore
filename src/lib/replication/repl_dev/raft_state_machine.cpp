@@ -365,14 +365,12 @@ int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx,
         return 0;
     }
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
-    auto snp_data = std::make_shared< snapshot_obj >();
-    snp_data->user_ctx = user_ctx;
+    auto snp_data = std::make_shared< snapshot_obj >(user_ctx);
     snp_data->offset = obj_id;
     snp_data->is_last_obj = is_last_obj;
 
-    // Listener will read the snapshot data and we pass through the same.
+    // Listener will read the snapshot data and modify user_ctx through the reference
     int ret = m_rd.m_listener->read_snapshot_obj(snp_ctx, snp_data);
-    user_ctx = snp_data->user_ctx; // Have to pass the user_ctx to NuRaft even if ret<0 to get it freed later
     if (ret < 0) return ret;
 
     is_last_obj = snp_data->is_last_obj;
@@ -395,7 +393,8 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
         return;
     }
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
-    auto snp_data = std::make_shared< snapshot_obj >();
+    void* dummy_ctx = nullptr;
+    auto snp_data = std::make_shared< snapshot_obj >(dummy_ctx);
     snp_data->offset = obj_id;
     snp_data->is_first_obj = is_first_obj;
     snp_data->is_last_obj = is_last_obj;
