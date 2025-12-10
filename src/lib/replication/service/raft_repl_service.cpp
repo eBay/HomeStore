@@ -610,6 +610,18 @@ ReplServiceError RaftReplService::destroy_repl_dev(group_id_t group_id, uint64_t
     return ReplServiceError::OK;
 }
 
+void RaftReplService::trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) {
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        LOGWARNMOD(replication, "ReplDev group_id={} not found while scheduling snapshot creation",
+                   boost::uuids::to_string(group_id));
+        return;
+    }
+
+    std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->trigger_snapshot_creation(compact_lsn, wait_for_commit);
+}
+
 ////////////////////// Reaper Thread related //////////////////////////////////
 void RaftReplService::start_repl_service_timers() {
     // we need to explictly cancel the timers before we stop the repl_devs, but we cannot cancel a thread timer

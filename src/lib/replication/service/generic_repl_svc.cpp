@@ -233,6 +233,8 @@ ReplServiceError SoloReplService::destroy_repl_dev(group_id_t group_id, uint64_t
     return remove_repl_dev(group_id).get();
 }
 
+void SoloReplService::trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) {}
+
 std::unique_ptr< CPContext > SoloReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) {
     return std::make_unique< CPContext >(new_cp);
 }

@@ -46,8 +46,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
             });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
-        m_last_flushed_commit_lsn = m_commit_upto_lsn;
+        m_last_flushed_cp_lsn = m_rd_sb->checkpoint_lsn;
         m_compact_lsn = m_rd_sb->compact_lsn;
+        m_last_flushed_compact_lsn = m_compact_lsn;
 
         m_rdev_name = m_rd_sb->rdev_name;
         // Its ok not to do compare exchange, because loading is always single threaded as of now
@@ -816,6 +817,54 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
 
     auto ret_val{true};
     if (when_done) { when_done(ret_val, null_except); }
+}
+
+void RaftReplDev::trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) {
+    // Step 1. Update truncation boundary if compact_lsn is specified
+    if (compact_lsn >= 0) {
+        // Step 1.1 Wait for commit upto compact_lsn if needed
+        if (wait_for_commit) {
+            RD_LOGI(NO_TRACE_ID, "Waiting for commit upto compact_lsn={}, current_commit_lsn={}", compact_lsn,
+                    m_commit_upto_lsn.load());
+            while (compact_lsn > m_commit_upto_lsn.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        // Step 1.2 trigger cp_flush to make sure all changes are flushed to disk before updating truncation boundary
+        hs()->cp_mgr().trigger_cp_flush(true /*force*/).get();
+        RD_LOGI(NO_TRACE_ID, "cp_flush completed before updating truncation boundary to lsn={}", compact_lsn);
+        // Step 1.3 Update truncation boundary
+        RD_LOGI(NO_TRACE_ID, "Updating truncation boundary to lsn={}, current_truncation_boundary={}", compact_lsn,
+                m_truncation_upper_limit.load());
+        update_truncation_boundary(compact_lsn);
+    }
+
+    // Step 2. Create snapshot manually
+    auto result = raft_server()->create_snapshot();
+    if (result == 0) {
+        RD_LOGE(NO_TRACE_ID, "Failed to create snapshot - another snapshot may be in progress");
+        return;
+    }
+    RD_LOGI(NO_TRACE_ID, "Successfully created snapshot, result log_idx={}", result);
+
+    // Step 3. Make sure logs are compacted upto compact_lsn after snapshot created
+    // Since we want to compact logs upto compact_lsn after the snapshot created, here we check the compact_lsn and
+    // trigger a compact manually if needed (since logs will only to truncated upto min(m_truncation_upper_limit,
+    // snp_idx-snp_distance), there is a that real_compact_lsn < compact_lsn after snapshot created).
+    // Note that manual compact may cause concurrency issue with the automatic log compaction in raft server. Currently,
+    // it doesn't matter because this API is used in op scenario when members syncup and no new write are handled. If we
+    // want to use it in more phase, we need to add lock to avoid concurrency issue.
+    if (compact_lsn > 0 && m_compact_lsn.load() < compact_lsn) {
+        RD_LOGI(NO_TRACE_ID, "Manually compacting logs upto lsn={} after snapshot, current_compact_lsn={}", compact_lsn,
+                m_compact_lsn.load());
+        m_data_journal->compact(compact_lsn);
+        RD_LOGI(NO_TRACE_ID, "Compacted logs upto lsn={} after snapshot", compact_lsn);
+    }
+
+    // Step 4. trigger cp_flush to make sure all changes are flushed to disk after snapshot creation and log compaction
+    hs()->cp_mgr().trigger_cp_flush(true /*force*/).get();
+    RD_LOGI(NO_TRACE_ID, "cp_flush completed after snapshot creation and log compaction");
+    RD_LOGI(NO_TRACE_ID, "snapshot creation and compaction completed");
 }
 
 void RaftReplDev::propose_truncate_boundary() {
@@ -1591,7 +1640,7 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
         complete_replace_member(rreq);
         break;
     case journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY:
-        update_truncation_boundary(rreq);
+        update_truncation_boundary(r_cast< const truncate_ctx* >(rreq->header().cbytes())->truncation_upper_limit);
         break;
     case journal_type_t::HS_CTRL_REMOVE_MEMBER:
         remove_member(rreq);
@@ -1755,7 +1804,7 @@ void RaftReplDev::clean_replace_member_task(repl_req_ptr_t rreq) {
     RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
 }
 
-void RaftReplDev::update_truncation_boundary(repl_req_ptr_t rreq) {
+void RaftReplDev::update_truncation_boundary(repl_lsn_t truncation_upper_limit) {
     repl_lsn_t cur_checkpoint_lsn = 0;
     {
         std::unique_lock lg{m_sb_mtx};
@@ -1764,8 +1813,7 @@ void RaftReplDev::update_truncation_boundary(repl_req_ptr_t rreq) {
     // expected truncation_upper_limit should not larger than the current checkpoint_lsn, this is to ensure that
     // when a crash happens before index flushed to disk, all the logs larger than checkpoint_lsn are still available
     // to replay.
-    auto ctx = r_cast< const truncate_ctx* >(rreq->header().cbytes());
-    auto exp_truncation_upper_limit = std::min(ctx->truncation_upper_limit, cur_checkpoint_lsn);
+    auto exp_truncation_upper_limit = std::min(truncation_upper_limit, cur_checkpoint_lsn);
     auto cur_truncation_upper_limit = m_truncation_upper_limit.load();
     // exp_truncation_upper_limit might be less or equal to cur_truncation_upper_limit after Baseline Re-sync,
     // we should skip update to ensure the truncation_upper_limit is always increasing.
@@ -2389,8 +2437,9 @@ void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     auto const clsn = ctx->compacted_to_lsn;
     auto const dsn = ctx->last_applied_dsn;
 
-    if (lsn == m_last_flushed_commit_lsn) {
-        // Not dirtied since last flush ignore
+    // compact can be triggered manually while no new logs are committed, so both lsn and clsn need to be checked
+    if (lsn == m_last_flushed_cp_lsn && clsn == m_last_flushed_compact_lsn) {
+        // Not dirtied since last cp flush ignore
         return;
     }
 
@@ -2402,7 +2451,8 @@ void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = dsn;
     m_rd_sb.write();
-    m_last_flushed_commit_lsn = lsn;
+    m_last_flushed_cp_lsn = lsn;
+    m_last_flushed_compact_lsn = clsn;
     RD_LOGD(NO_TRACE_ID, "cp flush in raft repl dev, lsn={}, clsn={}, next_dsn={}, cp string:{}", lsn, clsn,
             m_next_dsn.load(), cp->to_string());
 }
