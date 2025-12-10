@@ -106,6 +106,8 @@ protected:
                                                   uint64_t trace_id = 0) const override;
     ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) override;
 
+    void trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) override;
+
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
     void start_repl_service_timers();

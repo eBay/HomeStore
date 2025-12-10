@@ -110,6 +110,14 @@ public:
     /// @param group_id Group where the replace member happens
     virtual ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) = 0;
 
+    /// @brief Trigger a snapshot creation manually for a given group id
+    /// @param group_id Group id for which snapshot creation is requested
+    /// @param compact_lsn LSN upto which the snapshot expect to compact, -1 means no compaction upper needed
+    /// @param wait_for_commit default is true, means it will wait until the local committed lsn reach the compact_lsn,
+    /// if set to false, the snapshot and compaction will be triggered based on the latest committed lsn
+    virtual void trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn = -1,
+                                           bool wait_for_commit = true) = 0;
+
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in
     /// @return ReplDev is opened or ReplServiceError::SERVER_NOT_FOUND if it doesn't exist

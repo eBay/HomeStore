@@ -112,6 +112,7 @@ public:
                                                   const std::vector< replica_member_info >& others,
                                                   uint64_t trace_id = 0) const override;
     ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) override;
+    void trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) override;
 };
 
 class SoloReplServiceCPHandler : public CPCallbacks {

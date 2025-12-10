@@ -203,7 +203,8 @@ private:
 
     std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
 
-    repl_lsn_t m_last_flushed_commit_lsn{0}; // LSN upto which it was flushed to persistent store
+    repl_lsn_t m_last_flushed_cp_lsn{0};      // LSN upto which it was flushed to persistent store at the checkpoint
+    repl_lsn_t m_last_flushed_compact_lsn{0}; // LSN upto which it was compacted at the checkpoint
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
@@ -373,6 +374,24 @@ public:
      */
     void on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done);
 
+    /**
+     * \brief  Manually create a snapshot, the snapshot will be created directly based on the latest committed log
+     * index.
+     *
+     * This function is called when we want to create a snapshot and compact the log store manually.
+     * it provides an optional compact lsn for the log store, which is useful in scenarios like
+     * the truncation upper limit is reset due to restart (it is a in-memory param) and the previous auto background
+     * compact was skipped because of the truncation upper limit is zero.
+     *
+     * \param compact_lsn The specific truncation upper limit for the log store.
+     * \param wait_for_commit Whether to wait for the committed lsn to reach the compact_lsn before creating the
+     * snapshot.
+     *
+     * \note This function will trigger cp_flush before creating snapshot and after compaction to make sure the logs was
+     * compacted and change has been persisted, which might take some time.
+     */
+    void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) override;
+
 #if 0
     /**
      * Truncates the replication log by providing a specified number of reserved entries.
@@ -475,7 +494,7 @@ private:
     void create_snp_resync_data(raft_buf_ptr_t& data_out);
     bool save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s);
 
-    void update_truncation_boundary(repl_req_ptr_t rreq);
+    void update_truncation_boundary(repl_lsn_t truncation_upper_limit);
     void propose_truncate_boundary();
 
     void report_blk_metrics_if_needed(repl_req_ptr_t rreq);

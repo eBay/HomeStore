@@ -621,6 +621,9 @@ public:
     // clear reqs that has allocated blks on the given chunk.
     virtual void clear_chunk_req(chunk_num_t chunk_id) = 0;
 
+    // create a snapshot manually and try to compact logs upto compact_lsn
+    virtual void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) = 0;
+
 protected:
     shared< ReplDevListener > m_listener;
 
