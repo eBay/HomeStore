@@ -139,6 +139,7 @@ void LogDev::stop() {
         if (!get_pending_request_num()) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
+
     {
         std::unique_lock lg = flush_guard();
         // waiting under lock to make sure no new flush is started
@@ -582,26 +583,20 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
     // since we support out-of-order lsn write, so no need to guarantee the order of logstore write completion
     for (auto const& [idx, req] : req_map) {
-        m_pending_callback++;
         auto callback_lambda = [this, dev_offset, idx, req]() {
             auto ld_key = logdev_key{idx, dev_offset};
             auto comp_cb = req->log_store->get_comp_cb();
             (req->cb) ? req->cb(req, ld_key) : comp_cb(req, ld_key);
-            m_pending_callback--;
         };
 
-        // Only server side replication which uses raft runs the callback on a random worker.
-        bool server_side_replication = true;
+        // if we do not have repl_service, we run the callback in a random worker for the case of log store UT, where
+        // the callback will schedule a new write and try to acquire the flush lock again causing a deadlock
         if (hs()->has_repl_data_service()) {
-            auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
-            server_side_replication = repl_svc.get_impl_type() == repl_impl_type::server_side;
-        }
-
-        if (server_side_replication) {
+            // if we have replication service, we do sync callback
+            callback_lambda();
+        } else {
             iomanager.run_on_forget(iomgr::reactor_regex::random_worker, /* iomgr::fiber_regex::syncio_only, */
                                     [this, callback_lambda]() { callback_lambda(); });
-        } else {
-            callback_lambda();
         }
     }
 }

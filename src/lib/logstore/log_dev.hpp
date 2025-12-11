@@ -810,8 +810,11 @@ private:
     // callback of the append_async we schedule another flush.), so we need the lock to be locked for multitimes in the
     // same thread.
     iomgr::FiberManagerLib::mutex m_flush_mtx;
-    std::atomic_uint64_t m_pending_callback{0};
     folly::SharedMutexWritePriority m_stream_tracker_mtx;
+
+    // Note that, this is used for tracking pending callbacks to avoid stopping logdev before all callbacks are done
+    // if any one want to use async cbs, please make sure to incr/decr this counter properly
+    std::atomic_uint64_t m_pending_callback{0};
 
     // This is used to ensure that the logdev meta is created/loaded
     // to avoid other threads accessing it before it is ready (e.g., resource_mgr's device truncate thread)
