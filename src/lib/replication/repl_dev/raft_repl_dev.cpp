@@ -177,9 +177,7 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}", task_id);
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
-    if (m_my_repl_id != get_leader_id()) {
-        return make_async_error<>(ReplServiceError::NOT_LEADER);
-    }
+    if (m_my_repl_id != get_leader_id()) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
     // Check if leader itself is requested to move out.
     if (m_my_repl_id == member_out.id) {
         // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
@@ -405,9 +403,7 @@ ReplaceMemberStatus RaftReplDev::get_replace_member_status(std::string& task_id,
     }
     init_req_counter counter(pending_request_num);
 
-    if (!m_repl_svc_ctx || !is_leader()) {
-        return ReplaceMemberStatus::NOT_LEADER;
-    }
+    if (!m_repl_svc_ctx || !is_leader()) { return ReplaceMemberStatus::NOT_LEADER; }
 
     auto peers = get_replication_status();
     peer_info out_peer_info;
@@ -1039,6 +1035,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
                 status);
         if (status == ReplServiceError::NO_SPACE_LEFT && !is_data_channel && !rreq->is_proposer()) {
             RD_LOGD(rkey.traceID, "Repl_key=[{}] got no_space_left error on follower as lsn={}", rkey.to_string(), lsn);
+            m_latch_lsn.store(lsn);
             m_listener->on_no_space_left(lsn, user_header);
         } else {
             RD_LOGD(
@@ -1463,6 +1460,8 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
             RD_LOGD(rreq->traceID(), "Releasing blkid={} freed successfully", blkid.to_string());
         });
     }
+    // 4. reset latch lsn
+    reset_latch_lsn();
 }
 
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
@@ -1523,6 +1522,8 @@ void RaftReplDev::handle_config_rollback(const repl_lsn_t lsn, raft_cluster_conf
     // keep this variable in case it is needed later
     (void)conf;
     m_listener->on_config_rollback(lsn);
+    // reset latch lsn
+    reset_latch_lsn();
 }
 
 void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
@@ -1691,14 +1692,17 @@ AsyncReplResult<> RaftReplDev::become_leader() {
         return make_async_error<>(ReplServiceError::STOPPING);
     }
     init_req_counter counter(pending_request_num);
+    reset_latch_lsn();
 
-    return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this, counter = std::move(counter)](auto&& e) {
-        if (e.hasError()) {
-            RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
-            return make_async_error<>(RaftReplService::to_repl_error(e.error()));
-        }
-        return make_async_success<>();
-    });
+    return m_msg_mgr.become_leader(m_group_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) {
+            if (e.hasError()) {
+                RD_LOGE(NO_TRACE_ID, "Error in becoming leader: {}", e.error());
+                return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+            }
+            return make_async_success<>();
+        });
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx && m_repl_svc_ctx->is_raft_leader(); }
@@ -2007,6 +2011,39 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
                     raft_req->get_commit_idx());
             return ret;
         }
+
+        // there is a very corner case like following:
+        // T1: L1 is leader, push data to follower F1, F1 generate rreq1 and allocate blk for this data. let`s say the
+        // lsn of this data is lsn-100
+
+        // T2: leader switchs to L2, L2 send log to F1, F1 generate rreq2 and try to allocate blk but got
+        // no_space_left. then it will set the quiesce flag and waiting for the commit of lsn-99 (100 - 1).
+
+        // T3: leader switchs back to L1, L1 send log (lsn-100) to F1, when F1 tries to create rreq for lsn-100,  rreq1
+        // (which is created at T1) will be found since the rkey{server,term,dsn} is same as rreq1. so F1 will skip
+        // creating a new rreq. since the data for lsn-100 is already in written at T1, F1 start appending log entries
+        // to its log store, which will call logstore::append_log_entries and thus call localize_journal_entry_finish.
+
+        // T4: lsn-99 is committed at F1 and clear_chunk_req is called, so all the rreqs in F1 including rreq1 are
+        // cleared.
+
+        // T5: F1 call localize_journal_entry_finish, rreq1 is not found since it is cleared at T4, so F1 will try to
+        // create a new rreq for lsn-100. but now, F1 is in quiesce state, all the rreq creation will be rejected, so a
+        // nullptr will be returned. and cause RELEASE_ASSERT(rreq != nullptr) failure.
+
+        if (start_lsn + entries.size() - 1 >= (uint64_t)(m_latch_lsn.load())) {
+            // when we got no_space_left in log channel at follower, we set this latch_lsn, so if any lsn in this batch
+            // that is >= latch_lsn, the whole batch will be rejected.
+
+            // after we successfully handle no_space_left and call resume_accepting_reqs, rollback happens,
+            // become_leader, latch_lsn will be reset to max value.
+            RD_LOGW(
+                NO_TRACE_ID,
+                "Raft channel: Reject append entries on follower from leader due to latch_lsn {}, start_lsn {} ~ {}",
+                m_latch_lsn.load(), start_lsn, start_lsn + entries.size() - 1);
+            return nuraft::cb_func::ReturnCode::ReturnNull;
+        }
+
         RD_LOGT(NO_TRACE_ID,
                 "Raft channel: Received {} append entries on follower from leader, term {}, lsn {} ~ {} , my "
                 "committed lsn {} , leader committed lsn {}",
@@ -2486,7 +2523,13 @@ void RaftReplDev::quiesce_reqs() {
     }
 }
 
-void RaftReplDev::resume_accepting_reqs() { m_in_quience.store(false, std::memory_order_release); }
+void RaftReplDev::reset_latch_lsn() { m_latch_lsn.store(INT64_MAX); }
+
+void RaftReplDev::resume_accepting_reqs() {
+    m_in_quience.store(false, std::memory_order_release);
+    reset_latch_lsn();
+    RD_LOGD(NO_TRACE_ID, "exit quience state, resume accepting new requests");
+}
 
 void RaftReplDev::clear_chunk_req(chunk_num_t chunk_id) {
     RD_LOGD(NO_TRACE_ID,

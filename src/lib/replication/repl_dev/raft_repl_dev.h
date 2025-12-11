@@ -233,6 +233,8 @@ private:
     // pending create requests, including both raft and data channel
     std::atomic_uint64_t m_pending_init_req_num;
     std::atomic< bool > m_in_quience;
+    // we can only accept lsn that smaller than latch_lsn
+    std::atomic< int64_t > m_latch_lsn{INT64_MAX};
 
 public:
     friend class RaftStateMachine;
@@ -357,9 +359,9 @@ public:
 
     void become_leader_cb();
 
-    void become_follower_cb() { 
+    void become_follower_cb() {
         m_traffic_ready_lsn.store(0);
-        RD_LOGD(NO_TRACE_ID, "become_follower_cb called!"); 
+        RD_LOGD(NO_TRACE_ID, "become_follower_cb called!");
     }
 
     /// @brief This method is called when the data journal is compacted
@@ -428,11 +430,12 @@ public:
      */
     bool need_skip_processing(const repl_lsn_t lsn) { return lsn <= m_rd_sb->last_snapshot_lsn; }
 
-    void quiesce_reqs();
-    void resume_accepting_reqs();
+    void quiesce_reqs() override;
+    void resume_accepting_reqs() override;
 
     // clear reqs that has allocated blks on the given chunk.
     void clear_chunk_req(chunk_num_t chunk_id);
+    void reset_latch_lsn() override;
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////

@@ -99,13 +99,13 @@ protected:
 };
 
 struct snapshot_obj {
-    void *&user_ctx;
+    void*& user_ctx;
     uint64_t offset{0};
     sisl::io_blob_safe blob;
     bool is_first_obj{false};
     bool is_last_obj{false};
 
-    snapshot_obj(void *&ctx) : user_ctx(ctx) {}
+    snapshot_obj(void*& ctx) : user_ctx(ctx) {}
 };
 
 // HomeStore has some meta information to be transmitted during the baseline resync,
@@ -404,7 +404,7 @@ public:
     /// times on the leader till all the data is transferred to the follower. is_last_obj in
     /// snapshot_obj will be true once all the data has been trasnferred. After this the raft on
     /// the follower side can do the incremental resync.
-    virtual int read_snapshot_obj(shared<snapshot_context> context, shared<snapshot_obj> snp_obj) = 0;
+    virtual int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_obj) = 0;
 
     /// @brief Called on the follower when the leader sends the data during the baseline resyc.
     /// is_last_obj in in snapshot_obj will be true once all the data has been transfered.
@@ -591,6 +591,8 @@ public:
             m_listener.reset();
         }
     }
+
+    virtual void reset_latch_lsn() { return; }
 
     virtual shared< ReplDevListener > get_listener() { return m_listener; }
 
