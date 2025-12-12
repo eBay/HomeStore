@@ -313,6 +313,8 @@ public:
     ///////////////////////// Meta operations on vdev ////////////////////////
     void update_vdev_private(const sisl::blob& data);
 
+    void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb);
+
 private:
     uint64_t to_dev_offset(BlkId const& b, Chunk** chunk) const;
     bool is_chunk_available(cshared< Chunk >& chunk) const;
