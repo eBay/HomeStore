@@ -814,6 +814,81 @@ TEST_F(RaftReplDevTest, ReconcileLeader) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, NuraftStateTransition) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+    // Get the RaftReplDev instance
+    auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(dbs_[0]->repl_dev());
+    ASSERT_NE(repl_dev, nullptr);
+    LOGINFO("Step 0: Got RaftReplDev instance for group_id={}", repl_dev->group_id_str());
+
+    // Step 1: Manually set legacy "state" field (JSON object format) to simulate old version data
+    LOGINFO("Step 1: Setting legacy JSON object format state");
+    auto& js = *(repl_dev->m_raft_config_sb);
+    // Clear any existing nuraft_state to ensure we test legacy format
+    if (js.contains("nuraft_state")) { js.erase("nuraft_state"); }
+    // Set legacy state
+    js["state"] =
+        nlohmann::json{{"term", 100}, {"voted_for", 5}, {"election_timer_allowed", true}, {"catching_up", false}};
+    repl_dev->m_raft_config_sb.write();
+    LOGINFO("Step 1: Written legacy state - term=100, voted_for=5, election_timer_allowed=true, catching_up=false");
+
+    // Step 2: Read old state from legacy format
+    g_helper->sync_for_verify_start();
+    LOGINFO("Step 2: Reading state from legacy JSON object format");
+    auto old_state = repl_dev->read_state();
+    ASSERT_NE(old_state, nullptr);
+    ASSERT_EQ(old_state->get_term(), 100);
+    ASSERT_EQ(old_state->get_voted_for(), 5);
+    ASSERT_EQ(old_state->is_election_timer_allowed(), true);
+    ASSERT_EQ(old_state->is_catching_up(), false);
+    // receiving_snapshot should be false (not in legacy format)
+    ASSERT_EQ(old_state->is_receiving_snapshot(), false);
+    LOGINFO("Step 2: Successfully read legacy state - term={}, voted_for={}, election_timer_allowed={}, "
+            "catching_up={}, receiving_snapshot={}",
+            old_state->get_term(), old_state->get_voted_for(), old_state->is_election_timer_allowed(),
+            old_state->is_catching_up(), old_state->is_receiving_snapshot());
+
+    // Step 3: Update state and save in new binary format
+    g_helper->sync_for_test_start();
+    LOGINFO("Step 3: Updating state values and saving in binary format");
+    old_state->set_term(150);
+    old_state->set_voted_for(10);
+    old_state->allow_election_timer(false);
+    old_state->set_catching_up(true);
+    old_state->set_receiving_snapshot(true); // new field
+    LOGINFO("Step 3: Saving new state - term=150, voted_for=10, election_timer_allowed=false, "
+            "catching_up=true, receiving_snapshot=true");
+    repl_dev->save_state(*old_state);
+
+    // Step 4: Verify fields in JSON superblock
+    LOGINFO("Step 4: Verifying JSON superblock fields");
+    g_helper->sync_for_verify_start();
+    js = *(repl_dev->m_raft_config_sb);
+    ASSERT_TRUE(js.contains("nuraft_state"));
+    ASSERT_TRUE(js["nuraft_state"].is_array());
+    LOGINFO("Step 4: Confirmed 'nuraft_state' field exists and is array (size={} bytes)", js["nuraft_state"].size());
+
+    // Verify legacy "state" field is empty (not removed, but set to null/empty for rollback compatibility)
+    ASSERT_TRUE(js["state"].empty() || js["state"].is_null());
+    LOGINFO("Step 4: Confirmed legacy 'state' field is empty/null for rollback compatibility");
+
+    // Step 5: Read back and verify new state from binary format
+    LOGINFO("Step 5: Reading back state from binary format (nuraft_state field)");
+    auto new_state = repl_dev->read_state();
+    ASSERT_NE(new_state, nullptr);
+    ASSERT_EQ(new_state->get_term(), 150);
+    ASSERT_EQ(new_state->get_voted_for(), 10);
+    ASSERT_EQ(new_state->is_election_timer_allowed(), false);
+    ASSERT_EQ(new_state->is_catching_up(), true);
+    ASSERT_EQ(new_state->is_receiving_snapshot(), true);
+    LOGINFO("Step 5: Successfully read new state - term={}, voted_for={}, election_timer_allowed={}, "
+            "catching_up={}, receiving_snapshot={}",
+            new_state->get_term(), new_state->get_voted_for(), new_state->is_election_timer_allowed(),
+            new_state->is_catching_up(), new_state->is_receiving_snapshot());
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;

@@ -1904,31 +1904,64 @@ void RaftReplDev::save_config(const nuraft::cluster_config& config) {
 
 void RaftReplDev::save_state(const nuraft::srv_state& state) {
     std::unique_lock lg{m_config_mtx};
-    (*m_raft_config_sb)["state"] = nlohmann::json{{"term", state.get_term()},
-                                                  {"voted_for", state.get_voted_for()},
-                                                  {"election_timer_allowed", state.is_election_timer_allowed()},
-                                                  {"catching_up", state.is_catching_up()}};
+    // Use NuRaft's native binary serialization
+    auto buf = state.serialize();
+    std::vector< uint8_t > byte_array(static_cast< const uint8_t* >(buf->data_begin()),
+                                      static_cast< const uint8_t* >(buf->data_begin()) + buf->size());
+    (*m_raft_config_sb)["nuraft_state"] = byte_array;
+    // Clear legacy state field to ensure rollback version doesn't read old state
+    (*m_raft_config_sb)["state"] = nlohmann::json();
     m_raft_config_sb.write();
-    RD_LOGI(NO_TRACE_ID, "Saved state {}", (*m_raft_config_sb)["state"].dump());
+
+    RD_LOGI(NO_TRACE_ID,
+            "Saved state in binary format (size={} bytes): term={}, voted_for={}, "
+            "election_timer_allowed={}, catching_up={}, receiving_snapshot={}",
+            byte_array.size(), state.get_term(), state.get_voted_for(), state.is_election_timer_allowed(),
+            state.is_catching_up(), state.is_receiving_snapshot());
 }
 
 nuraft::ptr< nuraft::srv_state > RaftReplDev::read_state() {
     std::unique_lock lg{m_config_mtx};
     auto& js = *m_raft_config_sb;
     auto state = nuraft::cs_new< nuraft::srv_state >();
-    if (js["state"].empty()) {
-        js["state"] = nlohmann::json{{"term", state->get_term()},
-                                     {"voted_for", state->get_voted_for()},
-                                     {"election_timer_allowed", state->is_election_timer_allowed()},
-                                     {"catching_up", state->is_catching_up()}};
+
+    if (js["state"].empty() && js["nuraft_state"].empty()) {
+        RD_LOGI(NO_TRACE_ID, "No existing state found, using default state");
+        return state;
+    }
+
+    if (!js["nuraft_state"].empty()) {
+        // New binary format
+        try {
+            std::vector< uint8_t > byte_array = js["nuraft_state"];
+            auto buf = nuraft::buffer::alloc(byte_array.size());
+            std::memcpy(buf->data_begin(), byte_array.data(), byte_array.size());
+            buf->pos(0);
+            state = nuraft::srv_state::deserialize(*buf);
+            RD_LOGI(NO_TRACE_ID,
+                    "Loaded state in binary format (size={} bytes): term={}, voted_for={}, "
+                    "election_timer_allowed={}, catching_up={}, receiving_snapshot={}",
+                    byte_array.size(), state->get_term(), state->get_voted_for(), state->is_election_timer_allowed(),
+                    state->is_catching_up(), state->is_receiving_snapshot());
+        } catch (std::exception const& e) {
+            RD_LOGE(NO_TRACE_ID, "Failed to deserialize state in binary format: {}, using default state", e.what());
+        }
     } else {
+        // Legacy JSON object format
         try {
             state->set_term(uint64_cast(js["state"]["term"]));
             state->set_voted_for(static_cast< int >(js["state"]["voted_for"]));
             state->allow_election_timer(static_cast< bool >(js["state"]["election_timer_allowed"]));
             state->set_catching_up(static_cast< bool >(js["state"]["catching_up"]));
+            // Note: receiving_snapshot_ is NOT in legacy format, will default to false
+            RD_LOGW(NO_TRACE_ID,
+                    "Loaded state from legacy JSON object format: term={}, voted_for={}, election_timer_allowed={}, "
+                    "catching_up={}. "
+                    "Will be automatically migrated to binary format on next save.",
+                    state->get_term(), state->get_voted_for(), state->is_election_timer_allowed(),
+                    state->is_catching_up());
         } catch (std::out_of_range const&) {
-            LOGWARN("State data was not in the expected format [group_id={}]!", m_group_id)
+            RD_LOGE(NO_TRACE_ID, "State data in legacy JSON object format is corrupted, using default state");
         }
     }
     return state;
