@@ -41,6 +41,7 @@
 #include "common/homestore_utils.hpp"
 
 #define private public
+#define protected public
 #include "test_common/hs_repl_test_common.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
