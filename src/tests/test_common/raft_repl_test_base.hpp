@@ -199,7 +199,10 @@ public:
         LOGINFOMOD(replication, "[Replica={}] Received config rollback at lsn={}", g_helper->replica_num(), lsn);
     }
     void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {
-        LOGINFOMOD(replication, "[Replica={}] Received no_space_left at lsn={}", g_helper->replica_num(), lsn);
+        LOGINFOMOD(replication,
+                   "[Replica={}] Received no_space_left at lsn={}, reset latch lsn since we don`t really handle it.",
+                   g_helper->replica_num(), lsn);
+        repl_dev()->reset_latch_lsn();
     }
 
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
