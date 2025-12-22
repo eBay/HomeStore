@@ -201,6 +201,65 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     }
 }
 
+// TODO: change to tool file with well structure and tool related parameters
+bool HomeStore::start_tool(const hs_input_params& input, const std::string& scan_type,
+                           std::optional< uint16_t > debug_chunk_id, std::optional< blk_num_t > debug_blk_num) {
+    auto& hs_config = HomeStoreStaticConfig::instance();
+    hs_config.input = input;
+
+    if (input.devices.empty()) {
+        LOGERROR("No devices provided to start tool");
+        throw std::invalid_argument("null device list");
+    }
+
+    ///////////// Startup resource status and other manager outside core services /////////////////////////
+    sisl::ObjCounterRegistry::enable_metrics_reporting();
+    sisl::MallocMetrics::enable();
+
+    LOGINFO("HomeStore version: {}", version);
+    static std::once_flag flag1;
+    std::call_once(flag1, [this]() {
+        sisl::VersionMgr::addVersion(PACKAGE_NAME, version::Semver200_version(PACKAGE_VERSION));
+        m_periodic_logger =
+            sisl::logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
+        sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
+    });
+
+    HomeStoreDynamicConfig::init_settings_default();
+
+    LOGINFO("HS tool is loading with meta service", m_services.list());
+    m_meta_service = std::make_unique< MetaBlkService >();
+
+    m_dev_mgr = std::make_unique< DeviceManager >(input.devices, bind_this(HomeStore::create_vdev_cb_for_tool, 2));
+    if (m_dev_mgr->is_first_time_boot()) {
+        LOGERROR("HS tool requires existing homestore setup on the devices");
+        return false;
+    }
+
+    m_dev_mgr->load_devices(true /* ignore unknown vdevs */);
+    if (input.has_fast_dev()) {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+    } else {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
+    }
+
+    LOGINFO("HS tool loaded devices successfully");
+    LOGINFO("HS tool starting scan meta blks, dynamic_config_version={}, static_config: {}", HS_DYNAMIC_CONFIG(version),
+            HomeStoreStaticConfig::instance().to_json().dump(4));
+    m_meta_service->scan(scan_type, debug_chunk_id, debug_blk_num);
+    return true;
+}
+
+void HomeStore::stop_tool() {
+    LOGINFO("HS tool stopping services");
+    m_meta_service->stop();
+    m_meta_service.reset();
+
+    m_dev_mgr->close_devices();
+    m_dev_mgr.reset();
+    LOGINFO("HS tool stopped all services");
+}
+
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
     std::map< HSDevType, float > total_pct_by_type = {{HSDevType::Fast, 0.0f}, {HSDevType::Data, 0.0f}};
     // Accumulate total percentage of services on each device type
@@ -469,6 +528,27 @@ shared< VirtualDev > HomeStore::create_vdev_cb(const vdev_info& vinfo, bool load
 
     default:
         HS_LOG_ASSERT(0, "Unknown vdev_type {}", vdev_context->type);
+    }
+
+    return ret_vdev;
+}
+
+shared< VirtualDev > HomeStore::create_vdev_cb_for_tool(const vdev_info& vinfo, bool load_existing) {
+    shared< VirtualDev > ret_vdev;
+    auto& hs_config = HomeStoreStaticConfig::instance();
+    auto vdev_context = r_cast< const hs_vdev_context* >(vinfo.get_user_private());
+
+    switch (vdev_context->type) {
+    case hs_vdev_type_t::META_VDEV:
+        if (has_meta_service()) {
+            ret_vdev = m_meta_service->open_vdev(vinfo, load_existing);
+        } else {
+            LOGERROR("HS tool requires meta service to be enabled");
+        }
+        break;
+    default:
+        LOGINFO("[HS_TOOL] skip vdev_type {}", vdev_context->type);
+        break;
     }
 
     return ret_vdev;
