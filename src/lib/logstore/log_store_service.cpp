@@ -325,8 +325,10 @@ void LogStoreService::device_truncate() {
     // TODO: make device_truncate_under_lock return future and do collectAllFutures;
     if (is_stopping()) return;
     incr_pending_request_num();
-    for (auto& [id, logdev] : m_id_logdev_map)
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        HS_LOG(DEBUG, logstore, "Truncating logdev {}", id);
         logdev->truncate();
+    }
     decr_pending_request_num();
 }
 
