@@ -54,9 +54,41 @@ public:
                                              const replica_member_info& member_in, uint32_t commit_quorum = 0,
                                              uint64_t trace_id = 0) const = 0;
 
+    /// @brief Flips the learner flag for a specific replica member in the group.
+    /// @param group_id The ID of the replica group.
+    /// @param member The replica whose learner flag is to be changed.
+    /// @param target The target value for the learner flag (true to set as learner, false otherwise).
+    /// @param commit_quorum The commit quorum required for this operation.
+    /// @param wait_and_verify Whether to wait and verify the operation (default: true).
+    /// @param trace_id Optional trace ID for tracking (default: 0).
+    /// @return A future result indicating success or error.
     virtual AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                                 uint32_t commit_quorum, bool wait_and_verify = true,
                                                 uint64_t trace_id = 0) const = 0;
+
+    /// @brief Remove the specific replica member from the group.
+    /// @param group_id The ID of the replica group.
+    /// @param member The replica id to be removed.
+    /// @param commit_quorum The commit quorum required for this operation.
+    /// @param wait_and_verify Whether to wait and verify the operation (default: true).
+    /// @param trace_id Optional trace ID for tracking (default: 0).
+    /// @return A future result indicating success or error.
+    virtual AsyncReplResult<> remove_member(group_id_t group_id, const replica_id_t& member, uint32_t commit_quorum,
+                                            bool wait_and_verify = true, uint64_t trace_id = 0) const = 0;
+
+    /// @brief Clean the replace member task.
+    /// @param group_id The ID of the replica group.
+    /// @param task_id The task to be cleaned.
+    /// @param commit_quorum The commit quorum required for this operation.
+    /// @param trace_id Optional trace ID for tracking (default: 0).
+    /// @return A future result indicating success or error.
+    virtual AsyncReplResult<> clean_replace_member_task(group_id_t group_id, const std::string& task_id,
+                                                        uint32_t commit_quorum, uint64_t trace_id = 0) const = 0;
+
+    /// @brief Lists all replace member tasks.
+    /// @param trace_id Optional trace ID for tracking (default: 0).
+    /// @return A result containing a vector of replace_member_task objects.
+    virtual ReplResult< std::vector< replace_member_task > > list_replace_member_tasks(uint64_t trace_id = 0) const = 0;
 
     /// @brief Get status of member replacement.
     /// @param group_id Group where the replace member happens
@@ -70,6 +102,13 @@ public:
                                                           const replica_member_info& member_in,
                                                           const std::vector< replica_member_info >& others,
                                                           uint64_t trace_id = 0) const = 0;
+
+    /// @brief Destroy the repl dev for a given group id
+    /// Compared to remove_repl_dev, this function will directly destroy the local repl dev, rather than go through the
+    /// raft and destroy all repl dev among members. This function is mainly used for cleaning up local resources when
+    /// the repl dev is leaked.
+    /// @param group_id Group where the replace member happens
+    virtual ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) = 0;
 
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in

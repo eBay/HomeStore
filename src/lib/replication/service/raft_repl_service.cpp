@@ -372,7 +372,7 @@ shared< nuraft_mesg::mesg_state_mgr > RaftReplService::create_state_mgr(int32_t 
 AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t group_id,
                                                                       std::set< replica_id_t > const& members) {
     if (is_stopping()) return make_async_error< shared< ReplDev > >(ReplServiceError::STOPPING);
-    incr_pending_request_num();
+    init_req_counter counter(pending_request_num);
     // TODO: All operations are made sync here for convenience to caller. However, we should attempt to make this async
     // and do deferValue to a seperate dedicated hs thread for these kind of operations and wakeup the caller. It
     // probably needs iomanager executor for deferValue.
@@ -380,7 +380,6 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
         // Create a new RAFT group and add all members. create_group() will call the create_state_mgr which will create
         // the repl_dev instance and add it to the map.
         if (auto const status = m_msg_mgr->create_group(group_id, "homestore_replication").get(); !status) {
-            decr_pending_request_num();
             return make_async_error< shared< ReplDev > >(to_repl_error(status.error()));
         }
 
@@ -400,7 +399,6 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
                 } else if (result.error() != nuraft::CONFIG_CHANGING) {
                     LOGWARNMOD(replication, "Groupid={}, add member={} failed with error={}",
                                boost::uuids::to_string(group_id), boost::uuids::to_string(member), result.error());
-                    decr_pending_request_num();
                     return make_async_error< shared< ReplDev > >(to_repl_error(result.error()));
                 } else {
                     LOGWARNMOD(replication,
@@ -413,7 +411,6 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
     }
 
     auto result = get_repl_dev(group_id);
-    decr_pending_request_num();
     return result ? make_async_success< shared< ReplDev > >(result.value())
                   : make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_NOT_FOUND);
 }
@@ -447,17 +444,13 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
 //
 folly::SemiFuture< ReplServiceError > RaftReplService::remove_repl_dev(group_id_t group_id) {
     if (is_stopping()) return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::STOPPING);
-    incr_pending_request_num();
+    init_req_counter counter(pending_request_num);
 
     auto rdev_result = get_repl_dev(group_id);
-    if (!rdev_result) {
-        decr_pending_request_num();
-        return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::SERVER_NOT_FOUND);
-    }
+    if (!rdev_result) { return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::SERVER_NOT_FOUND); }
 
     auto ret = std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->destroy_group();
 
-    decr_pending_request_num();
     return ret;
 }
 
@@ -516,22 +509,15 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, std::stri
                                                   const replica_member_info& member_in, uint32_t commit_quorum,
                                                   uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
-    incr_pending_request_num();
+    init_req_counter counter(pending_request_num);
     auto rdev_result = get_repl_dev(group_id);
-    if (!rdev_result) {
-        decr_pending_request_num();
-        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
-    }
+    if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
 
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
         ->start_replace_member(task_id, member_out, member_in, commit_quorum, trace_id)
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this](auto&& e) mutable {
-            if (e.hasError()) {
-                decr_pending_request_num();
-                return make_async_error<>(e.error());
-            }
-            decr_pending_request_num();
+        .thenValue([this, counter = std::move(counter)](auto&& e) mutable {
+            if (e.hasError()) { return make_async_error<>(e.error()); }
             return make_async_success<>();
         });
 }
@@ -540,23 +526,65 @@ AsyncReplResult<> RaftReplService::flip_learner_flag(group_id_t group_id, const 
                                                      bool target, uint32_t commit_quorum, bool wait_and_verify,
                                                      uint64_t trace_id) const {
     if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
-    incr_pending_request_num();
+    init_req_counter counter(pending_request_num);
     auto rdev_result = get_repl_dev(group_id);
-    if (!rdev_result) {
-        decr_pending_request_num();
-        return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
-    }
+    if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
         ->flip_learner_flag(member, target, commit_quorum, wait_and_verify, trace_id)
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this](auto&& e) mutable {
-            if (e.hasError()) {
-                decr_pending_request_num();
-                return make_async_error<>(e.error());
-            }
-            decr_pending_request_num();
+        .thenValue([this, counter = std::move(counter)](auto&& e) mutable {
+            if (e.hasError()) { return make_async_error<>(e.error()); }
             return make_async_success<>();
         });
+}
+
+AsyncReplResult<> RaftReplService::remove_member(group_id_t group_id, const replica_id_t& member,
+                                                 uint32_t commit_quorum, bool wait_and_verify,
+                                                 uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    init_req_counter counter(pending_request_num);
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->remove_member(member, commit_quorum, wait_and_verify, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) mutable {
+            if (e.hasError()) { return make_async_error<>(e.error()); }
+            return make_async_success<>();
+        });
+}
+
+AsyncReplResult<> RaftReplService::clean_replace_member_task(group_id_t group_id, const std::string& task_id,
+                                                             uint32_t commit_quorum, uint64_t trace_id) const {
+    if (is_stopping()) return make_async_error<>(ReplServiceError::STOPPING);
+    init_req_counter counter(pending_request_num);
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->clean_replace_member_task(task_id, commit_quorum, trace_id)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, counter = std::move(counter)](auto&& e) mutable {
+            if (e.hasError()) { return make_async_error<>(e.error()); }
+            return make_async_success<>();
+        });
+}
+
+ReplResult< std::vector< replace_member_task > > RaftReplService::list_replace_member_tasks(uint64_t trace_id) const {
+    if (is_stopping()) return folly::makeUnexpected<>(ReplServiceError::STOPPING);
+    init_req_counter counter(pending_request_num);
+    std::vector< replace_member_task > tasks;
+    std::shared_lock lg(m_rd_map_mtx);
+    for (const auto& [uuid, rd] : m_rd_map) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rd);
+        if (!rdev) {
+            LOGWARNMOD(replication, "RaftReplDev for group_id={} is not found", boost::uuids::to_string(uuid));
+            continue;
+        }
+        auto task = rdev->get_ongoing_replace_member_task(trace_id);
+        // ignore error
+        if (task.hasValue()) { tasks.emplace_back(task.value()); }
+    }
+    return tasks;
 }
 
 // This query should always be called on leader to avoid misleading results due to lagging status on some followers.
@@ -569,6 +597,17 @@ ReplaceMemberStatus RaftReplService::get_replace_member_status(group_id_t group_
     if (!rdev_result) { return ReplaceMemberStatus::UNKNOWN; }
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
         ->get_replace_member_status(task_id, member_out, member_in, others, trace_id);
+}
+
+ReplServiceError RaftReplService::destroy_repl_dev(group_id_t group_id, uint64_t trace_id) {
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) {
+        LOGINFOMOD(replication, "repl dev group_id={} not found, maybe already destroyed, trace_id={}",
+                   boost::uuids::to_string(group_id), trace_id);
+        return ReplServiceError::OK;
+    }
+    std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->force_leave();
+    return ReplServiceError::OK;
 }
 
 ////////////////////// Reaper Thread related //////////////////////////////////
@@ -646,11 +685,10 @@ void RaftReplService::gc_repl_reqs() {
 }
 
 void RaftReplService::gc_repl_devs() {
-    incr_pending_request_num();
+    init_req_counter counter(pending_request_num);
     // Skip gc when raft repl service is stopping to avoid concurrency issues between repl_dev's stop and destroy ops.
     if (is_stopping()) {
         LOGINFOMOD(replication, "ReplSvc is stopping, skipping GC");
-        decr_pending_request_num();
         return;
     }
 
@@ -682,7 +720,6 @@ void RaftReplService::gc_repl_devs() {
             m_rd_map.erase(group_id);
         }
     }
-    decr_pending_request_num();
 }
 
 void RaftReplService::flush_durable_commit_lsn() {
