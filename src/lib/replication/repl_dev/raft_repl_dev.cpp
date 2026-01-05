@@ -46,8 +46,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
             });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
-        m_last_flushed_commit_lsn = m_commit_upto_lsn;
+        m_last_flushed_cp_lsn = m_rd_sb->checkpoint_lsn;
         m_compact_lsn = m_rd_sb->compact_lsn;
+        m_last_flushed_compact_lsn = m_compact_lsn;
 
         m_rdev_name = m_rd_sb->rdev_name;
         // Its ok not to do compare exchange, because loading is always single threaded as of now
@@ -320,34 +321,12 @@ AsyncReplResult<> RaftReplDev::complete_replace_member(std::string& task_id, con
         return make_async_error(ReplServiceError::FAILED);
     }
 #endif
-    auto ret = do_remove_member(member_out, trace_id);
+    auto ret = do_remove_member(member_out.id, true, trace_id);
     if (ret != ReplServiceError::OK) {
         RD_LOGE(trace_id, "Step5. Replace member, failed to remove member, task_id={}, member={}, err={}", task_id,
                 boost::uuids::to_string(member_out.id), ret);
         reset_quorum_size(0, trace_id);
         return make_async_error<>(std::move(ret));
-    }
-    RD_LOGI(trace_id, "Step5. Replace member, proposed to raft to remove member, task_id={}, member={}", task_id,
-            boost::uuids::to_string(member_out.id));
-    auto timeout = HS_DYNAMIC_CONFIG(consensus.wait_for_config_change_ms);
-    // TODO Move wait logic to nuraft_mesg
-    if (!wait_and_check(
-            [&]() {
-                auto srv_conf = raft_server()->get_srv_config(nuraft_mesg::to_server_id(member_out.id));
-                if (srv_conf) {
-                    RD_LOGD(trace_id, "out member still exists in raft group, member={}",
-                            boost::uuids::to_string(member_out.id));
-                    return false;
-                }
-                return true;
-            },
-            timeout)) {
-        RD_LOGD(trace_id,
-                "Step5.  Replace member, wait for old member removed timed out, cancel the request, timeout: {}",
-                timeout);
-        // If the member_out is down, leader will force remove it after
-        // leave_timeout=leave_limit_(default=5)*heart_beat_interval_, it's better for client to retry it.
-        return make_async_error<>(ReplServiceError::RETRY_REQUEST);
     }
     RD_LOGD(trace_id, "Step5.  Replace member, old member is removed, task_id={}, member={}", task_id,
             boost::uuids::to_string(member_out.id));
@@ -499,9 +478,58 @@ ReplServiceError RaftReplDev::do_add_member(const replica_member_info& member, u
     return ReplServiceError::OK;
 }
 
-ReplServiceError RaftReplDev::do_remove_member(const replica_member_info& member, uint64_t trace_id) {
+AsyncReplResult<> RaftReplDev::remove_member(const replica_id_t& member, uint32_t commit_quorum, bool wait_and_verify,
+                                             uint64_t trace_id) {
+    RD_LOGI(trace_id, "Remove member, member={}", boost::uuids::to_string(member));
+    if (is_stopping()) {
+        RD_LOGI(trace_id, "repl dev is being shutdown!");
+        return make_async_error<>(ReplServiceError::STOPPING);
+    }
+    init_req_counter counter(pending_request_num);
+
+    if (commit_quorum >= 1) { reset_quorum_size(commit_quorum, trace_id); }
+    // 1.remove member
+    auto ret = do_remove_member(member, wait_and_verify, trace_id);
+    if (ret != ReplServiceError::OK) {
+        RD_LOGE(trace_id, "Remove member step1. Failed to remove member err={}, member={}", ret,
+                boost::uuids::to_string(member));
+        reset_quorum_size(0, trace_id);
+        return make_async_error<>(std::move(ret));
+    }
+    RD_LOGI(trace_id, "Remove member step1. Member has been removed, member={}", boost::uuids::to_string(member));
+    // 2. propose to raft to remove member
+    // Note: The removed member will not receive this HS_CTRL_REMOVE_MEMBER log entry since it has already been
+    // removed from the raft group in step 1. Therefore, on_remove_member callback will only be executed on the
+    // remaining members.
+    RD_LOGI(trace_id, "Remove member step2. Propose to raft for HS_CTRL_REMOVE_MEMBER req, group_id={}",
+            group_id_str());
+
+    auto rreq = repl_req_ptr_t(new repl_req_ctx{});
+    auto member_to_remove = member;
+    sisl::blob header(r_cast< uint8_t* >(&member_to_remove), sizeof(replica_id_t));
+    rreq->init(repl_key{.server_id = server_id(),
+                        .term = raft_server()->get_term(),
+                        .dsn = m_next_dsn.fetch_add(1),
+                        .traceID = trace_id},
+               journal_type_t::HS_CTRL_REMOVE_MEMBER, true, header, sisl::blob{}, 0, m_listener);
+
+    auto err = m_state_machine->propose_to_raft(std::move(rreq));
+    if (err != ReplServiceError::OK) {
+        RD_LOGE(trace_id,
+                "Remove member step2. Failed to propose to raft for HS_CTRL_REMOVE_MEMBER req , err={}, member={}", err,
+                boost::uuids::to_string(member));
+        reset_quorum_size(0, trace_id);
+        return make_async_error<>(std::move(err));
+    }
+
+    reset_quorum_size(0, trace_id);
+    RD_LOGI(trace_id, "Remove member done, group_id={}, member={}", group_id_str(), boost::uuids::to_string(member));
+    return make_async_success<>();
+}
+
+ReplServiceError RaftReplDev::do_remove_member(const replica_id_t& member, bool wait_and_verify, uint64_t trace_id) {
     // The member should not be the leader.
-    if (m_my_repl_id == member.id && m_my_repl_id == get_leader_id()) {
+    if (m_my_repl_id == member && m_my_repl_id == get_leader_id()) {
         // If leader is the member requested to move out, then give up leadership and return error.
         // Client will retry replace_member request to the new leader.
         raft_server()->yield_leadership(false /* immediate */, -1 /* successor */);
@@ -510,7 +538,7 @@ ReplServiceError RaftReplDev::do_remove_member(const replica_member_info& member
     }
     auto ret = retry_when_config_changing(
         [&] {
-            auto rem_ret = m_msg_mgr.rem_member(m_group_id, member.id)
+            auto rem_ret = m_msg_mgr.rem_member(m_group_id, member)
                                .via(&folly::InlineExecutor::instance())
                                .thenValue([this, member, trace_id](auto&& e) -> nuraft::cmd_result_code {
                                    return e.hasError() ? e.error() : nuraft::cmd_result_code::OK;
@@ -520,15 +548,36 @@ ReplServiceError RaftReplDev::do_remove_member(const replica_member_info& member
         trace_id);
     if (ret == nuraft::cmd_result_code::SERVER_NOT_FOUND) {
         RD_LOGW(trace_id, "Remove member not found in group error, ignoring, member={}",
-                boost::uuids::to_string(member.id));
+                boost::uuids::to_string(member));
     } else if (ret != nuraft::cmd_result_code::OK) {
         // Its ok to retry this request as the request
         // of replace member is idempotent.
-        RD_LOGE(trace_id, "Replace member failed to remove member, member={}, err={}",
-                boost::uuids::to_string(member.id), ret);
+        RD_LOGE(trace_id, "Replace member failed to remove member, member={}, err={}", boost::uuids::to_string(member),
+                ret);
         return ReplServiceError::RETRY_REQUEST;
     }
-    RD_LOGI(trace_id, "Proposed to raft to remove member, member={}", boost::uuids::to_string(member.id));
+    RD_LOGI(trace_id, "Proposed to raft to remove member, member={}", boost::uuids::to_string(member));
+    if (wait_and_verify) {
+        auto timeout = HS_DYNAMIC_CONFIG(consensus.wait_for_config_change_ms);
+        if (!wait_and_check(
+                [&]() {
+                    auto srv_conf = raft_server()->get_srv_config(nuraft_mesg::to_server_id(member));
+                    if (srv_conf) {
+                        RD_LOGD(trace_id, "out member still exists in raft group, member={}",
+                                boost::uuids::to_string(member));
+                        return false;
+                    }
+                    return true;
+                },
+                timeout)) {
+            RD_LOGD(trace_id, "Wait for member removed timed out, please retry, timeout: {}, member={}", timeout,
+                    boost::uuids::to_string(member));
+            // If the member_out is down, leader will force remove it after
+            // leave_timeout=leave_limit_(default=5)*heart_beat_interval_, it's better for client to retry it.
+            return ReplServiceError::RETRY_REQUEST;
+        }
+        RD_LOGI(trace_id, "member has been removed, member={}", boost::uuids::to_string(member));
+    }
     return ReplServiceError::OK;
 }
 
@@ -601,6 +650,65 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
     }
 
     return ReplServiceError::OK;
+}
+
+AsyncReplResult<> RaftReplDev::clean_replace_member_task(const std::string& task_id, uint32_t commit_quorum,
+                                                         uint64_t trace_id) {
+    RD_LOGI(trace_id, "Clean replace member task, task={}, commit_quorum={}", task_id, commit_quorum);
+    if (is_stopping()) {
+        RD_LOGI(trace_id, "repl dev is being shutdown!");
+        return make_async_error<>(ReplServiceError::STOPPING);
+    }
+    init_req_counter counter(pending_request_num);
+    if (m_my_repl_id != get_leader_id()) {
+        RD_LOGI(trace_id, "Clean replace member task failed, not leader");
+        return make_async_error<>(ReplServiceError::NOT_LEADER);
+    }
+    auto persisted_task_id = std::string(m_rd_sb->replace_member_task.task_id);
+    if (persisted_task_id.empty()) {
+        RD_LOGI(trace_id, "Task not found, task_id={}", task_id);
+        return make_async_success();
+    }
+    if (m_rd_sb->replace_member_task.task_id != task_id) {
+        RD_LOGE(trace_id, "Task id mismatched, persisted_task_id={}, received_task_id={}",
+                m_rd_sb->replace_member_task.task_id, task_id);
+        return make_async_error<>(ReplServiceError::REPLACE_MEMBER_TASK_MISMATCH);
+    }
+    if (commit_quorum >= 1) { reset_quorum_size(commit_quorum, trace_id); }
+    RD_LOGI(trace_id,
+            "Clean replace member task, propose to raft for HS_CTRL_CLEAN_REPLACE_TASK req, group_id={}, task_id={}, "
+            "member_out={}, member_in={}",
+            group_id_str(), task_id, boost::uuids::to_string(m_rd_sb->replace_member_task.replica_in),
+            boost::uuids::to_string(m_rd_sb->replace_member_task.replica_out));
+    auto rreq = repl_req_ptr_t(new repl_req_ctx{});
+    sisl::blob header(r_cast< uint8_t* >(m_rd_sb->replace_member_task.task_id), max_replace_member_task_id_len);
+    rreq->init(repl_key{.server_id = server_id(),
+                        .term = raft_server()->get_term(),
+                        .dsn = m_next_dsn.fetch_add(1),
+                        .traceID = trace_id},
+               journal_type_t::HS_CTRL_CLEAN_REPLACE_TASK, true, header, sisl::blob{}, 0, m_listener);
+
+    auto err = m_state_machine->propose_to_raft(std::move(rreq));
+    if (err != ReplServiceError::OK) {
+        RD_LOGE(trace_id, "Propose to raft for HS_CTRL_CLEAN_REPLACE_TASK req failed , task_id={}, err={}", task_id,
+                err);
+        reset_quorum_size(0, trace_id);
+        return make_async_error<>(std::move(err));
+    }
+
+    reset_quorum_size(0, trace_id);
+    RD_LOGI(trace_id, "Clean replace member task done, group_id={}, task_id={}", group_id_str(), task_id);
+    return make_async_success<>();
+}
+
+ReplResult< replace_member_task > RaftReplDev::get_ongoing_replace_member_task(uint64_t trace_id) const {
+    if (m_rd_sb->replace_member_task.replica_in == boost::uuids::nil_uuid() ||
+        m_rd_sb->replace_member_task.replica_out == boost::uuids::nil_uuid()) {
+        return folly::makeUnexpected(ReplServiceError::RESULT_NOT_EXIST_YET);
+    }
+    return replace_member_task{.task_id = std::string(m_rd_sb->replace_member_task.task_id),
+                               .replica_out = m_rd_sb->replace_member_task.replica_out,
+                               .replica_in = m_rd_sb->replace_member_task.replica_in};
 }
 
 nuraft::cmd_result_code RaftReplDev::retry_when_config_changing(const std::function< nuraft::cmd_result_code() >& func,
@@ -709,6 +817,54 @@ void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< 
 
     auto ret_val{true};
     if (when_done) { when_done(ret_val, null_except); }
+}
+
+void RaftReplDev::trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) {
+    // Step 1. Update truncation boundary if compact_lsn is specified
+    if (compact_lsn >= 0) {
+        // Step 1.1 Wait for commit upto compact_lsn if needed
+        if (wait_for_commit) {
+            RD_LOGI(NO_TRACE_ID, "Waiting for commit upto compact_lsn={}, current_commit_lsn={}", compact_lsn,
+                    m_commit_upto_lsn.load());
+            while (compact_lsn > m_commit_upto_lsn.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        // Step 1.2 trigger cp_flush to make sure all changes are flushed to disk before updating truncation boundary
+        hs()->cp_mgr().trigger_cp_flush(true /*force*/).get();
+        RD_LOGI(NO_TRACE_ID, "cp_flush completed before updating truncation boundary to lsn={}", compact_lsn);
+        // Step 1.3 Update truncation boundary
+        RD_LOGI(NO_TRACE_ID, "Updating truncation boundary to lsn={}, current_truncation_boundary={}", compact_lsn,
+                m_truncation_upper_limit.load());
+        update_truncation_boundary(compact_lsn);
+    }
+
+    // Step 2. Create snapshot manually
+    auto result = raft_server()->create_snapshot();
+    if (result == 0) {
+        RD_LOGE(NO_TRACE_ID, "Failed to create snapshot - another snapshot may be in progress");
+        return;
+    }
+    RD_LOGI(NO_TRACE_ID, "Successfully created snapshot, result log_idx={}", result);
+
+    // Step 3. Make sure logs are compacted upto compact_lsn after snapshot created
+    // Since we want to compact logs upto compact_lsn after the snapshot created, here we check the compact_lsn and
+    // trigger a compact manually if needed (since logs will only to truncated upto min(m_truncation_upper_limit,
+    // snp_idx-snp_distance), there is a that real_compact_lsn < compact_lsn after snapshot created).
+    // Note that manual compact may cause concurrency issue with the automatic log compaction in raft server. Currently,
+    // it doesn't matter because this API is used in op scenario when members syncup and no new write are handled. If we
+    // want to use it in more phase, we need to add lock to avoid concurrency issue.
+    if (compact_lsn > 0 && m_compact_lsn.load() < compact_lsn) {
+        RD_LOGI(NO_TRACE_ID, "Manually compacting logs upto lsn={} after snapshot, current_compact_lsn={}", compact_lsn,
+                m_compact_lsn.load());
+        m_data_journal->compact(compact_lsn);
+        RD_LOGI(NO_TRACE_ID, "Compacted logs upto lsn={} after snapshot", compact_lsn);
+    }
+
+    // Step 4. trigger cp_flush to make sure all changes are flushed to disk after snapshot creation and log compaction
+    hs()->cp_mgr().trigger_cp_flush(true /*force*/).get();
+    RD_LOGI(NO_TRACE_ID, "cp_flush completed after snapshot creation and log compaction");
+    RD_LOGI(NO_TRACE_ID, "snapshot creation and compaction completed");
 }
 
 void RaftReplDev::propose_truncate_boundary() {
@@ -1473,16 +1629,28 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     }
 
     RD_LOGD(rreq->traceID(), "Raft channel: Commit rreq=[{}]", rreq->to_compact_string());
-    if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
+    switch (rreq->op_code()) {
+    case journal_type_t::HS_CTRL_DESTROY:
         leave();
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_START_REPLACE) {
+        break;
+    case journal_type_t::HS_CTRL_START_REPLACE:
         start_replace_member(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
+        break;
+    case journal_type_t::HS_CTRL_COMPLETE_REPLACE:
         complete_replace_member(rreq);
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY) {
-        update_truncation_boundary(rreq);
-    } else {
+        break;
+    case journal_type_t::HS_CTRL_UPDATE_TRUNCATION_BOUNDARY:
+        update_truncation_boundary(r_cast< const truncate_ctx* >(rreq->header().cbytes())->truncation_upper_limit);
+        break;
+    case journal_type_t::HS_CTRL_REMOVE_MEMBER:
+        remove_member(rreq);
+        break;
+    case journal_type_t::HS_CTRL_CLEAN_REPLACE_TASK:
+        clean_replace_member_task(rreq);
+        break;
+    default:
         m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), {rreq->local_blkid()}, rreq);
+        break;
     }
 
     if (!recovery) {
@@ -1559,8 +1727,7 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
                               blkid.to_string());
             });
         }
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY ||
-               rreq->op_code() == journal_type_t::HS_CTRL_COMPLETE_REPLACE) {
+    } else if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
         if (rreq->is_proposer()) {
             RD_LOGE(rreq->traceID(), "Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
             m_destroy_promise.setValue(err);
@@ -1615,7 +1782,29 @@ void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
     RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared.");
 }
 
-void RaftReplDev::update_truncation_boundary(repl_req_ptr_t rreq) {
+void RaftReplDev::remove_member(repl_req_ptr_t rreq) {
+    auto member = *r_cast< const replica_id_t* >(rreq->header().cbytes());
+    RD_LOGI(rreq->traceID(), "Raft repl remove_member commit, member={}", boost::uuids::to_string(member));
+    m_listener->on_remove_member(member, rreq->traceID());
+}
+
+void RaftReplDev::clean_replace_member_task(repl_req_ptr_t rreq) {
+    auto task_id = std::string(r_cast< const char* >(rreq->header().cbytes()));
+    RD_LOGI(rreq->traceID(), "Raft repl clean_replace_member_task commit, task_id={}", task_id);
+
+    std::unique_lock lg{m_sb_mtx};
+    auto persisted_task_id = get_replace_member_task_id();
+    if (!persisted_task_id.empty()) {
+        RD_DBG_ASSERT(persisted_task_id == task_id,
+                      "Invalid task_id in clean_replace_member_task message, received {}, persisted {}", task_id,
+                      persisted_task_id);
+        m_rd_sb->replace_member_task = replace_member_task_superblk{};
+        m_rd_sb.write();
+    }
+    RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
+}
+
+void RaftReplDev::update_truncation_boundary(repl_lsn_t truncation_upper_limit) {
     repl_lsn_t cur_checkpoint_lsn = 0;
     {
         std::unique_lock lg{m_sb_mtx};
@@ -1624,8 +1813,7 @@ void RaftReplDev::update_truncation_boundary(repl_req_ptr_t rreq) {
     // expected truncation_upper_limit should not larger than the current checkpoint_lsn, this is to ensure that
     // when a crash happens before index flushed to disk, all the logs larger than checkpoint_lsn are still available
     // to replay.
-    auto ctx = r_cast< const truncate_ctx* >(rreq->header().cbytes());
-    auto exp_truncation_upper_limit = std::min(ctx->truncation_upper_limit, cur_checkpoint_lsn);
+    auto exp_truncation_upper_limit = std::min(truncation_upper_limit, cur_checkpoint_lsn);
     auto cur_truncation_upper_limit = m_truncation_upper_limit.load();
     // exp_truncation_upper_limit might be less or equal to cur_truncation_upper_limit after Baseline Re-sync,
     // we should skip update to ensure the truncation_upper_limit is always increasing.
@@ -2249,8 +2437,9 @@ void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     auto const clsn = ctx->compacted_to_lsn;
     auto const dsn = ctx->last_applied_dsn;
 
-    if (lsn == m_last_flushed_commit_lsn) {
-        // Not dirtied since last flush ignore
+    // compact can be triggered manually while no new logs are committed, so both lsn and clsn need to be checked
+    if (lsn == m_last_flushed_cp_lsn && clsn == m_last_flushed_compact_lsn) {
+        // Not dirtied since last cp flush ignore
         return;
     }
 
@@ -2262,7 +2451,8 @@ void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = dsn;
     m_rd_sb.write();
-    m_last_flushed_commit_lsn = lsn;
+    m_last_flushed_cp_lsn = lsn;
+    m_last_flushed_compact_lsn = clsn;
     RD_LOGD(NO_TRACE_ID, "cp flush in raft repl dev, lsn={}, clsn={}, next_dsn={}, cp string:{}", lsn, clsn,
             m_next_dsn.load(), cp->to_string());
 }

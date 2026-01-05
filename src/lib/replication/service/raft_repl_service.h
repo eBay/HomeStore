@@ -91,12 +91,22 @@ protected:
     AsyncReplResult<> flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
                                         uint32_t commit_quorum, bool wait_and_verify = true,
                                         uint64_t trace_id = 0) const override;
+    AsyncReplResult<> remove_member(group_id_t group_id, const replica_id_t& member, uint32_t commit_quorum,
+                                    bool wait_and_verify = true, uint64_t trace_id = 0) const override;
+
+    AsyncReplResult<> clean_replace_member_task(group_id_t group_id, const std::string& task_id, uint32_t commit_quorum,
+                                                uint64_t trace_id = 0) const override;
+
+    ReplResult< std::vector< replace_member_task > > list_replace_member_tasks(uint64_t trace_id = 0) const override;
 
     ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                   const replica_member_info& member_out,
                                                   const replica_member_info& member_in,
                                                   const std::vector< replica_member_info >& others,
                                                   uint64_t trace_id = 0) const override;
+    ReplServiceError destroy_repl_dev(group_id_t group_id, uint64_t trace_id = 0) override;
+
+    void trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) override;
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
@@ -124,7 +134,7 @@ class ReplSvcCPContext : public CPContext {
     std::map< ReplDev*, cshared< ReplDevCPContext > > m_cp_ctx_map;
 
 public:
-    ReplSvcCPContext(CP* cp) : CPContext(cp) {};
+    ReplSvcCPContext(CP* cp) : CPContext(cp){};
     virtual ~ReplSvcCPContext() = default;
     int add_repl_dev_ctx(ReplDev* dev, cshared< ReplDevCPContext > dev_ctx);
     cshared< ReplDevCPContext > get_repl_dev_ctx(ReplDev* dev);

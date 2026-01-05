@@ -205,7 +205,9 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     int64_t lsn = s_cast< int64_t >(params.log_idx);
     repl_req_ptr_t rreq = lsn_to_req(lsn);
     if (m_rd.need_skip_processing(lsn)) {
-        RD_LOGI(rreq->traceID(), "Raft Channel: Log {} is expected to be handled by snapshot. Skipping commit.", lsn);
+        // If log replay is skipped, the rreq might be nullptr. Log the event with NO_TRACE_ID if rreq is null.
+        RD_LOGI(rreq == nullptr ? NO_TRACE_ID : std::to_string(rreq->traceID()),
+                "Raft Channel: Log {} is expected to be handled by snapshot. Skipping commit.", lsn);
         return m_success_ptr;
     }
     RD_DBG_ASSERT(rreq != nullptr, "Raft channel got null rreq for lsn={}", lsn);

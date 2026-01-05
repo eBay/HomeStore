@@ -53,6 +53,8 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_START_REPLACE = 3,    // Control message to start replace a member
       HS_CTRL_COMPLETE_REPLACE = 4, // Control message to complete replace a member,
       HS_CTRL_UPDATE_TRUNCATION_BOUNDARY = 5, // Control message to update truncation boundary
+      HS_CTRL_REMOVE_MEMBER = 6,              // Control message to remove a member from the group
+      HS_CTRL_CLEAN_REPLACE_TASK = 7,         // Control message to clean replace member task
 )
 
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, UNREADY, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
@@ -389,6 +391,9 @@ public:
     virtual void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
                                             const replica_member_info& member_in, trace_id_t tid) = 0;
 
+    /// @brief Called when remove a member.
+    virtual void on_remove_member(const replica_id_t& member, trace_id_t tid) = 0;
+
     /// @brief Called when the snapshot is being created by nuraft
     virtual AsyncReplResult<> create_snapshot(shared< snapshot_context > context) = 0;
 
@@ -615,6 +620,9 @@ public:
 
     // clear reqs that has allocated blks on the given chunk.
     virtual void clear_chunk_req(chunk_num_t chunk_id) = 0;
+
+    // create a snapshot manually and try to compact logs upto compact_lsn
+    virtual void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) = 0;
 
 protected:
     shared< ReplDevListener > m_listener;

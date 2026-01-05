@@ -374,6 +374,10 @@ public:
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
+    void on_remove_member(const replica_id_t& member, trace_id_t tid) override {
+        LOGINFO("[Replica={}] remove member, member {}", g_helper->replica_num(), member);
+    }
+
     void on_destroy(const group_id_t& group_id) override {
         LOGINFOMOD(replication, "[Replica={}] Group={} is being destroyed", g_helper->replica_num(),
                    boost::uuids::to_string(group_id));
@@ -592,7 +596,7 @@ public:
     }
 
     void run_on_leader(std::shared_ptr< TestReplicatedDB > db, auto&& lambda) {
-        if (!db || !db->repl_dev()) {
+        if (!db || !db->repl_dev() || db->is_zombie()) {
             // Spare which are not added to group will not have repl dev.
             return;
         }
@@ -790,6 +794,52 @@ public:
         });
     }
 
+    void remove_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_id) {
+        this->run_on_leader(db, [this, db, member_id]() {
+            LOGINFO("remove member, member={}", boost::uuids::to_string(member_id));
+            while (true) {
+                auto result = hs()->repl_service().remove_member(db->repl_dev()->group_id(), member_id, 0).get();
+                if (!result.hasError() || result.error() == ReplServiceError::OK) {
+                    LOGINFO("Member {} already removed", boost::uuids::to_string(member_id));
+                    break;
+                }
+                ASSERT_EQ(result.error(), ReplServiceError::RETRY_REQUEST)
+                    << "Error in remove_member, err=" << result.error();
+                LOGINFO("Got retry request, retrying remove_member for member={}", boost::uuids::to_string(member_id));
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+        });
+    }
+
+    void flip_learner(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_id, bool target,
+                      ReplServiceError error = ReplServiceError::OK) {
+        replica_member_info member{member_id, ""};
+        this->run_on_leader(db, [this, error, db, member, target]() {
+            LOGINFO("flip learner to {}, member={}", target, boost::uuids::to_string(member.id));
+            auto result = hs()->repl_service().flip_learner_flag(db->repl_dev()->group_id(), member, target, 0).get();
+            if (error == ReplServiceError::OK) {
+                ASSERT_EQ(result.hasError(), false) << "Error in flip_learner, err=" << result.error();
+            } else {
+                ASSERT_EQ(result.hasError(), true);
+                ASSERT_EQ(result.error(), error) << "Error in flip_learner, err=" << result.error();
+            }
+        });
+    }
+
+    void clean_replace_member_task(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
+                                   ReplServiceError error = ReplServiceError::OK) {
+        this->run_on_leader(db, [this, error, db, task_id]() {
+            LOGINFO("clean replace member task, task_id={}", task_id);
+            auto result = hs()->repl_service().clean_replace_member_task(db->repl_dev()->group_id(), task_id, 0).get();
+            if (error == ReplServiceError::OK) {
+                ASSERT_EQ(result.hasError(), false) << "Error in clean_replace_member_task, err=" << result.error();
+            } else {
+                ASSERT_EQ(result.hasError(), true);
+                ASSERT_EQ(result.error(), error) << "Error in clean_replace_member_task, err=" << result.error();
+            }
+        });
+    }
+
     ReplaceMemberStatus check_replace_member_status(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
                                                     replica_id_t member_out, replica_id_t member_in) {
         LOGINFO("check replace member status, task_id={}, out={} in={}", task_id, boost::uuids::to_string(member_out),
@@ -810,6 +860,42 @@ public:
 
     void yield_leadership(std::shared_ptr< TestReplicatedDB > db, bool immediate_yield, replica_id_t candidate) {
         db->repl_dev()->yield_leadership(immediate_yield, candidate);
+    }
+
+    void check_replace_member_rollback_result(std::shared_ptr< TestReplicatedDB > db, std::string& task_id,
+                                              replica_id_t member_out, replica_id_t member_in) {
+        LOGINFO("check replace member rollback result, task_id={}, out={} in={}", task_id,
+                boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+        while (true) {
+            auto ret = rdev->get_ongoing_replace_member_task();
+            if (ret.hasValue()) {
+                LOGDEBUG("replace member task still exists");
+            } else {
+                ASSERT_EQ(ret.error(), ReplServiceError::RESULT_NOT_EXIST_YET)
+                    << "unknown error in get_ongoing_replace_member_task, error=" << ret.error();
+                break;
+            }
+        }
+        LOGDEBUG("replace member task has been cleaned up");
+        this->run_on_leader(db, [this, db, member_in]() {
+            std::vector< peer_info > peers = db->repl_dev()->get_replication_status();
+            ASSERT_EQ(peers.size(), 3);
+            for (auto pinfo : peers) {
+                LOGDEBUG("peer_info: id={} can_vote={} priority={}", pinfo.id_, pinfo.can_vote, pinfo.priority_);
+                ASSERT_NE(pinfo.id_, member_in);
+                ASSERT_TRUE(pinfo.can_vote);
+                ASSERT_TRUE(pinfo.priority_ > 0);
+            }
+        });
+
+        auto ret = hs()->repl_service().list_replace_member_tasks();
+        ASSERT_EQ(ret.hasError(), false) << "error in list_replace_member_tasks, error=" << ret.error();
+        ASSERT_EQ(ret.value().size(), 0);
+    }
+    bool group_exists(std::shared_ptr< TestReplicatedDB > db) {
+        if (!db->repl_dev()) return false;
+        return hs()->repl_service().get_repl_dev(db->repl_dev()->group_id()).hasValue();
     }
 
 protected:

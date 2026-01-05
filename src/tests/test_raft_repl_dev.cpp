@@ -889,6 +889,51 @@ TEST_F(RaftReplDevTest, NuraftStateTransition) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, Schedule_Snapshot_Creation) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    uint64_t entries_per_attempt = 100;
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit on all replicas */);
+
+    g_helper->sync_for_verify_start();
+    // we check snapshot creation on follower1
+    if (g_helper->replica_num() == 1) {
+        auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(dbs_[0]->repl_dev());
+        auto group_id = repl_dev->group_id();
+        auto current_truncation_upper_limit = repl_dev->m_truncation_upper_limit.load();
+        LOGINFO("group={} current_truncation_upper_limit={}", dbs_.back()->repl_dev()->group_id(),
+                current_truncation_upper_limit);
+        ASSERT_EQ(current_truncation_upper_limit, 0);
+        LOGINFO("Trigger scheduled snapshot creation on follower1");
+        repl_dev->trigger_snapshot_creation(10, false /* wait_for_commit */);
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        current_truncation_upper_limit = repl_dev->m_truncation_upper_limit.load();
+        LOGINFO("After scheduled snapshot creation, group={} current_truncation_upper_limit={}", group_id,
+                current_truncation_upper_limit);
+        ASSERT_EQ(current_truncation_upper_limit, 10);
+        LOGINFO("Re-schedule snapshot creation on follower1 with lower compact lsn");
+        repl_dev->trigger_snapshot_creation(5, false /* wait_for_commit */);
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        current_truncation_upper_limit = repl_dev->m_truncation_upper_limit.load();
+        LOGINFO("After re-scheduled snapshot creation, group={} current_truncation_upper_limit={}", group_id,
+                current_truncation_upper_limit);
+        ASSERT_EQ(current_truncation_upper_limit, 10);
+        LOGINFO("Re-schedule snapshot creation on follower1 with higher compact lsn");
+        auto current_commit_idx = repl_dev->get_last_commit_lsn();
+        repl_dev->trigger_snapshot_creation(10000, false /* wait_for_commit */);
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+        current_truncation_upper_limit = repl_dev->m_truncation_upper_limit.load();
+        LOGINFO(
+            "After re-scheduled snapshot creation, group={} current_truncation_upper_limit={}, current_commit_idx={}",
+            group_id, current_truncation_upper_limit, current_commit_idx);
+        ASSERT_EQ(current_truncation_upper_limit, current_commit_idx);
+    }
+    this->validate_data();
+    LOGINFO("Validate all data written so far by reading them");
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;
