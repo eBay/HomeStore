@@ -14,6 +14,7 @@
  *********************************************************************************/
 #include <sisl/logging/logging.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <chrono>
 
 #include <boost/uuid/string_generator.hpp>
@@ -655,7 +656,16 @@ void RaftReplService::start_repl_service_timers() {
 
     m_replace_member_sync_check_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */, nullptr,
-        iomgr::reactor_regex::all_worker, [this](void*) { monitor_replace_member_replication_status(); },
+        iomgr::reactor_regex::all_worker,
+        [this](void*) {
+#ifdef _PRERELEASE
+            if (iomgr_flip::instance()->test_flip("skip_monitor_replace_member_replication_status")) {
+                LOGINFOMOD(replication, "flip skip_monitor_replace_member_replication_status triggered");
+                return;
+            }
+#endif
+            monitor_replace_member_replication_status();
+        },
         true /* wait_to_schedule */);
 }
 
