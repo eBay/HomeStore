@@ -250,7 +250,7 @@ public:
         freq.set_count(count);
         freq.set_percent(percent);
         m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
-        LOGDEBUG("Flip {} set", flip_name);
+        LOGINFO("Flip {} set", flip_name);
     }
 
     void set_delay_flip(const std::string flip_name, uint64_t delay_usec, uint32_t count = 1, uint32_t percent = 100) {
