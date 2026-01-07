@@ -58,11 +58,6 @@ void ResourceMgr::trigger_truncate() {
     }
 
     if (hs()->has_repl_data_service()) {
-        auto& repl_svc = dynamic_cast< GenericReplService& >(hs()->repl_service());
-        if (repl_svc.get_impl_type() == repl_impl_type::solo) {
-            // skip truncation from RM for solo repl dev;
-            return;
-        }
         /*
          * DO NOT NEED : raft will truncate logs.
          * // first make sure all repl dev's underlying raft log store make corresponding reservation during
@@ -74,6 +69,7 @@ void ResourceMgr::trigger_truncate() {
          *  });
          */
         // next do device truncate which go through all logdevs and truncate them;
+        HS_LOG_EVERY_N(INFO, base, unmove(50), "Resource manager is triggering truncate");
         hs()->logstore_service().device_truncate();
     }
 
@@ -83,7 +79,7 @@ void ResourceMgr::trigger_truncate() {
 
 void ResourceMgr::start_timer() {
     auto const res_mgr_timer_ms = HS_DYNAMIC_CONFIG(resource_limits.resource_audit_timer_ms);
-    LOGINFO("resource audit timer is set to {} usec", res_mgr_timer_ms);
+    LOGINFO("resource audit timer is set to {} ms", res_mgr_timer_ms);
     if (res_mgr_timer_ms == 0) {
         LOGINFO("resource audit timer is set to 0, so not starting timer");
         return;
@@ -193,8 +189,9 @@ bool ResourceMgr::check_journal_vdev_size(const uint64_t used_size, const uint64
         const uint32_t used_pct = (100 * used_size / total_size);
         if (used_pct >= get_journal_vdev_size_limit()) {
             m_journal_vdev_exceed_cb(used_size, used_pct >= get_journal_vdev_size_critical_limit() /* is_critical */);
-            HS_LOG_EVERY_N(WARN, base, unmove(50), "high watermark hit, used percentage: {}, high watermark percentage: {}",
-                           used_pct, get_journal_vdev_size_limit());
+            HS_LOG_EVERY_N(WARN, base, unmove(50),
+                           "high watermark hit, used percentage: {}, high watermark percentage: {}", used_pct,
+                           get_journal_vdev_size_limit());
             return true;
         }
     }
