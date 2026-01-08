@@ -438,6 +438,10 @@ public:
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id) {};
 
+    virtual void on_become_leader(const group_id_t& group_id) {};
+
+    virtual void on_become_follower(const group_id_t& group_id) {};
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };

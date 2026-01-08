@@ -2820,6 +2820,7 @@ void RaftReplDev::become_leader_cb() {
     // becoming a leader.
 
     RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", current_gate, new_gate);
+    m_listener->on_become_leader(m_group_id);
 }
 
 bool RaftReplDev::is_ready_for_traffic() const {

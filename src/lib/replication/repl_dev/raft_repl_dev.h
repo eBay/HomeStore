@@ -355,6 +355,7 @@ public:
     void become_follower_cb() {
         m_traffic_ready_lsn.store(0);
         RD_LOGD(NO_TRACE_ID, "become_follower_cb called!");
+        m_listener->on_become_follower(m_group_id);
     }
 
     /// @brief This method is called when the data journal is compacted
