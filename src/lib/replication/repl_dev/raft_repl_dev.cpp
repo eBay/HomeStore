@@ -138,6 +138,11 @@ bool RaftReplDev::join_group() {
     return true;
 }
 
+bool RaftReplDev::add_data_rpc_service(std::string const& request_name,
+                                       data_service_request_handler_t const& request_handler) {
+    return m_msg_mgr.bind_data_service_request(request_name, m_group_id, request_handler);
+}
+
 // All the steps in the implementation should be idempotent and retryable.
 AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const replica_member_info& member_out,
                                                     const replica_member_info& member_in, uint32_t commit_quorum,

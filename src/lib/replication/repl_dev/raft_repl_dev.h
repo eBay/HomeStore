@@ -322,6 +322,8 @@ public:
     void pause_state_machine(size_t timeout) override;
     void resume_state_machine() override;
     bool is_state_machine_paused() override;
+    bool add_data_rpc_service(std::string const& request_name,
+                              data_service_request_handler_t const& request_handler) override;
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
