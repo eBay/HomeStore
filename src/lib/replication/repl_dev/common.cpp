@@ -59,7 +59,10 @@ ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool 
 }
 
 repl_req_ctx::~repl_req_ctx() {
-    if (m_journal_entry) { m_journal_entry->~repl_journal_entry(); }
+    if (m_journal_entry) {
+        m_journal_entry->~repl_journal_entry();
+        m_journal_entry = nullptr;
+    }
 }
 
 void repl_req_ctx::create_journal_entry(bool is_raft_buf, int32_t server_id) {
