@@ -438,9 +438,15 @@ public:
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id) {};
 
+    virtual void on_become_leader(const group_id_t& group_id) {};
+
+    virtual void on_become_follower(const group_id_t& group_id) {};
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };
+
+using data_service_request_handler_t = std::function< void(boost::intrusive_ptr< sisl::GenericRpcData >& rpc_data) >;
 
 class ReplDev {
 public:
@@ -623,6 +629,11 @@ public:
 
     // create a snapshot manually and try to compact logs upto compact_lsn
     virtual void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) = 0;
+
+    virtual bool add_data_rpc_service(std::string const& request_name,
+                                      data_service_request_handler_t const& request_handler) {
+        return true;
+    }
 
 protected:
     shared< ReplDevListener > m_listener;
