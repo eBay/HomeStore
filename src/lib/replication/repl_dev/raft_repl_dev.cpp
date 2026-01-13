@@ -138,6 +138,23 @@ bool RaftReplDev::join_group() {
     return true;
 }
 
+bool RaftReplDev::add_data_rpc_service(std::string const& request_name,
+                                       data_service_request_handler_t const& request_handler) {
+    return m_msg_mgr.bind_data_service_request(request_name, m_group_id, request_handler);
+}
+
+nuraft_mesg::NullAsyncResult RaftReplDev::data_request_unidirectional(nuraft_mesg::destination_t const& dest,
+                                                                      std::string const& request_name,
+                                                                      sisl::io_blob_list_t const& cli_buf) {
+    return group_msg_service()->data_service_request_unidirectional(dest, request_name, cli_buf);
+}
+
+nuraft_mesg::AsyncResult< sisl::GenericClientResponse >
+RaftReplDev::data_request_bidirectional(nuraft_mesg::destination_t const& dest, std::string const& request_name,
+                                        sisl::io_blob_list_t const& cli_buf) {
+    return group_msg_service()->data_service_request_bidirectional(dest, request_name, cli_buf);
+}
+
 // All the steps in the implementation should be idempotent and retryable.
 AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const replica_member_info& member_out,
                                                     const replica_member_info& member_in, uint32_t commit_quorum,
@@ -2820,6 +2837,7 @@ void RaftReplDev::become_leader_cb() {
     // becoming a leader.
 
     RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", current_gate, new_gate);
+    m_listener->on_become_leader(m_group_id);
 }
 
 bool RaftReplDev::is_ready_for_traffic() const {

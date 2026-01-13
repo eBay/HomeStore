@@ -323,6 +323,15 @@ public:
     void resume_state_machine() override;
     bool is_state_machine_paused() override;
 
+    bool add_data_rpc_service(std::string const& request_name,
+                              data_service_request_handler_t const& request_handler) override;
+    nuraft_mesg::NullAsyncResult data_request_unidirectional(nuraft_mesg::destination_t const& dest,
+                                                             std::string const& request_name,
+                                                             sisl::io_blob_list_t const& cli_buf) override;
+    nuraft_mesg::AsyncResult< sisl::GenericClientResponse >
+    data_request_bidirectional(nuraft_mesg::destination_t const& dest, std::string const& request_name,
+                               sisl::io_blob_list_t const& cli_buf) override;
+
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
     }
@@ -355,6 +364,7 @@ public:
     void become_follower_cb() {
         m_traffic_ready_lsn.store(0);
         RD_LOGD(NO_TRACE_ID, "become_follower_cb called!");
+        m_listener->on_become_follower(m_group_id);
     }
 
     /// @brief This method is called when the data journal is compacted
