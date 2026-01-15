@@ -28,7 +28,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <sisl/flip/flip.hpp>
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 

@@ -32,7 +32,9 @@
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
+#ifdef _PRERELEASE
 #include <iomgr/iomgr_flip.hpp>
+#endif
 #include <homestore/homestore_decl.hpp>
 
 #include "device/chunk.h"
