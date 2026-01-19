@@ -128,16 +128,15 @@ public:
         return false;
     }
 
-    nuraft_mesg::NullAsyncResult data_request_unidirectional(nuraft_mesg::destination_t const& dest,
-                                                             std::string const& request_name,
-                                                             sisl::io_blob_list_t const& cli_buf) override {
-        return folly::makeUnexpected(nuraft::cmd_result_code::BAD_REQUEST);
+    NullDataRpcAsyncResult data_request_unidirectional(destination_t const& dest, std::string const& request_name,
+                                                       sisl::io_blob_list_t const& cli_buf) override {
+        return folly::makeUnexpected(data_rpc_error_code::NOT_SUPPORTED);
     }
 
-    nuraft_mesg::AsyncResult< sisl::GenericClientResponse >
-    data_request_bidirectional(nuraft_mesg::destination_t const& dest, std::string const& request_name,
+    DataRpcAsyncResult< sisl::GenericClientResponse >
+    data_request_bidirectional(destination_t const& dest, std::string const& request_name,
                                sisl::io_blob_list_t const& cli_buf) override {
-        return folly::makeUnexpected(nuraft::cmd_result_code::BAD_REQUEST);
+        return folly::makeUnexpected(data_rpc_error_code::NOT_SUPPORTED);
     }
 
 private:
