@@ -157,7 +157,9 @@ sisl::byte_array BitmapBlkAllocator::acquire_underlying_buffer() {
     synchronize_rcu();
 
     BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Multiple acquires concurrently?");
-    return (m_disk_bm->serialize(m_align_size));
+    // Copy the serialized buffer as cp flush can interefere with incoming I/O's.
+    // Cp flush happens not only during restart but also during normal I/O's.
+    return (m_disk_bm->serialize(m_align_size, true /* force_copy */));
 }
 
 void BitmapBlkAllocator::release_underlying_buffer() {

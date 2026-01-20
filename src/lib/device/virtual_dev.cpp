@@ -164,7 +164,12 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
         HS_LOG(ERROR, device, "fail to commit_blk: bid {}", blkid.to_string());
         return BlkAllocStatus::INVALID_DEV;
     }
-    HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
+
+    for (int i = 0; i < blkid.blk_count(); i++) {
+        auto t = BlkId{blkid.blk_num() + i, 1 /* nblks */, blkid.chunk_num()};
+        HS_LOG(DEBUG, device, "commit_blk: bid {}", t.to_string());
+    }
+
     auto const recovering = homestore::hs()->is_initializing();
     if (!recovering) {
         // in non-recovery mode, if a blk is committed without allocating, it will cause data corruption
@@ -328,9 +333,9 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
     return status;
 }
 
-void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
-    auto do_free_action = [this](auto const& b, VDevCPContext* vctx) {
-        if (vctx && (m_allocator_type != blk_allocator_type_t::append)) {
+void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx, bool free_now) {
+    auto do_free_action = [this](auto const& b, VDevCPContext* vctx, bool free_now) {
+        if (vctx && (m_allocator_type != blk_allocator_type_t::append) && !free_now) {
             // We don't want to accumulate here for append blk allocator.
             vctx->m_free_blkid_list.push_back(b);
         } else {
@@ -348,10 +353,10 @@ void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
         MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
         auto it = mbid.iterate();
         while (auto const b = it.next()) {
-            do_free_action(*b, vctx);
+            do_free_action(*b, vctx, free_now);
         }
     } else {
-        do_free_action(bid, vctx);
+        do_free_action(bid, vctx, free_now);
     }
 }
 
