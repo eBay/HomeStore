@@ -139,34 +139,34 @@ bool RaftReplDev::join_group() {
     return true;
 }
 
-data_rpc_error_code RaftReplDev::nuraft_to_data_rpc_error_code(nuraft::cmd_result_code const& nuraft_err) {
+repl_data_rpc_error_code RaftReplDev::nuraft_to_hs_error(nuraft::cmd_result_code const& nuraft_err) {
     switch (nuraft_err) {
     case nuraft::cmd_result_code::OK:
-        return data_rpc_error_code::SUCCESS;
+        return repl_data_rpc_error_code::SUCCESS;
     case nuraft::cmd_result_code::SERVER_NOT_FOUND:
-        return data_rpc_error_code::SERVER_NOT_FOUND;
+        return repl_data_rpc_error_code::SERVER_NOT_FOUND;
     case nuraft::cmd_result_code::TIMEOUT:
-        return data_rpc_error_code::TIMEOUT;
+        return repl_data_rpc_error_code::TIMEOUT;
     case nuraft::cmd_result_code::SERVER_ALREADY_EXISTS:
-        return data_rpc_error_code::SERVER_ALREADY_EXISTS;
+        return repl_data_rpc_error_code::SERVER_ALREADY_EXISTS;
     case nuraft::cmd_result_code::CANCELLED:
-        return data_rpc_error_code::CANCELLED;
+        return repl_data_rpc_error_code::CANCELLED;
     case nuraft::cmd_result_code::TERM_MISMATCH:
-        return data_rpc_error_code::TERM_MISMATCH;
+        return repl_data_rpc_error_code::TERM_MISMATCH;
     case nuraft::cmd_result_code::BAD_REQUEST:
-        return data_rpc_error_code::BAD_REQUEST;
+        return repl_data_rpc_error_code::BAD_REQUEST;
     case nuraft::cmd_result_code::FAILED:
-        return data_rpc_error_code::FAILED;
+        return repl_data_rpc_error_code::FAILED;
     default:
-        return data_rpc_error_code::NOT_SUPPORTED;
+        return repl_data_rpc_error_code::NOT_SUPPORTED;
     }
 }
 
-nuraft_mesg::destination_t RaftReplDev::change_to_nuraft_mesg_destination(destination_t dest) {
-    if (std::holds_alternative< peer_id_t >(dest)) {
-        return nuraft_mesg::destination_t(std::get< peer_id_t >(dest));
-    } else if (std::holds_alternative< role_regex >(dest)) {
-        return nuraft_mesg::destination_t(static_cast< nuraft_mesg::role_regex >(std::get< role_regex >(dest)));
+nuraft_mesg::destination_t RaftReplDev::hs_to_nuraft_dest(repl_dest_t dest) {
+    if (std::holds_alternative< replica_id_t >(dest)) {
+        return nuraft_mesg::destination_t(std::get< replica_id_t >(dest));
+    } else if (std::holds_alternative< repl_role_regex >(dest)) {
+        return nuraft_mesg::destination_t(static_cast< nuraft_mesg::role_regex >(std::get< repl_role_regex >(dest)));
     } else {
         return nuraft_mesg::destination_t(std::get< svr_id_t >(dest));
     }
@@ -177,24 +177,24 @@ bool RaftReplDev::add_data_rpc_service(std::string const& request_name,
     return m_msg_mgr.bind_data_service_request(request_name, m_group_id, request_handler);
 }
 
-NullDataRpcAsyncResult RaftReplDev::data_request_unidirectional(destination_t const& dest,
+NullDataRpcAsyncResult RaftReplDev::data_request_unidirectional(repl_dest_t const& dest,
                                                                 std::string const& request_name,
                                                                 sisl::io_blob_list_t const& cli_buf) {
     return group_msg_service()
-        ->data_service_request_unidirectional(change_to_nuraft_mesg_destination(dest), request_name, cli_buf)
-        .deferValue([this](auto&& r) -> Result< folly::Unit, data_rpc_error_code > {
-            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_data_rpc_error_code(r.error())); }
+        ->data_service_request_unidirectional(hs_to_nuraft_dest(dest), request_name, cli_buf)
+        .deferValue([this](auto&& r) -> Result< folly::Unit, repl_data_rpc_error_code > {
+            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_hs_error(r.error())); }
             return folly::unit;
         });
 }
 
 DataRpcAsyncResult< sisl::GenericClientResponse >
-RaftReplDev::data_request_bidirectional(destination_t const& dest, std::string const& request_name,
+RaftReplDev::data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
                                         sisl::io_blob_list_t const& cli_buf) {
     return group_msg_service()
-        ->data_service_request_bidirectional(change_to_nuraft_mesg_destination(dest), request_name, cli_buf)
-        .deferValue([this](auto&& r) -> Result< sisl::GenericClientResponse, data_rpc_error_code > {
-            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_data_rpc_error_code(r.error())); }
+        ->data_service_request_bidirectional(hs_to_nuraft_dest(dest), request_name, cli_buf)
+        .deferValue([this](auto&& r) -> Result< sisl::GenericClientResponse, repl_data_rpc_error_code > {
+            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_hs_error(r.error())); }
             return std::move(r.value());
         });
 }

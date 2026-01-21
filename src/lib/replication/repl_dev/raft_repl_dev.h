@@ -325,10 +325,10 @@ public:
 
     bool add_data_rpc_service(std::string const& request_name,
                               data_service_request_handler_t const& request_handler) override;
-    NullDataRpcAsyncResult data_request_unidirectional(destination_t const& dest, std::string const& request_name,
+    NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
                                                        sisl::io_blob_list_t const& cli_buf) override;
     DataRpcAsyncResult< sisl::GenericClientResponse >
-    data_request_bidirectional(destination_t const& dest, std::string const& request_name,
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
                                sisl::io_blob_list_t const& cli_buf) override;
 
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
@@ -483,8 +483,8 @@ private:
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
     void handle_fetch_data_response(sisl::GenericClientResponse response, std::vector< repl_req_ptr_t > rreqs);
     bool is_resync_mode();
-    data_rpc_error_code nuraft_to_data_rpc_error_code(nuraft::cmd_result_code const& nuraft_err);
-    nuraft_mesg::destination_t change_to_nuraft_mesg_destination(destination_t dest);
+    repl_data_rpc_error_code nuraft_to_hs_error(nuraft::cmd_result_code const& nuraft_err);
+    nuraft_mesg::destination_t hs_to_nuraft_dest(repl_dest_t dest);
 
     /**
      * \brief This method handles errors that occur during append entries or data receiving.

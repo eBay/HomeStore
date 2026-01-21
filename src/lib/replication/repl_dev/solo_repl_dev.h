@@ -128,15 +128,15 @@ public:
         return false;
     }
 
-    NullDataRpcAsyncResult data_request_unidirectional(destination_t const& dest, std::string const& request_name,
+    NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
                                                        sisl::io_blob_list_t const& cli_buf) override {
-        return folly::makeUnexpected(data_rpc_error_code::NOT_SUPPORTED);
+        return folly::makeUnexpected(repl_data_rpc_error_code::NOT_SUPPORTED);
     }
 
     DataRpcAsyncResult< sisl::GenericClientResponse >
-    data_request_bidirectional(destination_t const& dest, std::string const& request_name,
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
                                sisl::io_blob_list_t const& cli_buf) override {
-        return folly::makeUnexpected(data_rpc_error_code::NOT_SUPPORTED);
+        return folly::makeUnexpected(repl_data_rpc_error_code::NOT_SUPPORTED);
     }
 
 private:

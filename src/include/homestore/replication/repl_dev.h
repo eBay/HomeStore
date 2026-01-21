@@ -36,17 +36,17 @@ using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 using trace_id_t = u_int64_t;
 
 using data_service_request_handler_t = std::function< void(boost::intrusive_ptr< sisl::GenericRpcData >& rpc_data) >;
-ENUM(role_regex, uint8_t, LEADER, FOLLOWER, ALL, ANY);
-using peer_id_t = boost::uuids::uuid;
+ENUM(repl_role_regex, uint8_t, LEADER, FOLLOWER, ALL, ANY);
 using svr_id_t = int32_t;
-using destination_t = std::variant< peer_id_t, role_regex, svr_id_t >;
+using repl_dest_t = std::variant< replica_id_t, repl_role_regex, svr_id_t >;
 
-ENUM(data_rpc_error_code, uint8_t, SUCCESS, TIMEOUT, SERVER_NOT_FOUND, CANCELLED, SERVER_ALREADY_EXISTS, TERM_MISMATCH,
-     BAD_REQUEST, FAILED, NOT_SUPPORTED);
+ENUM(repl_data_rpc_error_code, uint8_t, SUCCESS, TIMEOUT, SERVER_NOT_FOUND, CANCELLED, SERVER_ALREADY_EXISTS,
+     TERM_MISMATCH, BAD_REQUEST, FAILED, UNKNOWN, NOT_SUPPORTED);
+
 template < typename T >
-using DataRpcAsyncResult = folly::SemiFuture< Result< T, data_rpc_error_code > >;
+using DataRpcAsyncResult = folly::SemiFuture< Result< T, repl_data_rpc_error_code > >;
 
-using NullDataRpcAsyncResult = AsyncResult< folly::Unit, data_rpc_error_code >;
+using NullDataRpcAsyncResult = AsyncResult< folly::Unit, repl_data_rpc_error_code >;
 
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
@@ -646,13 +646,12 @@ public:
                                       data_service_request_handler_t const& request_handler) = 0;
 
     // send a unidirectional data rpc to dest with request_name and cli_buf
-    virtual NullDataRpcAsyncResult data_request_unidirectional(destination_t const& dest,
-                                                               std::string const& request_name,
+    virtual NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
                                                                sisl::io_blob_list_t const& cli_buf) = 0;
 
     // send a bidirectional data rpc to dest with request_name and cli_buf
     virtual DataRpcAsyncResult< sisl::GenericClientResponse >
-    data_request_bidirectional(destination_t const& dest, std::string const& request_name,
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
                                sisl::io_blob_list_t const& cli_buf) = 0;
 
 protected:
