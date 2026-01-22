@@ -142,7 +142,6 @@ public:
         void notify_committed_lsn(int64_t lsn) override {}
         void on_config_rollback(int64_t lsn) override {}
         void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) override {}
-        void on_log_replay_done(const group_id_t& group_id) override {};
     };
 
     class Application : public ReplApplication {

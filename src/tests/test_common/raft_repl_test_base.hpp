@@ -206,8 +206,6 @@ public:
         repl_dev()->reset_latch_lsn();
     }
 
-    void on_log_replay_done(const group_id_t& group_id) override {};
-
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
         std::lock_guard< std::mutex > lock(m_snapshot_lock);
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();

@@ -449,7 +449,7 @@ public:
     virtual void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) = 0;
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) = 0;
+    virtual void on_log_replay_done(const group_id_t& group_id) {};
 
     virtual void on_become_leader(const group_id_t& group_id) {};
 
