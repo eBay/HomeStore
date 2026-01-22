@@ -35,6 +35,19 @@ using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 using trace_id_t = u_int64_t;
 
+using data_service_request_handler_t = std::function< void(boost::intrusive_ptr< sisl::GenericRpcData >& rpc_data) >;
+ENUM(repl_role_regex, uint8_t, LEADER, FOLLOWER, ALL, ANY);
+using svr_id_t = int32_t;
+using repl_dest_t = std::variant< replica_id_t, repl_role_regex, svr_id_t >;
+
+ENUM(repl_data_rpc_error_code, uint8_t, SUCCESS, TIMEOUT, SERVER_NOT_FOUND, CANCELLED, SERVER_ALREADY_EXISTS,
+     TERM_MISMATCH, BAD_REQUEST, FAILED, UNKNOWN, NOT_SUPPORTED);
+
+template < typename T >
+using DataRpcAsyncResult = folly::SemiFuture< Result< T, repl_data_rpc_error_code > >;
+
+using NullDataRpcAsyncResult = AsyncResult< folly::Unit, repl_data_rpc_error_code >;
+
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
       BLK_ALLOCATED = 1 << 0, // Local block is allocated
@@ -438,6 +451,10 @@ public:
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
     virtual void on_log_replay_done(const group_id_t& group_id) {};
 
+    virtual void on_become_leader(const group_id_t& group_id) {};
+
+    virtual void on_become_follower(const group_id_t& group_id) {};
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };
@@ -623,6 +640,19 @@ public:
 
     // create a snapshot manually and try to compact logs upto compact_lsn
     virtual void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) = 0;
+
+    // add a data rpc service named request_name with request_handler
+    virtual bool add_data_rpc_service(std::string const& request_name,
+                                      data_service_request_handler_t const& request_handler) = 0;
+
+    // send a unidirectional data rpc to dest with request_name and cli_buf
+    virtual NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
+                                                               sisl::io_blob_list_t const& cli_buf) = 0;
+
+    // send a bidirectional data rpc to dest with request_name and cli_buf
+    virtual DataRpcAsyncResult< sisl::GenericClientResponse >
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
+                               sisl::io_blob_list_t const& cli_buf) = 0;
 
 protected:
     shared< ReplDevListener > m_listener;

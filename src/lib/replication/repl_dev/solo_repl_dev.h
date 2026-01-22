@@ -122,6 +122,22 @@ public:
     void truncate();
 
     void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) override { return; }
+    bool add_data_rpc_service(std::string const& request_name,
+                              data_service_request_handler_t const& request_handler) override {
+        // not supported yet
+        return false;
+    }
+
+    NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
+                                                       sisl::io_blob_list_t const& cli_buf) override {
+        return folly::makeUnexpected(repl_data_rpc_error_code::NOT_SUPPORTED);
+    }
+
+    DataRpcAsyncResult< sisl::GenericClientResponse >
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
+                               sisl::io_blob_list_t const& cli_buf) override {
+        return folly::makeUnexpected(repl_data_rpc_error_code::NOT_SUPPORTED);
+    }
 
 private:
     void write_journal(repl_req_ptr_t rreq);

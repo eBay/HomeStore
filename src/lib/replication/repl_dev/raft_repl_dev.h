@@ -323,6 +323,14 @@ public:
     void resume_state_machine() override;
     bool is_state_machine_paused() override;
 
+    bool add_data_rpc_service(std::string const& request_name,
+                              data_service_request_handler_t const& request_handler) override;
+    NullDataRpcAsyncResult data_request_unidirectional(repl_dest_t const& dest, std::string const& request_name,
+                                                       sisl::io_blob_list_t const& cli_buf) override;
+    DataRpcAsyncResult< sisl::GenericClientResponse >
+    data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
+                               sisl::io_blob_list_t const& cli_buf) override;
+
     std::shared_ptr< snapshot_context > deserialize_snapshot_context(sisl::io_blob_safe& snp_ctx) override {
         return std::make_shared< nuraft_snapshot_context >(snp_ctx);
     }
@@ -355,6 +363,7 @@ public:
     void become_follower_cb() {
         m_traffic_ready_lsn.store(0);
         RD_LOGD(NO_TRACE_ID, "become_follower_cb called!");
+        m_listener->on_become_follower(m_group_id);
     }
 
     /// @brief This method is called when the data journal is compacted
@@ -474,6 +483,8 @@ private:
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
     void handle_fetch_data_response(sisl::GenericClientResponse response, std::vector< repl_req_ptr_t > rreqs);
     bool is_resync_mode();
+    repl_data_rpc_error_code nuraft_to_hs_error(nuraft::cmd_result_code const& nuraft_err);
+    nuraft_mesg::destination_t hs_to_nuraft_dest(repl_dest_t dest);
 
     /**
      * \brief This method handles errors that occur during append entries or data receiving.

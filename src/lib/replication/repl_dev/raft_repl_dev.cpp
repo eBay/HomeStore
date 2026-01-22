@@ -22,6 +22,7 @@
 #include "device/device.h"
 #include "push_data_rpc_generated.h"
 #include "fetch_data_rpc_generated.h"
+#include <nuraft_mesg/common.hpp>
 
 namespace homestore {
 std::atomic< uint64_t > RaftReplDev::s_next_group_ordinal{1};
@@ -136,6 +137,66 @@ bool RaftReplDev::join_group() {
         return false;
     }
     return true;
+}
+
+repl_data_rpc_error_code RaftReplDev::nuraft_to_hs_error(nuraft::cmd_result_code const& nuraft_err) {
+    switch (nuraft_err) {
+    case nuraft::cmd_result_code::OK:
+        return repl_data_rpc_error_code::SUCCESS;
+    case nuraft::cmd_result_code::SERVER_NOT_FOUND:
+        return repl_data_rpc_error_code::SERVER_NOT_FOUND;
+    case nuraft::cmd_result_code::TIMEOUT:
+        return repl_data_rpc_error_code::TIMEOUT;
+    case nuraft::cmd_result_code::SERVER_ALREADY_EXISTS:
+        return repl_data_rpc_error_code::SERVER_ALREADY_EXISTS;
+    case nuraft::cmd_result_code::CANCELLED:
+        return repl_data_rpc_error_code::CANCELLED;
+    case nuraft::cmd_result_code::TERM_MISMATCH:
+        return repl_data_rpc_error_code::TERM_MISMATCH;
+    case nuraft::cmd_result_code::BAD_REQUEST:
+        return repl_data_rpc_error_code::BAD_REQUEST;
+    case nuraft::cmd_result_code::FAILED:
+        return repl_data_rpc_error_code::FAILED;
+    default:
+        return repl_data_rpc_error_code::NOT_SUPPORTED;
+    }
+}
+
+nuraft_mesg::destination_t RaftReplDev::hs_to_nuraft_dest(repl_dest_t dest) {
+    if (std::holds_alternative< replica_id_t >(dest)) {
+        return nuraft_mesg::destination_t(std::get< replica_id_t >(dest));
+    } else if (std::holds_alternative< repl_role_regex >(dest)) {
+        return nuraft_mesg::destination_t(static_cast< nuraft_mesg::role_regex >(std::get< repl_role_regex >(dest)));
+    } else {
+        return nuraft_mesg::destination_t(std::get< svr_id_t >(dest));
+    }
+}
+
+bool RaftReplDev::add_data_rpc_service(std::string const& request_name,
+                                       data_service_request_handler_t const& request_handler) {
+    return m_msg_mgr.bind_data_service_request(request_name, m_group_id, request_handler);
+}
+
+NullDataRpcAsyncResult RaftReplDev::data_request_unidirectional(repl_dest_t const& dest,
+                                                                std::string const& request_name,
+                                                                sisl::io_blob_list_t const& cli_buf) {
+    return group_msg_service()
+        ->data_service_request_unidirectional(hs_to_nuraft_dest(dest), request_name, cli_buf)
+        .deferValue([this](auto&& r) -> Result< folly::Unit, repl_data_rpc_error_code > {
+            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_hs_error(r.error())); }
+            return folly::unit;
+        });
+}
+
+DataRpcAsyncResult< sisl::GenericClientResponse >
+RaftReplDev::data_request_bidirectional(repl_dest_t const& dest, std::string const& request_name,
+                                        sisl::io_blob_list_t const& cli_buf) {
+    return group_msg_service()
+        ->data_service_request_bidirectional(hs_to_nuraft_dest(dest), request_name, cli_buf)
+        .deferValue([this](auto&& r) -> Result< sisl::GenericClientResponse, repl_data_rpc_error_code > {
+            if (r.hasError()) { return folly::makeUnexpected(nuraft_to_hs_error(r.error())); }
+            return std::move(r.value());
+        });
 }
 
 // All the steps in the implementation should be idempotent and retryable.
@@ -1204,7 +1265,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         return nullptr;
     }
 
-    RD_LOGD(rkey.traceID, , "in follower_create_req: rreq={}, addr=0x{:x}", rreq->to_string(),
+    RD_LOGD(rkey.traceID, "in follower_create_req: rreq={}, addr=0x{:x}", rreq->to_string(),
             reinterpret_cast< uintptr_t >(rreq.get()));
     return rreq;
 }
@@ -2820,6 +2881,7 @@ void RaftReplDev::become_leader_cb() {
     // becoming a leader.
 
     RD_LOGD(NO_TRACE_ID, "become_leader_cb: setting traffic_ready_lsn from {} to {}", current_gate, new_gate);
+    m_listener->on_become_leader(m_group_id);
 }
 
 bool RaftReplDev::is_ready_for_traffic() const {
