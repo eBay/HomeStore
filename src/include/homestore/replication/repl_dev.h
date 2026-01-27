@@ -397,16 +397,22 @@ public:
     virtual void on_destroy(const group_id_t& group_id) = 0;
 
     /// @brief Called when start replace member.
-    virtual void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                         const replica_member_info& member_in, trace_id_t tid) = 0;
+    /// @param ctx Replace member context with task_id and member info
+    /// @param member_ids Current complete membership ID list from raft config
+    virtual void on_start_replace_member(const replace_member_ctx& ctx, const std::vector< replica_id_t >& member_ids,
+                                         trace_id_t tid) = 0;
 
     /// @brief Called when complete replace member.
-    virtual void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                            const replica_member_info& member_in, trace_id_t tid) = 0;
+    /// @param ctx Replace member context with task_id and member info
+    /// @param member_ids Current complete membership ID list from raft config
+    virtual void on_complete_replace_member(const replace_member_ctx& ctx,
+                                            const std::vector< replica_id_t >& member_ids, trace_id_t tid) = 0;
 
     /// @brief Called when clean replace member task (rollback).
-    virtual void on_clean_replace_member_task(const std::string& task_id, const replica_member_info& member_out,
-                                              const replica_member_info& member_in, trace_id_t tid) = 0;
+    /// @param ctx Replace member context with task_id and member info
+    /// @param member_ids Current complete membership ID list from raft config
+    virtual void on_clean_replace_member_task(const replace_member_ctx& ctx,
+                                               const std::vector< replica_id_t >& member_ids, trace_id_t tid) = 0;
 
     /// @brief Called when remove a member.
     virtual void on_remove_member(const replica_id_t& member, trace_id_t tid) = 0;
@@ -453,7 +459,7 @@ public:
     virtual void on_no_space_left(repl_lsn_t lsn, sisl::blob const& header) = 0;
 
     /// @brief when restart, after all the logs are replayed and before joining raft group, notify the upper layer
-    virtual void on_log_replay_done(const group_id_t& group_id) {};
+    virtual void on_log_replay_done(const group_id_t& group_id){};
 
     virtual void on_become_leader(const group_id_t& group_id) {};
 

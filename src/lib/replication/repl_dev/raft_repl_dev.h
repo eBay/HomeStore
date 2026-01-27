@@ -16,8 +16,6 @@
 
 namespace homestore {
 
-static constexpr uint64_t max_replace_member_task_id_len = 64;
-
 struct replace_member_task_superblk {
     char task_id[max_replace_member_task_id_len];
     replica_id_t replica_out;
@@ -42,21 +40,6 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
-
-struct replace_member_ctx {
-    char task_id[max_replace_member_task_id_len];
-    replica_member_info replica_out;
-    replica_member_info replica_in;
-
-    replace_member_ctx() = default;
-    replace_member_ctx(const std::string& id, const replica_member_info& out, const replica_member_info& in) {
-        auto len = std::min(id.length(), max_replace_member_task_id_len - 1);
-        std::strncpy(task_id, id.c_str(), len);
-        task_id[len] = '\0';
-        replica_out = out;
-        replica_in = in;
-    }
-};
 
 struct truncate_ctx {
     repl_lsn_t truncation_upper_limit = 0;
