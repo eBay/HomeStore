@@ -108,3 +108,6 @@ CMakeSettings.json
 CMakeUserPresets.json
 .vs/**
 .cache
+
+# claude
+.claude/**
