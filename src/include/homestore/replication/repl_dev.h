@@ -404,6 +404,10 @@ public:
     virtual void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
                                             const replica_member_info& member_in, trace_id_t tid) = 0;
 
+    /// @brief Called when clean replace member task (rollback).
+    virtual void on_clean_replace_member_task(const std::string& task_id, const replica_member_info& member_out,
+                                              const replica_member_info& member_in, trace_id_t tid) = 0;
+
     /// @brief Called when remove a member.
     virtual void on_remove_member(const replica_id_t& member, trace_id_t tid) = 0;
 
@@ -552,6 +556,10 @@ public:
     /// @brief get replication status. If called on follower member
     /// this API can return empty result.
     virtual std::vector< peer_info > get_replication_status() const = 0;
+
+    /// @brief Get all members in the replication quorum
+    /// @return List of replica IDs that are part of the replication group
+    virtual std::vector< replica_id_t > get_replication_quorum() = 0;
 
     /// @brief Gets the group_id this repldev is working for
     /// @return group_id

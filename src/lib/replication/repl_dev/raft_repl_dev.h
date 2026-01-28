@@ -290,6 +290,7 @@ public:
     bool is_leader() const override;
     replica_id_t get_leader_id() const override;
     std::vector< peer_info > get_replication_status() const override;
+    std::vector< replica_id_t > get_replication_quorum() override;
     std::set< replica_id_t > get_active_peers() const;
     group_id_t group_id() const override { return m_group_id; }
     void reconcile_leader() override;
