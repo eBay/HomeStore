@@ -24,6 +24,8 @@
 #include "fetch_data_rpc_generated.h"
 #include <nuraft_mesg/common.hpp>
 
+#include <boost/uuid/string_generator.hpp>
+
 namespace homestore {
 std::atomic< uint64_t > RaftReplDev::s_next_group_ordinal{1};
 
@@ -1853,16 +1855,50 @@ void RaftReplDev::clean_replace_member_task(repl_req_ptr_t rreq) {
     auto task_id = std::string(r_cast< const char* >(rreq->header().cbytes()));
     RD_LOGI(rreq->traceID(), "Raft repl clean_replace_member_task commit, task_id={}", task_id);
 
-    std::unique_lock lg{m_sb_mtx};
-    auto persisted_task_id = get_replace_member_task_id();
-    if (!persisted_task_id.empty()) {
-        RD_DBG_ASSERT(persisted_task_id == task_id,
-                      "Invalid task_id in clean_replace_member_task message, received {}, persisted {}", task_id,
-                      persisted_task_id);
-        m_rd_sb->replace_member_task = replace_member_task_superblk{};
-        m_rd_sb.write();
+    replica_member_info member_out;
+    replica_member_info member_in;
+
+    // Step 1: Check and read member info from superblk
+    {
+        std::unique_lock lg{m_sb_mtx};
+        auto persisted_task_id = get_replace_member_task_id();
+        if (persisted_task_id.empty()) {
+            RD_LOGI(rreq->traceID(), "Raft repl clean_replace_member_task: task not found, task_id={}", task_id);
+            return;
+        }
+
+        if (persisted_task_id != task_id) {
+            RD_LOGW(rreq->traceID(),
+                    "Raft repl clean_replace_member_task: task_id mismatch, received={}, persisted={}, skip cleaning",
+                    task_id, persisted_task_id);
+            return;
+        }
+
+        // Read member info from superblk
+        member_out.id = m_rd_sb->replace_member_task.replica_out;
+        member_in.id = m_rd_sb->replace_member_task.replica_in;
     }
-    RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
+
+    // Step 2: Call listener callback to rollback membership in HomeObject
+    if (member_out.id != boost::uuids::nil_uuid() && member_in.id != boost::uuids::nil_uuid()) {
+        RD_LOGI(rreq->traceID(),
+                "Raft repl clean_replace_member_task, callback to listener, task_id={}, member_out={}, member_in={}",
+                task_id, boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+        m_listener->on_clean_replace_member_task(task_id, member_out, member_in, rreq->traceID());
+    } else {
+        RD_LOGW(rreq->traceID(), "Raft repl clean_replace_member_task: invalid member info, skip callback");
+    }
+
+    // Step 3: Clear the replace_member task from superblk
+    {
+        std::unique_lock lg{m_sb_mtx};
+        auto persisted_task_id = get_replace_member_task_id();
+        if (!persisted_task_id.empty()) {
+            m_rd_sb->replace_member_task = replace_member_task_superblk{};
+            m_rd_sb.write();
+            RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
+        }
+    }
 }
 
 void RaftReplDev::update_truncation_boundary(repl_lsn_t truncation_upper_limit) {
@@ -1978,6 +2014,24 @@ std::vector< peer_info > RaftReplDev::get_replication_status() const {
                                   .can_vote = !pinfo.is_learner_});
     }
     return pi;
+}
+
+std::vector< replica_id_t > RaftReplDev::get_replication_quorum() {
+    std::vector< replica_id_t > member_ids;
+    auto msg_service = group_msg_service();
+
+    if (msg_service) {
+        std::list< nuraft_mesg::replica_config > cluster_config;
+        msg_service->get_cluster_config(cluster_config);
+        for (auto const& config : cluster_config) {
+            member_ids.push_back(boost::uuids::string_generator()(config.peer_id));
+        }
+        RD_LOGD(NO_TRACE_ID, "get_replication_quorum: found {} members in cluster config", member_ids.size());
+    } else {
+        RD_LOGW(NO_TRACE_ID, "get_replication_quorum: msg_service is null, returning empty member list");
+    }
+
+    return member_ids;
 }
 
 void RaftReplDev::reconcile_leader() {

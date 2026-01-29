@@ -137,6 +137,8 @@ public:
                                      const replica_member_info& member_in, trace_id_t tid) override {}
         void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
                                         const replica_member_info& member_in, trace_id_t tid) override {}
+        void on_clean_replace_member_task(const std::string& task_id, const replica_member_info& member_out,
+                                          const replica_member_info& member_in, trace_id_t tid) override {}
         void on_remove_member(const replica_id_t& member, trace_id_t tid) override {}
         void on_destroy(const group_id_t& group_id) override {}
         void notify_committed_lsn(int64_t lsn) override {}
