@@ -360,18 +360,21 @@ bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {
     incr_pending_request_num();
     // Fast path
     if (to_lsn == m_tail_lsn.load()) {
+        THIS_LOGSTORE_LOG(INFO, "Rollback to the current tail_lsn {}, no-op", to_lsn);
         decr_pending_request_num();
         return true;
     }
 
-    if (to_lsn > m_tail_lsn.load() || to_lsn < m_start_lsn.load()) {
+    // Special case: allow rollback to exactly start_lsn - 1.
+    // This handles the scenario where all logs were truncated and a leader switch happens before new logs commit.
+    if (to_lsn > m_tail_lsn.load() || to_lsn < m_start_lsn.load() - 1) {
         HS_LOG_ASSERT(false, "Attempted to rollback to {} which is not in the range of [{}, {}]", to_lsn,
-                      m_start_lsn.load(), m_tail_lsn.load());
+                      m_start_lsn.load() - 1, m_tail_lsn.load());
         decr_pending_request_num();
         return false;
     }
 
-    THIS_LOGSTORE_LOG(INFO, "Rolling back to {}, tail {}", to_lsn, m_tail_lsn.load());
+    THIS_LOGSTORE_LOG(INFO, "Rolling back to {}, start {} tail {}", to_lsn, m_start_lsn.load(), m_tail_lsn.load());
     bool do_flush{false};
     do {
         {
