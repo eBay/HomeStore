@@ -698,6 +698,8 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
     auto const do_free = [this](BlkId const& b) {
         BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
         {
+            BLKALLOC_LOG(TRACE, "Freeing directly to portion={} blkid={} set_bits_count={}",
+                         blknum_to_portion_num(b.blk_num()), b.to_string(), get_alloced_blk_count());
             auto const start_blk_id = portion.get_portion_num() * get_blks_per_portion();
             auto const end_blk_id = start_blk_id + get_blks_per_portion() - 1;
             auto lock{portion.portion_auto_lock()};
@@ -707,8 +709,6 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
             BLKALLOC_REL_ASSERT(m_cache_bm->is_bits_set(b.blk_num(), b.blk_count()), "Expected bits to be set");
             m_cache_bm->reset_bits(b.blk_num(), b.blk_count());
         }
-        BLKALLOC_LOG(TRACE, "Freeing directly to portion={} blkid={} set_bits_count={}",
-                     blknum_to_portion_num(b.blk_num()), b.to_string(), get_alloced_blk_count());
         return b.blk_count();
     };
 
