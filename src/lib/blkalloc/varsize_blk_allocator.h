@@ -222,7 +222,7 @@ public:
     blk_num_t get_used_blks() const override;
     bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
-    void reset() override {};
+    void reset() override;
     nlohmann::json get_metrics_in_json();
 
 private:

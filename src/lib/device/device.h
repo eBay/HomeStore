@@ -179,6 +179,11 @@ public:
         return m_chunks[chunk_id].get();
     }
 
+    VirtualDev* get_vdev_mutable(uint32_t vdev_id) {
+        std::unique_lock lg{m_vdev_mutex};
+        return m_vdevs[vdev_id].get();
+    }
+
     uint32_t atomic_page_size(HSDevType dtype) const;
     uint32_t optimal_page_size(HSDevType dtype) const;
     uint32_t align_size(HSDevType dtype) const;

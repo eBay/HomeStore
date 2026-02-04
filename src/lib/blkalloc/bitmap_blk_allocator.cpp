@@ -186,4 +186,12 @@ sisl::ThreadVector< MultiBlkId >* BitmapBlkAllocator::get_alloc_blk_list() {
     return p;
 }
 
+void BitmapBlkAllocator::reset() {
+    // use the reset method to remove the metablk
+    if (m_meta_blk_cookie) {
+        meta_service().remove_sub_sb(m_meta_blk_cookie);
+        m_meta_blk_cookie = nullptr;
+    }
+    meta_service().deregister_handler(get_name());
+}
 } // namespace homestore

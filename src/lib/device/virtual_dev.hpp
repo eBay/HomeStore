@@ -122,6 +122,10 @@ public:
     /// @param chunk Chunk to be added
     virtual void add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk);
 
+    /// @brief Resets the block allocator for a given chunk.
+    /// @param chunk Chunk whose block allocator needs to be reset.
+    virtual void reset_chunk_blk_allocator(Chunk* chunk);
+
     /// @brief Remove chunk from the vdev.
     ///
     /// @param chunk Chunk to be removed.
