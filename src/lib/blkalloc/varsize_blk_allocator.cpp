@@ -877,4 +877,6 @@ std::string VarsizeBlkAllocator::to_string() const {
 }
 
 nlohmann::json VarsizeBlkAllocator::get_metrics_in_json() { return m_metrics.get_result_in_json(true); }
+
+void VarsizeBlkAllocator::reset() { BitmapBlkAllocator::reset(); }
 } // namespace homestore
