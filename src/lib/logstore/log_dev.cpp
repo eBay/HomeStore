@@ -583,10 +583,12 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
     // since we support out-of-order lsn write, so no need to guarantee the order of logstore write completion
     for (auto const& [idx, req] : req_map) {
+        m_pending_callback++;
         auto callback_lambda = [this, dev_offset, idx, req]() {
             auto ld_key = logdev_key{idx, dev_offset};
             auto comp_cb = req->log_store->get_comp_cb();
             (req->cb) ? req->cb(req, ld_key) : comp_cb(req, ld_key);
+            m_pending_callback--;
         };
 
         // if we do not have repl_service, we run the callback in a random worker for the case of log store UT, where
