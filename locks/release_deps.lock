@@ -236,10 +236,10 @@
     "context": "host"
    },
    "21": {
-    "ref": "lz4/1.9.4#1217a03c990b79aa34ed0faede18f534",
+    "ref": "lz4/1.9.4#432ec925e1af7d6e9aa35173c6504dc7",
     "options": "fPIC=True\nshared=False",
     "package_id": "167d94f790a13d2d452e6674cb4624f82019d653",
-    "prev": "8c4bb3a0ef856fbe0a960b877ee09668",
+    "prev": "6d90b59c18706b96a26c73ee10b44e2d",
     "context": "host"
    },
    "22": {
@@ -268,10 +268,10 @@
     "context": "host"
    },
    "25": {
-    "ref": "libelf/0.8.13#4f70a3555809ae50cc8add44f0f84288",
+    "ref": "libelf/0.8.13#c51dff906f36bdd55dc84ef9bb5de13e",
     "options": "fPIC=True\nshared=False",
     "package_id": "167d94f790a13d2d452e6674cb4624f82019d653",
-    "prev": "834f5701a3ca17797d1871f603922e20",
+    "prev": "6d6fc78ae191c8cd1dcea5b2b08a7bdd",
     "context": "host"
    },
    "26": {
@@ -332,10 +332,10 @@
     "context": "host"
    },
    "33": {
-    "ref": "protobuf/3.21.12#ed2404ae366627005beb2173eab68174",
+    "ref": "protobuf/3.21.12#bc8a9a4aba4080d1e204a6fc7cac3a11",
     "options": "debug_suffix=True\nfPIC=True\nlite=False\nshared=False\nwith_rtti=True\nwith_zlib=True\nzlib:fPIC=True\nzlib:shared=False",
     "package_id": "797020f1d46faabe6e00145c76ac2d540967522d",
-    "prev": "ec03b611a7536f028aac9a82fe66756b",
+    "prev": "e4dfbd63a046b3d9ad4a10622bd37af4",
     "requires": [
      "4"
     ],
@@ -503,10 +503,10 @@
     "context": "host"
    },
    "52": {
-    "ref": "farmhash/cci.20190513#af6593f545dd2b496e6bd019f1deb66f",
+    "ref": "farmhash/cci.20190513#60980ffb85c63bbba6514c209f2ee1b8",
     "options": "fPIC=True\nno_builtin_expect=False\nshared=False",
     "package_id": "089583db87cc9bb721a186e76f9ddd934d557dba",
-    "prev": "8d4543965b92e97809e8f06af1b88c33",
+    "prev": "6ec3200c94e61c7896968b1f89e3f0ae",
     "context": "host"
    },
    "53": {
