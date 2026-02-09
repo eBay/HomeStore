@@ -63,6 +63,7 @@ nlohmann::json Chunk::get_status([[maybe_unused]] int log_level) const {
 }
 
 void Chunk::reset_block_allocator() {
+    m_blk_allocator->reset();
     auto vdev_ptr = hs()->device_mgr()->get_vdev_mutable(vdev_id());
     RELEASE_ASSERT(vdev_ptr, "VDev not found for vdev_id: {}", vdev_id());
     vdev_ptr->reset_chunk_blk_allocator(this);

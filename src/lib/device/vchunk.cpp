@@ -27,10 +27,7 @@ blk_num_t VChunk::get_total_blks() const { return m_internal_chunk->blk_allocato
 
 blk_num_t VChunk::get_used_blks() const { return m_internal_chunk->blk_allocator()->get_used_blks(); }
 
-void VChunk::reset() {
-    m_internal_chunk->blk_allocator_mutable()->reset();
-    m_internal_chunk->reset_block_allocator();
-}
+void VChunk::reset() { m_internal_chunk->reset_block_allocator(); }
 
 blk_num_t VChunk::available_blks() const { return m_internal_chunk->blk_allocator()->available_blks(); }
 

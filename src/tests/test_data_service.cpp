@@ -844,6 +844,32 @@ TEST_F(BlkDataServiceTest, TestBasicWrite) {
     LOGINFO("Step 3: I/O completed, do shutdown.");
 }
 
+TEST_F(BlkDataServiceTest, TestUsedCapacity) {
+    // start io in worker thread;
+    const auto io_size = 4 * Ki;
+    LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
+    // check initial capacity
+    EXPECT_EQ(inst().get_used_capacity(), 0);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io(io_size); });
+
+    LOGINFO("Step 2: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 3: Check used size before and after reset blk allocator.");
+    EXPECT_EQ(inst().get_used_capacity(), io_size);
+
+    // get vdev and reset all chunks.
+    // the arguments to open_vdev are not important as we will get the existing vdev.
+    auto vdev_ptr = inst().open_vdev(vdev_info{}, true);
+    for (auto& [_, chunk] : vdev_ptr->get_chunks()) {
+        if (chunk) { chunk->reset_block_allocator(); }
+    }
+
+    EXPECT_EQ(inst().get_used_capacity(), 0);
+
+    LOGINFO("Step 3: I/O completed, do shutdown.");
+}
+
 TEST_F(BlkDataServiceTest, TestWriteMultiplePagesSingleIov) {
     // start io in worker thread;
     const auto io_size = 4 * Mi;
