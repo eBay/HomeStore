@@ -636,29 +636,27 @@ void RaftReplService::start_repl_service_timers() {
                        HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) {
+                nullptr, [this](void*) {
                     LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
                     gc_repl_reqs();
                     gc_repl_devs();
                 });
 
             // Check for queued fetches at the minimum every second
-            uint64_t interval_ns = std::min(
-                HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
+            uint64_t interval_ns =
+                std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
             m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
-                                                                     [this](void *) { fetch_pending_data(); });
+                                                                     [this](void*) { fetch_pending_data(); });
 
             // Flush durable commit lsns to superblock
             // FIXUP: what is the best value for flush_durable_commit_interval_ms?
             m_flush_durable_commit_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) { flush_durable_commit_lsn(); });
+                nullptr, [this](void*) { flush_durable_commit_lsn(); });
 
             m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) {
-                    monitor_replace_member_replication_status();
-                });
+                nullptr, [this](void*) { monitor_replace_member_replication_status(); });
             latch.count_down();
         }
     });
@@ -675,7 +673,7 @@ void RaftReplService::stop_repl_service_timers() {
     });
 }
 
-void RaftReplService::add_to_fetch_queue(cshared<RaftReplDev> &rdev, std::vector<repl_req_ptr_t> rreqs) {
+void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs) {
     std::unique_lock lg(m_pending_fetch_mtx);
     m_pending_fetch_batches.push(std::make_pair(rdev, std::move(rreqs)));
 }
@@ -683,7 +681,7 @@ void RaftReplService::add_to_fetch_queue(cshared<RaftReplDev> &rdev, std::vector
 void RaftReplService::fetch_pending_data() {
     std::unique_lock lg(m_pending_fetch_mtx);
     while (!m_pending_fetch_batches.empty()) {
-        auto const &[d, rreqs] = m_pending_fetch_batches.front();
+        auto const& [d, rreqs] = m_pending_fetch_batches.front();
         if (get_elapsed_time_ms(rreqs.at(0)->created_time()) < HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms)) {
             break;
         }

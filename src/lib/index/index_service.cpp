@@ -45,7 +45,7 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs, shared<
 }
 
 void IndexService::create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks,
-                               chunk_selector_type_t chunk_sel_type, uint32_t chunk_size) {
+                               chunk_selector_type_t chunk_sel_type, uint64_t chunk_size) {
     auto const atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::INDEX_VDEV;

@@ -78,9 +78,7 @@ public:
         return std::vector< peer_info >{
             peer_info{.id_ = m_group_id, .replication_idx_ = 0, .last_succ_resp_us_ = 0, .priority_ = 1}};
     }
-    std::vector< replica_id_t > get_replication_quorum() override {
-        return std::vector< replica_id_t >{m_group_id};
-    }
+    std::vector< replica_id_t > get_replication_quorum() override { return std::vector< replica_id_t >{m_group_id}; }
     void reconcile_leader() override {}
     void yield_leadership(bool immediate_yield, replica_id_t candidate) override {}
     bool is_ready_for_traffic() const override { return true; }

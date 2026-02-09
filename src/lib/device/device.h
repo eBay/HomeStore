@@ -43,18 +43,18 @@ struct vdev_info {
     uint32_t num_mirrors{0};                   // 12: Total number of mirrors
     uint32_t blk_size{0};                      // 16: IO block size for this vdev
     uint32_t num_primary_chunks{0};            // 20: number of primary chunks
-    uint32_t chunk_size{0};                    // 24: chunk size used in vdev.
-    vdev_size_type_t size_type{};              // 28: Whether its a static or dynamic type.
-    uint8_t slot_allocated{0};                 // 29: Is this current slot allocated
-    uint8_t failed{0};                         // 30: set to true if disk is replaced
-    uint8_t hs_dev_type{0};                    // 31: PDev dev type (as in fast or data)
-    uint8_t multi_pdev_choice{0};              // 32: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
-    char name[max_name_len];                   // 33: Name of the vdev
-    uint16_t checksum{0};                      // 97: Checksum of this entire Block
-    uint8_t alloc_type;                        // 98: Allocator type of this vdev
-    uint8_t chunk_sel_type;                    // 99: Chunk Selector type of this vdev_id
-    uint8_t use_slab_allocator{0};             // 100: Use slab allocator for this vdev
-    uint8_t padding[154]{};                    // 101: Padding to make it 256 bytes
+    uint64_t chunk_size{0};                    // 24: chunk size used in vdev.
+    vdev_size_type_t size_type{};              // 32: Whether its a static or dynamic type.
+    uint8_t slot_allocated{0};                 // 33: Is this current slot allocated
+    uint8_t failed{0};                         // 34: set to true if disk is replaced
+    uint8_t hs_dev_type{0};                    // 35: PDev dev type (as in fast or data)
+    uint8_t multi_pdev_choice{0};              // 36: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
+    char name[max_name_len];                   // 37: Name of the vdev
+    uint16_t checksum{0};                      // 101: Checksum of this entire Block
+    uint8_t alloc_type;                        // 102: Allocator type of this vdev
+    uint8_t chunk_sel_type;                    // 103: Chunk Selector type of this vdev_id
+    uint8_t use_slab_allocator{0};             // 104: Use slab allocator for this vdev
+    uint8_t padding[150]{};                    // 105: Padding to make it 256 bytes
     uint8_t user_private[user_private_size]{}; // 128: User sepcific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -107,7 +107,7 @@ struct vdev_parameters {
                                             // NOTE: If pdev opts is ALL_PDEV_STRIPED, then num_chunks would round off
                                             // to number of pdevs evenly
     uint32_t blk_size;                      // Block size vdev operates on
-    uint32_t chunk_size{};                  // Chunk size provided for dynamic vdev.
+    uint64_t chunk_size{};                  // Chunk size provided for dynamic vdev.
     HSDevType dev_type;                     // Which physical device type this vdev belongs to (FAST or DATA)
     blk_allocator_type_t alloc_type;        // which allocator type this vdev wants to be with;
     chunk_selector_type_t chunk_sel_type;   // which chunk selector type this vdev wants to be with;

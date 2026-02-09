@@ -59,6 +59,7 @@ void BitmapBlkAllocator::cp_flush(CP*) {
 
     if (m_is_disk_bm_dirty.load()) {
         sisl::byte_array bitmap_buf = acquire_underlying_buffer();
+        BLKALLOC_LOG(INFO, "Flushing bitmap (name: {} id: {}) size = {}", get_name(), m_chunk_id, bitmap_buf->size());
         if (m_meta_blk_cookie) {
             meta_service().update_sub_sb(bitmap_buf->cbytes(), bitmap_buf->size(), m_meta_blk_cookie);
         } else {
