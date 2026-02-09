@@ -17,6 +17,8 @@
 #include "device/physical_dev.hpp"
 #include "common/homestore_utils.hpp"
 #include "blkalloc/blk_allocator.h"
+#include "device/virtual_dev.hpp"
+#include <homestore/homestore.hpp>
 
 namespace homestore {
 Chunk::Chunk(PhysicalDev* pdev, const chunk_info& cinfo, uint32_t chunk_slot) :
@@ -59,4 +61,12 @@ nlohmann::json Chunk::get_status([[maybe_unused]] int log_level) const {
     j["slot_alloced?"] = is_busy();
     return j;
 }
+
+void Chunk::reset_block_allocator() {
+    m_blk_allocator->reset();
+    auto vdev_ptr = hs()->device_mgr()->get_vdev_mutable(vdev_id());
+    RELEASE_ASSERT(vdev_ptr, "VDev not found for vdev_id: {}", vdev_id());
+    vdev_ptr->reset_chunk_blk_allocator(this);
+}
+
 } // namespace homestore

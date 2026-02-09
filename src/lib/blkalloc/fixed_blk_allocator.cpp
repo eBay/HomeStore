@@ -129,4 +129,6 @@ blk_num_t FixedBlkAllocator::get_used_blks() const { return get_total_blks() - a
 std::string FixedBlkAllocator::to_string() const {
     return fmt::format("Total Blks={} Available_Blks={}", get_total_blks(), available_blks());
 }
+
+void FixedBlkAllocator::reset() { BitmapBlkAllocator::reset(); }
 } // namespace homestore

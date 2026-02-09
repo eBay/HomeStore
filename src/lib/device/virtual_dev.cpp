@@ -128,6 +128,13 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
     m_chunk_selector->add_chunk(chunk);
 }
 
+void VirtualDev::reset_chunk_blk_allocator(Chunk* chunk) {
+    auto ba = create_blk_allocator(m_allocator_type, block_size(), chunk->physical_dev()->optimal_page_size(),
+                                   chunk->physical_dev()->align_size(), chunk->size(), m_auto_recovery,
+                                   chunk->chunk_id(), true /* is_init */, m_use_slab_in_blk_allocator);
+    chunk->set_block_allocator(std::move(ba));
+}
+
 void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
     m_all_chunks.erase(chunk->chunk_id());

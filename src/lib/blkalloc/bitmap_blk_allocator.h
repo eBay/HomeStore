@@ -77,7 +77,7 @@ public:
     void cp_flush(CP* cp) override;
 
     void recovery_completed() override {}
-    void reset() override {}
+    void reset() override;
     blk_num_t get_num_portions() const { return (m_num_blks - 1) / m_blks_per_portion + 1; }
     blk_num_t get_blks_per_portion() const { return m_blks_per_portion; }
 

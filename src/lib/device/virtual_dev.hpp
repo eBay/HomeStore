@@ -122,6 +122,10 @@ public:
     /// @param chunk Chunk to be added
     virtual void add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk);
 
+    /// @brief Resets the block allocator for a given chunk.
+    /// @param chunk Chunk whose block allocator needs to be reset.
+    virtual void reset_chunk_blk_allocator(Chunk* chunk);
+
     /// @brief Remove chunk from the vdev.
     ///
     /// @param chunk Chunk to be removed.
@@ -307,6 +311,8 @@ public:
     static uint64_t get_len(const iovec* iov, int iovcnt);
     const std::set< PhysicalDev* >& get_pdevs() const { return m_pdevs; }
     std::map< uint16_t, shared< Chunk > > get_chunks() const;
+    // only use this method for testing.
+    std::map< uint16_t, shared< Chunk > >& get_chunks_mutable() { return m_all_chunks; }
     shared< Chunk > get_next_chunk(cshared< Chunk >& chunk);
     bool is_blk_exist(MultiBlkId const& b) const;
 
