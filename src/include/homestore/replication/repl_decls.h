@@ -113,6 +113,23 @@ struct replace_member_task {
     replica_id_t replica_in;  // The replica which is going to be added in place of replica_out
 };
 
+// Context for replace member operations (used in callbacks)
+static constexpr size_t max_replace_member_task_id_len = 64;
+struct replace_member_ctx {
+    char task_id[max_replace_member_task_id_len];
+    replica_member_info replica_out;
+    replica_member_info replica_in;
+
+    replace_member_ctx() = default;
+    replace_member_ctx(const std::string& id, const replica_member_info& out, const replica_member_info& in) {
+        auto len = std::min(id.length(), max_replace_member_task_id_len - 1);
+        std::strncpy(task_id, id.c_str(), len);
+        task_id[len] = '\0';
+        replica_out = out;
+        replica_in = in;
+    }
+};
+
 } // namespace homestore
 
 // hash function definitions

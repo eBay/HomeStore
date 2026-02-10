@@ -4,7 +4,7 @@
 #include <iomgr/iomgr_flip.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/nil_generator.hpp>
-
+#include <boost/uuid/string_generator.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <sisl/grpc/rpc_client.hpp>
@@ -23,8 +23,6 @@
 #include "push_data_rpc_generated.h"
 #include "fetch_data_rpc_generated.h"
 #include <nuraft_mesg/common.hpp>
-
-#include <boost/uuid/string_generator.hpp>
 
 namespace homestore {
 std::atomic< uint64_t > RaftReplDev::s_next_group_ordinal{1};
@@ -1815,13 +1813,34 @@ void RaftReplDev::start_replace_member(repl_req_ptr_t rreq) {
     RD_LOGI(rreq->traceID(), "Raft repl start_replace_member commit, task_id={} member_out={} member_in={}",
             ctx->task_id, boost::uuids::to_string(ctx->replica_out.id), boost::uuids::to_string(ctx->replica_in.id));
 
-    m_listener->on_start_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
+    // Get current membership ID list from raft config
+    std::vector< replica_id_t > member_ids;
+    auto config = load_config();
+    RD_REL_ASSERT(config, "Unable to load raft config during start_replace_member");
+
+    auto config_lsn = static_cast< int64_t >(config->get_log_idx());
+    if (rreq->lsn() <= config_lsn) {
+        // This config change was already applied, skip directly
+        RD_LOGI(rreq->traceID(), "Start replace member: rreq lsn={} <= config lsn={}, skipping (already applied)",
+                rreq->lsn(), config_lsn);
+        return;
+    }
+    for (auto const& srv : config->get_servers()) {
+        member_ids.push_back(boost::uuids::string_generator()(srv->get_endpoint()));
+    }
+    RD_LOGD(rreq->traceID(),
+            "Start replace member, rreq lsn={} > config lsn={}, passing {} member IDs from persisted config",
+            rreq->lsn(), config_lsn, member_ids.size());
+
     // record the replace_member intent
     std::unique_lock lg{m_sb_mtx};
     std::strncpy(m_rd_sb->replace_member_task.task_id, ctx->task_id, max_replace_member_task_id_len);
     m_rd_sb->replace_member_task.replica_in = ctx->replica_in.id;
     m_rd_sb->replace_member_task.replica_out = ctx->replica_out.id;
     m_rd_sb.write();
+    lg.unlock(); // Release lock before calling listener
+
+    m_listener->on_start_replace_member(*ctx, member_ids, rreq->traceID());
 }
 
 void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
@@ -1830,7 +1849,24 @@ void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
     RD_LOGI(rreq->traceID(), "Raft repl complete_replace_member commit, task_id={} member_out={} member_in={}", task_id,
             boost::uuids::to_string(ctx->replica_out.id), boost::uuids::to_string(ctx->replica_in.id));
 
-    m_listener->on_complete_replace_member(ctx->task_id, ctx->replica_out, ctx->replica_in, rreq->traceID());
+    // Get current membership ID list from raft config
+    std::vector< replica_id_t > member_ids;
+    auto config = load_config();
+    RD_REL_ASSERT(config, "Unable to load raft config during complete_replace_member");
+
+    auto config_lsn = static_cast< int64_t >(config->get_log_idx());
+    if (rreq->lsn() <= config_lsn) {
+        // This config change was already applied, skip directly
+        RD_LOGI(rreq->traceID(), "Complete replace member: rreq lsn={} <= config lsn={}, skipping (already applied)",
+                rreq->lsn(), config_lsn);
+        return;
+    }
+    for (auto const& srv : config->get_servers()) {
+        member_ids.push_back(boost::uuids::string_generator()(srv->get_endpoint()));
+    }
+    RD_LOGD(rreq->traceID(),
+            "Complete replace member, rreq lsn={} > config lsn={}, passing {} member IDs from persisted config",
+            rreq->lsn(), config_lsn, member_ids.size());
 
     // clear the replace_member intent
     std::unique_lock lg{m_sb_mtx};
@@ -1841,8 +1877,11 @@ void RaftReplDev::complete_replace_member(repl_req_ptr_t rreq) {
                       m_rd_sb->replace_member_task.task_id);
         m_rd_sb->replace_member_task = replace_member_task_superblk{};
         m_rd_sb.write();
+        RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
     }
-    RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared.");
+    lg.unlock(); // Release lock before calling listener
+
+    m_listener->on_complete_replace_member(*ctx, member_ids, rreq->traceID());
 }
 
 void RaftReplDev::remove_member(repl_req_ptr_t rreq) {
@@ -1855,49 +1894,49 @@ void RaftReplDev::clean_replace_member_task(repl_req_ptr_t rreq) {
     auto task_id = std::string(r_cast< const char* >(rreq->header().cbytes()));
     RD_LOGI(rreq->traceID(), "Raft repl clean_replace_member_task commit, task_id={}", task_id);
 
-    replica_member_info member_out;
-    replica_member_info member_in;
+    // Get current membership ID list from raft config
+    std::vector< replica_id_t > member_ids;
+    auto config = load_config();
+    RD_REL_ASSERT(config, "Unable to load raft config during clean_replace_member_task");
 
-    // Step 1: Check and read member info from superblk
-    {
-        std::unique_lock lg{m_sb_mtx};
-        auto persisted_task_id = get_replace_member_task_id();
-        if (persisted_task_id.empty()) {
-            RD_LOGI(rreq->traceID(), "Raft repl clean_replace_member_task: task not found, task_id={}", task_id);
-            return;
-        }
-
-        if (persisted_task_id != task_id) {
-            RD_LOGW(rreq->traceID(),
-                    "Raft repl clean_replace_member_task: task_id mismatch, received={}, persisted={}, skip cleaning",
-                    task_id, persisted_task_id);
-            return;
-        }
-
-        // Read member info from superblk
-        member_out.id = m_rd_sb->replace_member_task.replica_out;
-        member_in.id = m_rd_sb->replace_member_task.replica_in;
+    auto config_lsn = static_cast< int64_t >(config->get_log_idx());
+    if (rreq->lsn() <= config_lsn) {
+        // This config change was already applied, skip directly
+        RD_LOGI(rreq->traceID(), "Clean replace member task: rreq lsn={} <= config lsn={}, skipping (already applied)",
+                rreq->lsn(), config_lsn);
+        return;
     }
+    for (auto const& srv : config->get_servers()) {
+        member_ids.push_back(boost::uuids::string_generator()(srv->get_endpoint()));
+    }
+    RD_LOGD(rreq->traceID(),
+            "Clean replace member task, rreq lsn={} > config lsn={}, passing {} member IDs from persisted config",
+            rreq->lsn(), config_lsn, member_ids.size());
 
-    // Step 2: Call listener callback to rollback membership in HomeObject
-    if (member_out.id != boost::uuids::nil_uuid() && member_in.id != boost::uuids::nil_uuid()) {
-        RD_LOGI(rreq->traceID(),
-                "Raft repl clean_replace_member_task, callback to listener, task_id={}, member_out={}, member_in={}",
-                task_id, boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
-        m_listener->on_clean_replace_member_task(task_id, member_out, member_in, rreq->traceID());
+    // Build context from persisted task info
+    std::unique_lock lg{m_sb_mtx};
+    auto persisted_task_id = get_replace_member_task_id();
+    if (!persisted_task_id.empty()) {
+        RD_DBG_ASSERT(persisted_task_id == task_id,
+                      "Invalid task_id in clean_replace_member_task message, received {}, persisted {}", task_id,
+                      persisted_task_id);
+
+        // Build ctx from superblock
+        replace_member_ctx ctx;
+        std::strncpy(ctx.task_id, task_id.c_str(), std::min(task_id.length(), max_replace_member_task_id_len - 1));
+        ctx.task_id[std::min(task_id.length(), max_replace_member_task_id_len - 1)] = '\0';
+        ctx.replica_out.id = m_rd_sb->replace_member_task.replica_out;
+        ctx.replica_in.id = m_rd_sb->replace_member_task.replica_in;
+
+        m_rd_sb->replace_member_task = replace_member_task_superblk{};
+        m_rd_sb.write();
+
+        RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
+        lg.unlock(); // Release lock before calling listener
+
+        m_listener->on_clean_replace_member_task(ctx, member_ids, rreq->traceID());
     } else {
-        RD_LOGW(rreq->traceID(), "Raft repl clean_replace_member_task: invalid member info, skip callback");
-    }
-
-    // Step 3: Clear the replace_member task from superblk
-    {
-        std::unique_lock lg{m_sb_mtx};
-        auto persisted_task_id = get_replace_member_task_id();
-        if (!persisted_task_id.empty()) {
-            m_rd_sb->replace_member_task = replace_member_task_superblk{};
-            m_rd_sb.write();
-            RD_LOGI(rreq->traceID(), "Raft repl replace_member_task has been cleared, task_id={}", task_id);
-        }
+        RD_LOGW(rreq->traceID(), "No persisted task found for clean, task_id={}", task_id);
     }
 }
 
@@ -2018,19 +2057,14 @@ std::vector< peer_info > RaftReplDev::get_replication_status() const {
 
 std::vector< replica_id_t > RaftReplDev::get_replication_quorum() {
     std::vector< replica_id_t > member_ids;
-    auto msg_service = group_msg_service();
+    auto config = load_config();
+    RD_REL_ASSERT(config, "Unable to load raft config during get_replication_quorum");
 
-    if (msg_service) {
-        std::list< nuraft_mesg::replica_config > cluster_config;
-        msg_service->get_cluster_config(cluster_config);
-        for (auto const& config : cluster_config) {
-            member_ids.push_back(boost::uuids::string_generator()(config.peer_id));
-        }
-        RD_LOGD(NO_TRACE_ID, "get_replication_quorum: found {} members in cluster config", member_ids.size());
-    } else {
-        RD_LOGW(NO_TRACE_ID, "get_replication_quorum: msg_service is null, returning empty member list");
+    for (auto const& srv : config->get_servers()) {
+        member_ids.push_back(boost::uuids::string_generator()(srv->get_endpoint()));
     }
 
+    RD_LOGD(NO_TRACE_ID, "get_replication_quorum: found {} members in raft config", member_ids.size());
     return member_ids;
 }
 

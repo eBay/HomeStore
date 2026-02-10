@@ -362,22 +362,25 @@ public:
         return hints;
     }
 
-    void on_start_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                 const replica_member_info& member_in, trace_id_t tid) override {
-        LOGINFO("[Replica={}] start replace member out {} in {}", g_helper->replica_num(),
-                boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+    void on_start_replace_member(const replace_member_ctx& ctx, const std::vector< replica_id_t >& member_ids,
+                                 trace_id_t tid) override {
+        LOGINFO("[Replica={}] start replace member task_id={} out {} in {}, member_count={}", g_helper->replica_num(),
+                ctx.task_id, boost::uuids::to_string(ctx.replica_out.id), boost::uuids::to_string(ctx.replica_in.id),
+                member_ids.size());
     }
 
-    void on_complete_replace_member(const std::string& task_id, const replica_member_info& member_out,
-                                    const replica_member_info& member_in, trace_id_t tid) override {
-        LOGINFO("[Replica={}] complete replace member out {} in {}", g_helper->replica_num(),
-                boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+    void on_complete_replace_member(const replace_member_ctx& ctx, const std::vector< replica_id_t >& member_ids,
+                                    trace_id_t tid) override {
+        LOGINFO("[Replica={}] complete replace member task_id={} out {} in {}, member_count={}",
+                g_helper->replica_num(), ctx.task_id, boost::uuids::to_string(ctx.replica_out.id),
+                boost::uuids::to_string(ctx.replica_in.id), member_ids.size());
     }
 
-    void on_clean_replace_member_task(const std::string& task_id, const replica_member_info& member_out,
-                                      const replica_member_info& member_in, trace_id_t tid) override {
-        LOGINFO("[Replica={}] clean replace member task {} out {} in {}", g_helper->replica_num(), task_id,
-                boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+    void on_clean_replace_member_task(const replace_member_ctx& ctx, const std::vector< replica_id_t >& member_ids,
+                                      trace_id_t tid) override {
+        LOGINFO("[Replica={}] clean replace member task task_id={} out {} in {}, member_count={}",
+                g_helper->replica_num(), ctx.task_id, boost::uuids::to_string(ctx.replica_out.id),
+                boost::uuids::to_string(ctx.replica_in.id), member_ids.size());
     }
 
     void on_remove_member(const replica_id_t& member, trace_id_t tid) override {
