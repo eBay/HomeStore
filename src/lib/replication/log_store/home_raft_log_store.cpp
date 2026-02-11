@@ -187,8 +187,11 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
     // calls, but it is dangerous to set higher number.
     m_last_durable_lsn = -1;
 
-    m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
-                              nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const appended_seq =
+        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
+                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    HS_REL_ASSERT_EQ(to_repl_lsn(appended_seq), static_cast< repl_lsn_t >(index),
+                     "write_at appended lsn mismatch: expected {} actual {}", index, to_repl_lsn(appended_seq));
 
     auto position_in_cache = index % m_log_entry_cache.size();
     {
