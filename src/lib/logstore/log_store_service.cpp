@@ -64,7 +64,7 @@ void LogStoreService::on_meta_blk_found(const sisl::byte_view& buf, void* meta_c
     HS_REL_ASSERT_EQ(m_sb->version, logstore_service_sb_version, "Invalid version of log service metablk");
 }
 
-folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size) {
+folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, HSDevType devType, uint64_t chunk_size) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
 
     hs_vdev_context hs_ctx;

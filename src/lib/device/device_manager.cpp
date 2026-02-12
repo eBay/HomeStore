@@ -415,7 +415,7 @@ void DeviceManager::compose_vparam(uint64_t vdev_id, vdev_parameters& vparam, st
     }
 
     // Based on the min chunk size, we calculate the max number of chunks that can be created in each target pdev
-    uint32_t min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
+    uint64_t min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
     // FIXME: it is possible that each vdev is less than max_num_chunks, but total is more than MAX_CHUNKS_IN_SYSTEM.
     // uint32 convert is safe as it only overflow when vdev size > 64PB with 16MB min_chunk_size.
     uint32_t max_num_chunks = std::min(uint32_t(vparam.vdev_size / min_chunk_size), hs_super_blk::MAX_CHUNKS_IN_SYSTEM);

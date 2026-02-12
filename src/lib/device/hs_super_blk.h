@@ -207,7 +207,7 @@ public:
         // for a device with 100MB and min_chunk_size = 16MB, we should get 6 chunks, not 7.
         return dinfo.dev_size / min_c_size;
     }
-    static uint32_t min_chunk_size(HSDevType dtype) {
+    static uint64_t min_chunk_size(HSDevType dtype) {
         uint64_t min_chunk_size = (dtype == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
 #ifdef _PRERELEASE
         auto chunk_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");

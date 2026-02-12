@@ -818,7 +818,11 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 
 //////////////////// CP Related API section /////////////////////////////////
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
+#ifdef _PRERELEASE
     LOGTRACEMOD(wbcache, "Starting Index CP Flush with cp \ndag={}", cp_ctx->to_string_with_dags());
+#else
+    LOGINFOMOD(wbcache, "Starting Index CP Flush with cp {}", cp_ctx->id());
+#endif
     // #ifdef _PRERELEASE
     //     static int id = 0;
     //     auto filename = "cp_" + std::to_string(id++) + "_" + std::to_string(rand() % 100) + ".dot";
@@ -833,6 +837,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
         } else {
             CP_PERIODIC_LOG(DEBUG, unmove(cp_ctx->id()), "Btree does not have any dirty buffers to flush");
         }
+        cp_ctx->complete(true);
         return folly::makeFuture< bool >(true); // nothing to flush
     }
 
@@ -946,20 +951,19 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
     if (next_buf) {
         do_flush_one_buf(cp_ctx, next_buf, false);
     } else if (!has_more) {
-        for (const auto& ordinal : m_updated_ordinals) {
-            LOGTRACEMOD(wbcache, "Updating sb for ordinal {}", ordinal);
-            index_service().write_sb(ordinal);
-        }
-
         // We are done flushing the buffers, We flush the vdev to persist the vdev bitmaps and free blks
         // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
         iomanager.run_on_forget(cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
+            for (const auto& ordinal : m_updated_ordinals) {
+                LOGTRACEMOD(wbcache, "Updating sb for ordinal {}", ordinal);
+                index_service().write_sb(ordinal);
+            }
             auto cp_id = cp_ctx->id();
-            LOGTRACEMOD(wbcache, "Initiating CP {} flush", cp_id);
+            LOGINFOMOD(wbcache, "Initiating CP {} flush", cp_id);
             m_vdev->cp_flush(cp_ctx); // This is a blocking io call
             LOGTRACEMOD(wbcache, "CP {} freed blkids: \n{}", cp_id, cp_ctx->to_string_free_list());
             cp_ctx->complete(true);
-            LOGTRACEMOD(wbcache, "Completed CP {} flush", cp_id);
+            LOGINFOMOD(wbcache, "Completed CP {} flush", cp_id);
         });
     }
 }
