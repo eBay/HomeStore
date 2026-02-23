@@ -624,6 +624,8 @@ public:
 
     virtual void reset_latch_lsn() { return; }
 
+    virtual void flush_durable_commit_lsn() {}
+
     virtual shared< ReplDevListener > get_listener() { return m_listener; }
 
     // we have no shutdown for repl_dev, since shutdown repl_dev is done by repl_service
