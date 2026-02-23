@@ -420,7 +420,7 @@ public:
     /**
      * Flush the durable commit LSN to the superblock
      */
-    void flush_durable_commit_lsn();
+    void flush_durable_commit_lsn() override;
 
     /**
      * Monitor the replace_member replication status, if the new member is fully synced up and ready to take over,
