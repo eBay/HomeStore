@@ -262,6 +262,227 @@ TEST_F(PDevTest, RandomChunkOpsWithRestart) {
             num_removed, available_size);
 }
 
+// Test fixture for superblock error handling tests
+class SuperblockErrorTest : public ::testing::Test {
+protected:
+    std::string m_test_file;
+    uint64_t m_dev_size{100 * 1024 * 1024}; // 100MB
+
+    void SetUp() override {
+        m_test_file = "/tmp/test_superblock_error";
+        init_file(m_test_file, m_dev_size);
+
+        auto const is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
+    }
+
+    void TearDown() override {
+        iomanager.stop();
+        if (std::filesystem::exists(m_test_file)) {
+            std::filesystem::remove(m_test_file);
+        }
+    }
+
+    // Helper to corrupt a file at specific offset
+    void corrupt_file_at_offset(uint64_t offset, uint64_t size) {
+        std::fstream file(m_test_file, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(file.is_open());
+        file.seekp(offset);
+        std::vector<uint8_t> garbage(size, 0xAA); // Fill with garbage
+        file.write(reinterpret_cast<char*>(garbage.data()), size);
+        file.close();
+    }
+
+    // Helper to truncate file to simulate IO errors
+    void truncate_file(uint64_t new_size) {
+        std::filesystem::resize_file(m_test_file, new_size);
+    }
+};
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockIOError) {
+    LOGINFO("Test: read_first_block should crash on IO error");
+
+    // Truncate the file to be too small to contain first block
+    truncate_file(512); // Less than first_block::s_io_fb_size (4096)
+
+    // Attempt to read first block should crash with HS_REL_ASSERT
+    ASSERT_DEATH({
+        PhysicalDev::read_first_block(m_test_file, O_RDWR);
+    }, "IO error reading first block");
+}
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockCorruptedData) {
+    LOGINFO("Test: read_first_block should return invalid first_block on corrupted data");
+
+    // Fill the first block area with garbage
+    corrupt_file_at_offset(0, 4096);
+
+    // Reading should succeed but return invalid first_block
+    ASSERT_NO_THROW({
+        auto fblk = PhysicalDev::read_first_block(m_test_file, O_RDWR);
+        ASSERT_FALSE(fblk.is_valid()) << "Corrupted first block should be invalid";
+        LOGINFO("Successfully read corrupted first block, is_valid={}", fblk.is_valid());
+    });
+}
+
+TEST_F(SuperblockErrorTest, FooterValidationHDDDevice) {
+    LOGINFO("Test: Footer validation should detect header/footer mismatch on HDD");
+
+    // First, create a properly formatted device
+    std::vector<dev_info> dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+
+    auto dmgr = std::make_unique<DeviceManager>(
+        dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    // Get the pdev to check if it has footer mirroring
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0);
+    auto pdev = pdevs[0];
+
+    // For HDD devices (with footer mirroring), test footer validation
+    if (pdev->atomic_page_size() > 0) {
+        LOGINFO("Device has footer mirroring enabled, testing footer corruption detection");
+
+        dmgr.reset();
+        iomanager.stop();
+
+        // Calculate footer offset: data_end_offset = devsize - data_offset
+        // Footer first block is at: data_end_offset + first_block_offset (0)
+        auto data_offset = hs_super_blk::first_block_offset() +
+                          hs_super_blk::total_size(dev_infos[0]);
+        auto footer_offset = m_dev_size - data_offset;
+
+        LOGINFO("Corrupting footer at offset={}", footer_offset);
+        corrupt_file_at_offset(footer_offset, 512);
+
+        // Restart should crash because footer doesn't match header
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+        ASSERT_DEATH({
+            auto dmgr2 = std::make_unique<DeviceManager>(
+                dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+            dmgr2->load_devices();
+        }, "Footer first block mismatch");
+    } else {
+        LOGINFO("Device does not have footer mirroring, skipping footer corruption test");
+    }
+}
+
+TEST_F(SuperblockErrorTest, FooterIOError) {
+    LOGINFO("Test: Footer read IO error should be caught during sanity_check");
+
+    // First, create a properly formatted device
+    std::vector<dev_info> dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+
+    auto dmgr = std::make_unique<DeviceManager>(
+        dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0);
+    auto pdev = pdevs[0];
+
+    // For HDD devices, test footer IO error
+    if (pdev->atomic_page_size() > 0) {
+        LOGINFO("Device has footer mirroring enabled, testing footer IO error");
+
+        dmgr.reset();
+        iomanager.stop();
+
+        // Truncate file to cut off the footer area
+        auto data_offset = hs_super_blk::first_block_offset() +
+                          hs_super_blk::total_size(dev_infos[0]);
+        auto truncate_size = data_offset + 1024; // Cut off before footer
+
+        LOGINFO("Truncating file to size={} to cause footer IO error", truncate_size);
+        truncate_file(truncate_size);
+
+        // Restart should crash because footer cannot be read
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+        ASSERT_DEATH({
+            auto dmgr2 = std::make_unique<DeviceManager>(
+                dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+            dmgr2->load_devices();
+        }, "IO error reading footer first block");
+    } else {
+        LOGINFO("Device does not have footer mirroring, skipping footer IO error test");
+    }
+}
+
+TEST_F(SuperblockErrorTest, NonHDDDeviceSkipsFooterValidation) {
+    LOGINFO("Test: Non-HDD devices should skip footer validation");
+
+    // Create device as Fast type (SSD), which typically doesn't have footer mirroring
+    std::vector<dev_info> dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Fast);
+
+    auto dmgr = std::make_unique<DeviceManager>(
+        dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Fast);
+    ASSERT_GT(pdevs.size(), 0);
+
+    // Should restart successfully even if we corrupt the footer area
+    dmgr.reset();
+    iomanager.stop();
+
+    // Corrupt what would be the footer area
+    auto data_offset = hs_super_blk::first_block_offset() +
+                      hs_super_blk::total_size(dev_infos[0]);
+    auto footer_offset = m_dev_size - data_offset;
+    corrupt_file_at_offset(footer_offset, 4096);
+
+    // Should succeed because SSD doesn't validate footer
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        auto dmgr2 = std::make_unique<DeviceManager>(
+            dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+        dmgr2->load_devices();
+        LOGINFO("Successfully loaded device without footer validation");
+    });
+}
+
+TEST_F(SuperblockErrorTest, ValidFooterMatchesHeader) {
+    LOGINFO("Test: Valid footer should match header on HDD device");
+
+    std::vector<dev_info> dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+
+    auto dmgr = std::make_unique<DeviceManager>(
+        dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0);
+
+    // Restart should succeed with matching header and footer
+    dmgr.reset();
+    iomanager.stop();
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        auto dmgr2 = std::make_unique<DeviceManager>(
+            dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+        dmgr2->load_devices();
+        LOGINFO("Successfully validated matching header and footer");
+    });
+}
+
 int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(argc, argv, logging, test_pdev, iomgr);
     ::testing::InitGoogleTest(&argc, argv);

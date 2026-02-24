@@ -154,6 +154,7 @@ public:
 
     std::error_code read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
     void write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset);
+    void sanity_check();
     void close_device();
 
     //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////
