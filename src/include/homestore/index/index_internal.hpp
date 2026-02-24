@@ -99,6 +99,8 @@ public:
     virtual void update_sb() = 0;
     virtual void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) = 0;
     virtual bool sanity_check(const IndexBufferPtrList& bufs) const = 0;
+    virtual void dump_tree_to_file(const std::string& file) const = 0;
+    virtual void to_string() const = 0;
 };
 
 enum class index_buf_state_t : uint8_t {

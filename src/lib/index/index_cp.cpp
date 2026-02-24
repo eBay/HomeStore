@@ -231,6 +231,7 @@ void IndexCPContext::log_dags() {
 
 std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
     txn_journal const* tj = r_cast< txn_journal const* >(sb.bytes());
+    LOGINFO("transaction {}",tj->to_string());
     if (tj->cp_id != id()) {
         // On clean shutdown, cp_id would be lesser than the current cp_id, in that case ignore this sb
         HS_DBG_ASSERT_LT(tj->cp_id, id(), "Persisted cp in wb txn journal is more than current cp");

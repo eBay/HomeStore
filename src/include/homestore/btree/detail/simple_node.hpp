@@ -221,9 +221,9 @@ public:
     std::string to_string(bool print_friendly = false) const override {
         auto snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
         auto str =
-            fmt::format("{}id={} level={} nEntries={} {} {} {}",
+            fmt::format("{}id={} level={} nEntries={} last_cp={} {} {} {}",
                         (print_friendly ? "------------------------------------------------------------\n" : ""),
-                        this->node_id(), this->level(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
+                        this->node_id(), this->level(), this->total_entries(), this->get_persistent_header_const()->modified_cp_id ,(this->is_leaf() ? "LEAF" : "INTERIOR"),
                         snext, this->is_node_deleted() ? "  Deleted" : " LIVE");
         if (this->has_valid_edge()) {
             fmt::format_to(std::back_inserter(str), " edge={}.{}", this->edge_info().m_bnodeid,

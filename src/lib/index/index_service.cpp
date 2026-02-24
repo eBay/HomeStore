@@ -114,6 +114,7 @@ void IndexService::start() {
     std::unique_lock lg(m_index_map_mtx);
     for (const auto& [_, tbl] : m_index_map) {
         tbl->recovery_completed();
+        tbl->dump_tree_to_file(fmt::format("/logs/logs/latest/index_table_{}.txt", tbl->ordinal()));
 #ifdef _PRERELEASE
         tbl->audit_tree();
 #endif
