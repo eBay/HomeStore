@@ -132,6 +132,12 @@ public:
         return true;
     }
 
+    void dump_tree_to_file(const std::string& file) const override {
+        Btree< K, V >::dump_tree_to_file(file);
+    }
+    void to_string() const override {
+        Btree< K, V >::dump_tree_to_file();
+    }
     btree_status_t destroy() override {
         if (is_stopping()) return btree_status_t::stopping;
         incr_pending_request_num();
