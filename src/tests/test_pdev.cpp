@@ -24,7 +24,9 @@
 #include <random>
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/drive_interface.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -34,8 +36,70 @@
 #include "device/physical_dev.hpp"
 
 using namespace homestore;
+using ::testing::_;
+using ::testing::Return;
+using ::testing::Invoke;
+
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_pdev, iomgr)
+
+// Mock DriveInterface for testing
+class MockDriveInterface : public iomgr::DriveInterface {
+public:
+    MockDriveInterface() : DriveInterface(nullptr) {}
+
+    // IOInterface pure virtual methods
+    MOCK_METHOD(std::string, name, (), (const, override));
+    MOCK_METHOD(void, init_iface_reactor_context, (iomgr::IOReactor*), (override));
+    MOCK_METHOD(void, clear_iface_reactor_context, (iomgr::IOReactor*), (override));
+
+    // DriveInterface pure virtual methods
+    MOCK_METHOD(iomgr::drive_interface_type, interface_type, (), (const, override));
+    MOCK_METHOD(void, close_dev, (const iomgr::io_device_ptr&), (override));
+
+    // Sync IO methods (the ones we care about for testing)
+    MOCK_METHOD(std::error_code, sync_write, (iomgr::IODevice*, const char*, uint32_t, uint64_t), (override));
+    MOCK_METHOD(std::error_code, sync_writev, (iomgr::IODevice*, const iovec*, int, uint32_t, uint64_t), (override));
+    MOCK_METHOD(std::error_code, sync_read, (iomgr::IODevice*, char*, uint32_t, uint64_t), (override));
+    MOCK_METHOD(std::error_code, sync_readv, (iomgr::IODevice*, const iovec*, int, uint32_t, uint64_t), (override));
+    MOCK_METHOD(std::error_code, sync_write_zero, (iomgr::IODevice*, uint64_t, uint64_t), (override));
+
+    // Async IO methods (not used in these tests, provide default implementations)
+    MOCK_METHOD(folly::Future<std::error_code>, async_write,
+                (iomgr::IODevice*, const char*, uint32_t, uint64_t, bool), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, async_writev,
+                (iomgr::IODevice*, const iovec*, int, uint32_t, uint64_t, bool), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, async_read,
+                (iomgr::IODevice*, char*, uint32_t, uint64_t, bool), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, async_readv,
+                (iomgr::IODevice*, const iovec*, int, uint32_t, uint64_t, bool), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, async_unmap,
+                (iomgr::IODevice*, uint32_t, uint64_t, bool), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, async_write_zero,
+                (iomgr::IODevice*, uint64_t, uint64_t), (override));
+    MOCK_METHOD(folly::Future<std::error_code>, queue_fsync, (iomgr::IODevice*), (override));
+    MOCK_METHOD(void, submit_batch, (), (override));
+
+    // Other required methods
+    MOCK_METHOD(iomgr::DriveInterfaceMetrics&, get_metrics, (), (override));
+    MOCK_METHOD(size_t, get_dev_size, (iomgr::IODevice*), (override));
+    MOCK_METHOD(iomgr::drive_attributes, get_attributes, (const std::string&, iomgr::drive_type), (override));
+    MOCK_METHOD(iomgr::io_device_ptr, open_dev, (const std::string&, iomgr::drive_type, int), (override));
+};
+
+// Mock IODevice for testing
+class MockIODevice : public iomgr::IODevice {
+public:
+    MockIODevice(iomgr::DriveInterface* drive_iface)
+        : IODevice(0, iomgr::reactor_regex::all_user), m_drive_iface(drive_iface) {
+        io_interface = drive_iface;
+    }
+
+    iomgr::DriveInterface* drive_interface() { return m_drive_iface; }
+
+private:
+    iomgr::DriveInterface* m_drive_iface;
+};
 
 SISL_OPTION_GROUP(test_pdev,
                   (num_data_devs, "", "num_data_devs", "number of data devices to create",
@@ -260,6 +324,198 @@ TEST_F(PDevTest, RandomChunkOpsWithRestart) {
 
     LOGINFO("Test created {} chunks and removed {} chunks successfully, final available size={}", num_created,
             num_removed, available_size);
+}
+
+// Test fixture for superblock error handling tests
+class SuperblockErrorTest : public ::testing::Test {
+protected:
+    std::string m_test_file{"/tmp/test_superblock_error"};
+    static constexpr uint64_t TEST_DEV_SIZE{100 * 1024 * 1024}; // 100MB
+
+    void SetUp() override {
+        init_file(m_test_file, TEST_DEV_SIZE);
+        auto const is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
+    }
+
+    void TearDown() override {
+        iomanager.stop();
+        homestore::test::clear_device_cache();
+        if (std::filesystem::exists(m_test_file)) {
+            std::filesystem::remove(m_test_file);
+        }
+    }
+
+    void corrupt_file_at_offset(uint64_t offset, uint64_t size) {
+        std::fstream file(m_test_file, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(file.is_open()) << "Failed to open file for corruption";
+        file.seekp(offset);
+        std::vector<uint8_t> garbage(size, 0xAA);
+        file.write(reinterpret_cast<char*>(garbage.data()), size);
+    }
+
+    void truncate_file(uint64_t new_size) {
+        std::filesystem::resize_file(m_test_file, new_size);
+    }
+
+    auto create_device_manager() {
+        std::vector<dev_info> dev_infos;
+        dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+        return std::make_unique<DeviceManager>(
+            dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+    }
+};
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockIOError) {
+    LOGINFO("Test: IO error during first block read should throw system_error");
+
+    auto mock_drive = std::make_shared<MockDriveInterface>();
+    auto mock_iodev = std::make_shared<MockIODevice>(mock_drive.get());
+
+    EXPECT_CALL(*mock_drive, sync_read(_, _, _, _))
+        .WillOnce(Return(std::make_error_code(std::errc::io_error)));
+    EXPECT_CALL(*mock_drive, close_dev(_)).WillRepeatedly(Return());
+
+    homestore::test::clear_device_cache();
+    homestore::test::inject_io_device(m_test_file, mock_iodev);
+
+    ASSERT_THROW({
+        PhysicalDev::read_first_block(m_test_file, O_RDWR);
+    }, std::system_error);
+
+    homestore::test::clear_device_cache();
+}
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockCorruptedData) {
+    LOGINFO("Test: Corrupted first block data should return invalid first_block");
+
+    auto mock_drive = std::make_shared<MockDriveInterface>();
+    auto mock_iodev = std::make_shared<MockIODevice>(mock_drive.get());
+
+    EXPECT_CALL(*mock_drive, sync_read(_, _, _, _))
+        .WillOnce(Invoke([](iomgr::IODevice*, char* data, uint32_t size, uint64_t) {
+            std::memset(data, 0xAA, size);
+            return std::error_code{};
+        }));
+    EXPECT_CALL(*mock_drive, close_dev(_)).WillRepeatedly(Return());
+
+    homestore::test::clear_device_cache();
+    homestore::test::inject_io_device(m_test_file, mock_iodev);
+
+    auto fblk = PhysicalDev::read_first_block(m_test_file, O_RDWR);
+    ASSERT_FALSE(fblk.is_valid()) << "Corrupted first block should be invalid";
+
+    homestore::test::clear_device_cache();
+}
+
+TEST_F(SuperblockErrorTest, FooterValidationHDDDevice) {
+    LOGINFO("Test: HDD footer corruption should be detected during device load");
+
+    iomgr::DriveInterface::emulate_drive_type(m_test_file, iomgr::drive_type::file_on_hdd);
+
+    auto dmgr = create_device_manager();
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0);
+    auto pdev = pdevs[0];
+    ASSERT_GT(pdev->atomic_page_size(), 0) << "Footer mirroring should be enabled for HDD";
+
+    auto footer_offset = pdev->data_end_offset() + hs_super_blk::first_block_offset();
+
+    dmgr.reset();
+    iomanager.stop();
+    homestore::test::clear_device_cache();
+
+    corrupt_file_at_offset(footer_offset, 512);
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_THROW({
+        auto dmgr2 = create_device_manager();
+        dmgr2->load_devices();
+    }, std::runtime_error);
+}
+
+TEST_F(SuperblockErrorTest, FooterIOError) {
+    LOGINFO("Test: HDD footer IO error should throw during device load");
+
+    iomgr::DriveInterface::emulate_drive_type(m_test_file, iomgr::drive_type::file_on_hdd);
+
+    auto dmgr = create_device_manager();
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0);
+    ASSERT_GT(pdevs[0]->atomic_page_size(), 0) << "Footer mirroring should be enabled for HDD";
+
+    dmgr.reset();
+    iomanager.stop();
+    homestore::test::clear_device_cache();
+
+    // Truncate file to cut off footer area (4K aligned to avoid DIO errors)
+    dev_info temp_dinfo(m_test_file, HSDevType::Data);
+    auto data_offset = hs_super_blk::first_block_offset() + hs_super_blk::total_size(temp_dinfo);
+    auto truncate_size = sisl::round_down(data_offset + 1024, 4096ul);
+    truncate_file(truncate_size);
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_THROW({
+        auto dmgr2 = create_device_manager();
+        dmgr2->load_devices();
+    }, std::system_error);
+}
+
+TEST_F(SuperblockErrorTest, NonHDDDeviceSkipsFooterValidation) {
+    LOGINFO("Test: SSD devices should skip footer validation");
+
+    iomgr::DriveInterface::emulate_drive_type(m_test_file, iomgr::drive_type::file_on_nvme);
+
+    std::vector<dev_info> dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Fast);
+
+    auto dmgr = std::make_unique<DeviceManager>(
+        dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    dmgr.reset();
+    iomanager.stop();
+
+    // Corrupt footer area - should be ignored by SSD devices
+    auto data_offset = hs_super_blk::first_block_offset() + hs_super_blk::total_size(dev_infos[0]);
+    corrupt_file_at_offset(TEST_DEV_SIZE - data_offset, 4096);
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        auto dmgr2 = std::make_unique<DeviceManager>(
+            dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+        dmgr2->load_devices();
+    });
+}
+
+TEST_F(SuperblockErrorTest, ValidFooterMatchesHeader) {
+    LOGINFO("Test: Valid HDD footer should pass validation");
+
+    iomgr::DriveInterface::emulate_drive_type(m_test_file, iomgr::drive_type::file_on_hdd);
+
+    auto dmgr = create_device_manager();
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    dmgr.reset();
+    iomanager.stop();
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        auto dmgr2 = create_device_manager();
+        dmgr2->load_devices();
+    });
 }
 
 int main(int argc, char* argv[]) {
