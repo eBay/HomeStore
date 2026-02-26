@@ -309,7 +309,6 @@ void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t stor
     HS_LOG(INFO, logstore, "Removing logstore {} from logdev {}", store_id, logdev_id);
     incr_pending_request_num();
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
-    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
     if (it == m_id_logdev_map.end()) {
         HS_LOG(WARN, logstore, "logdev id {} doesnt exist", logdev_id);
@@ -325,6 +324,7 @@ void LogStoreService::device_truncate() {
     // TODO: make device_truncate_under_lock return future and do collectAllFutures;
     if (is_stopping()) return;
     incr_pending_request_num();
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
     for (auto& [id, logdev] : m_id_logdev_map) {
         HS_LOG(DEBUG, logstore, "Truncating logdev {}", id);
         logdev->truncate();

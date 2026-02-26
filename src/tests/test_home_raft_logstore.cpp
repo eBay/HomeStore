@@ -66,6 +66,15 @@ public:
         ASSERT_EQ(m_rls->start_index(), m_start_lsn) << "Start Index not expected to be updated after insertion";
     }
 
+    void write_at_start_bounday_test(nuraft::ptr< nuraft::log_entry >& le) {
+        m_rls->write_at(m_start_lsn, le);
+        ASSERT_EQ(m_rls->entry_at(m_start_lsn)->get_term(), le->get_term());
+        m_next_lsn = m_start_lsn + 1;
+        ASSERT_EQ(m_rls->start_index(), m_start_lsn);
+        ASSERT_EQ(m_rls->last_index(), m_start_lsn);
+        ASSERT_EQ(m_rls->next_slot(), m_next_lsn);
+    }
+
     void rollback_test() {
         m_next_lsn = (m_next_lsn - m_start_lsn) / 2; // Rollback half of the current logs
         ++m_cur_term;
@@ -89,6 +98,13 @@ public:
         m_start_lsn = compact_upto + 1;
         m_rls->compact(compact_upto);
         ASSERT_EQ(m_rls->start_index(), m_start_lsn) << "Post compaction, start_index is invalid";
+        validate_all_logs();
+    }
+
+    void compact_all_test() {
+        m_start_lsn = m_next_lsn;
+        m_rls->compact(m_next_lsn - 1);
+        ASSERT_EQ(m_rls->start_index(), m_next_lsn) << "Post compaction, start_index is invalid";
         validate_all_logs();
     }
 
@@ -256,6 +272,24 @@ TEST_F(TestRaftLogStore, lifecycle_test) {
     LOGINFO("Step 13: Post recovery do append test");
     this->m_leader_store.append_read_test(nrecords);   // total_records in leader = 2000
     this->m_follower_store.append_read_test(nrecords); // total_records in follower = 4000
+}
+
+TEST_F(TestRaftLogStore, write_at_start_boundary_test) {
+    LOGINFO("Step 1: Append some records and then compact all");
+    this->m_leader_store.append_read_test(2);
+    this->m_leader_store.compact_all_test();
+
+    LOGINFO("Step 2: Write at start boundary when no logs exist, expect allowed");
+    // no more logs exist, write_at at start boundary should be allowed
+    auto le = nuraft::cs_new< nuraft::log_entry >(5 /*term*/, nuraft::buffer::alloc(8));
+    le->get_buf().put("ALLOW");
+    this->m_leader_store.write_at_start_bounday_test(le);
+
+    LOGINFO("Step 3: Write at start boundary again, expect allowed");
+    // write_at start boundary again to make sure rollback is allowed
+    le = nuraft::cs_new< nuraft::log_entry >(6 /*term*/, nuraft::buffer::alloc(8));
+    le->get_buf().put("ALLOW2");
+    this->m_leader_store.write_at_start_bounday_test(le);
 }
 
 SISL_OPTIONS_ENABLE(logging, test_home_raft_log_store, iomgr, test_common_setup)
