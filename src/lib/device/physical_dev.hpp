@@ -154,6 +154,7 @@ public:
 
     std::error_code read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
     void write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset);
+    void sanity_check();
     void close_device();
 
     //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////
@@ -239,4 +240,13 @@ private:
     void free_chunk_info(chunk_info* cinfo);
     ChunkInterval find_next_chunk_area(uint64_t size) const;
 };
+
+// Test-only namespace for functions that manipulate internal state for testing purposes
+// These functions allow tests to inject mock devices into the cache to test error scenarios
+// that cannot be easily triggered through normal code paths (e.g., IO errors, corrupted data).
+namespace test {
+void inject_io_device(const std::string& devname, iomgr::io_device_ptr iodev);
+void clear_device_cache();
+} // namespace test
+
 } // namespace homestore
