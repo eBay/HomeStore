@@ -767,6 +767,13 @@ void VirtualDev::recovery_completed() {
     }
 }
 
+void VirtualDev::foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) {
+    std::unique_lock lg{m_mgmt_mutex};
+    for (auto& [_, chunk] : m_all_chunks) {
+        cb(chunk);
+    }
+}
+
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());

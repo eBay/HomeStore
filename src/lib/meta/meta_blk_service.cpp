@@ -104,6 +104,19 @@ void MetaBlkService::start(bool need_format) {
     recover();
 }
 
+void MetaBlkService::scan(const std::string& scan_type, std::optional< uint16_t > debug_chunk_id,
+                          std::optional< blk_num_t > debug_blk_num) {
+    if (scan_type == "chunk") {
+        HS_LOG(INFO, metablk, "Scanning meta blks on all chunk");
+        scan_blks_on_all_chunks(debug_chunk_id, debug_blk_num);
+    } else if (scan_type == "chain") {
+        HS_LOG(INFO, metablk, "Scanning meta blks by chain");
+        scan_blks_by_chain();
+    } else {
+        HS_LOG(ERROR, metablk, "Unsupported scan type: {}", scan_type);
+    }
+}
+
 void MetaBlkService::stop() {
     {
         std::lock_guard< decltype(m_shutdown_mtx) > lg_shutdown{m_shutdown_mtx};
@@ -220,6 +233,316 @@ void MetaBlkService::scan_meta_blks() {
     cache_clear();
     const auto self_recover = scan_and_load_meta_blks(m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info);
     if (self_recover) { set_self_recover(); }
+}
+
+ENUM(PGState, uint8_t, ALIVE = 0, DESTROYED);
+
+struct ShardInfo {
+    enum class State : uint8_t {
+        OPEN = 0,
+        SEALED = 1,
+        DELETED = 2,
+    };
+
+    uint64_t id;
+    uint16_t placement_group;
+    State state;
+    uint64_t lsn; // created_lsn
+    uint64_t created_time;
+    uint64_t last_modified_time;
+    uint64_t available_capacity_bytes;
+    uint64_t total_capacity_bytes;
+    std::optional< boost::uuids::uuid > current_leader{std::nullopt};
+
+    auto operator<=>(ShardInfo const& rhs) const { return id <=> rhs.id; }
+    auto operator==(ShardInfo const& rhs) const { return id == rhs.id; }
+    bool is_open() const { return state == State::OPEN; }
+
+    // to_string method for printing shard info
+    std::string to_string() const {
+        return fmt::format("ShardInfo: id={}, placement_group={}, state={}, lsn={}, "
+                           "created_time={}, last_modified_time={}, available_capacity_bytes={}, "
+                           "total_capacity_bytes={}, current_leader={}",
+                           id, placement_group, static_cast< uint8_t >(state), lsn, created_time, last_modified_time,
+                           available_capacity_bytes, total_capacity_bytes,
+                           current_leader.has_value() ? boost::uuids::to_string(current_leader.value()) : "null");
+    }
+};
+
+#pragma pack(push, 1)
+struct pg_info_superblk {
+    uint16_t id;
+    PGState state;
+    // num_expected_members means how many members a  pg should have, while num_dynamic_members is the actual
+    // members count, as members might float during member replacement.
+    uint32_t num_expected_members;
+    uint32_t num_dynamic_members;
+    uint32_t num_chunks;
+    uint64_t chunk_size;
+    boost::uuids::uuid replica_set_uuid;
+    uint64_t pg_size;
+    boost::uuids::uuid index_table_uuid;
+    uint64_t blob_sequence_num;
+    uint64_t active_blob_count;         // Total number of active blobs
+    uint64_t tombstone_blob_count;      // Total number of tombstones
+    uint64_t total_occupied_blk_count;  // Total number of occupied blocks
+    uint64_t total_reclaimed_blk_count; // Total number of reclaimed blocks
+    char data[1];                       // ISO C++ forbids zero-size array
+
+    pg_info_superblk() = default;
+    pg_info_superblk(pg_info_superblk const& rhs) { *this = rhs; }
+};
+
+struct DataHeader {
+    static constexpr uint8_t data_header_version = 0x01;
+    static constexpr uint64_t data_header_magic = 0x21fdffdba8d68fc6; // echo "BlobHeader" | md5sum
+
+    enum class data_type_t : uint32_t { SHARD_INFO = 1, BLOB_INFO = 2 };
+
+    bool valid() const { return ((magic == data_header_magic) && (version <= data_header_version)); }
+
+    uint64_t magic{data_header_magic};
+    uint8_t version{data_header_version};
+    data_type_t type{data_type_t::BLOB_INFO};
+};
+
+struct shard_info_superblk : DataHeader {
+    ShardInfo info;
+    uint16_t p_chunk_id;
+    uint16_t v_chunk_id;
+
+    // to_string method for printing shard_info_superblk with DataHeader and chunk_ids
+    std::string to_string() const {
+        return fmt::format(
+            "shard_info_superblk: [DataHeader: magic=0x{:x}, version={}, type={}], [{}], p_chunk_id={}, v_chunk_id={}",
+            magic, version, static_cast< uint32_t >(type), info.to_string(), p_chunk_id, v_chunk_id);
+    }
+
+    // Helper method to print chunk ids
+    std::string chunk_ids_to_string() const {
+        return fmt::format("chunk_ids: [p_chunk_id={}, v_chunk_id={}]", p_chunk_id, v_chunk_id);
+    }
+};
+
+#pragma pack(pop)
+
+void MetaBlkService::scan_blks_on_all_chunks(std::optional< uint16_t > debug_chunk_id,
+                                             std::optional< blk_num_t > debug_blk_num) const {
+    constexpr blk_num_t BATCH_SIZE = 1024;
+    const auto blk_sz = block_size();
+    const auto batch_size_bytes = BATCH_SIZE * blk_sz;
+
+    HS_LOG(INFO, metablk, "Starting batch scan with batch_size={} blocks ({} bytes)", BATCH_SIZE,
+           in_bytes(batch_size_bytes));
+
+    m_sb_vdev->foreach_chunks([this, blk_sz, batch_size_bytes, BATCH_SIZE, debug_chunk_id, debug_blk_num](cshared< Chunk >& chunk) {
+        // Skip chunks that don't match debug_chunk_id if specified
+        if (debug_chunk_id.has_value() && chunk->chunk_id() != debug_chunk_id.value()) { return; }
+
+        HS_LOG(INFO, metablk, "Scanning chunk: {}, size: {}, start_offset: {}", chunk->chunk_id(),
+               in_bytes(chunk->size()), chunk->start_offset());
+
+        const blk_num_t total_blks = chunk->size() / blk_sz;
+        HS_LOG(INFO, metablk, "Number of blocks in chunk {}: {}, chunk_size={} block_size={}", chunk->chunk_id(),
+               total_blks, chunk->size(), blk_sz);
+
+        int valid_cnt{0};
+        int invalid_cnt{0};
+        int ssb_cnt{0};
+        int meta_blk_cnt{0};
+        int ovf_blk_cnt{0};
+
+        auto batch_buf = hs_utils::iobuf_alloc(batch_size_bytes, sisl::buftag::metablk, align_size());
+        for (blk_num_t batch_start = 0; batch_start < total_blks; batch_start += BATCH_SIZE) {
+            // If debug_blk_num is specified, set batch_start to debug_blk_num
+            if (debug_blk_num.has_value()) {
+                batch_start = debug_blk_num.value();
+                HS_REL_ASSERT(batch_start < total_blks, "debug_blk_num {} exceeds total_blks {}", batch_start,
+                              total_blks);
+            }
+
+            const blk_num_t blks_in_batch = std::min(BATCH_SIZE, total_blks - batch_start);
+            const size_t read_size = blks_in_batch * blk_sz;
+            const auto offset_in_chunk = batch_start * blk_sz;
+
+            // Read a batch of blocks
+            auto ec = m_sb_vdev->sync_read(r_cast< char* >(batch_buf), read_size, chunk, offset_in_chunk);
+            if (ec.value()) {
+                HS_LOG(ERROR, metablk, "Failed to read batch at chunk: {}, offset: {}, size: {}, error: {}",
+                       chunk->chunk_id(), offset_in_chunk, read_size, ec.message());
+                hs_utils::iobuf_free(batch_buf, sisl::buftag::metablk);
+                return;
+            }
+
+            // Process each block in the batch
+            for (blk_num_t i = 0; i < blks_in_batch; ++i) {
+                const auto blk_offset_in_batch = i * blk_sz;
+                auto* blk_ptr = r_cast< uint8_t* >(batch_buf) + blk_offset_in_batch;
+                const uint32_t magic = *r_cast< uint32_t* >(blk_ptr);
+                const blk_num_t global_blk_num = batch_start + i;
+
+                switch (magic) {
+                case META_BLK_SB_MAGIC: {
+                    ssb_cnt++;
+                    auto* ssb = r_cast< meta_blk_sb* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[SSB] found at blk#{}@c{}, blkid=[{}], blk={}", global_blk_num,
+                           chunk->chunk_id(), ssb->bid.to_string(), ssb->to_string());
+                    valid_cnt++;
+                    break;
+                }
+                case META_BLK_MAGIC: {
+                    meta_blk_cnt++;
+                    auto* mblk = r_cast< meta_blk* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[MetaBlk] found at blk#{}@c{} blk_content=[{}]", global_blk_num,
+                           chunk->chunk_id(), mblk->to_string());
+
+                    // Check if this is a PGManager meta block
+                    if (std::string(mblk->hdr.h.type) == "PGManager") {
+                        // Get the context data (pg_info_superblk)
+                        const auto* pg_info = r_cast< const pg_info_superblk* >(mblk->get_context_data());
+                        HS_LOG(INFO, metablk,
+                               "[PGManager] chunk={} blk={} pg_info: id={}, state={}, num_expected_members={}, "
+                               "num_dynamic_members={}, num_chunks={}, chunk_size={}, pg_size={}, "
+                               "blob_sequence_num={}, active_blob_count={}, tombstone_blob_count={}, "
+                               "total_occupied_blk_count={}, total_reclaimed_blk_count={}",
+                               chunk->chunk_id(), global_blk_num, pg_info->id, static_cast< uint8_t >(pg_info->state),
+                               pg_info->num_expected_members, pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
+                               pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
+                               pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
+                    } else if (std::string(mblk->hdr.h.type) == "ShardManager") {
+                        const auto* shard_info_blk = r_cast< const shard_info_superblk* >(mblk->get_context_data());
+                        HS_LOG(INFO, metablk, "[ShardManager] chunk={} blk={} shard_info: {}", chunk->chunk_id(),
+                               global_blk_num, shard_info_blk->to_string());
+                    }
+
+                    valid_cnt++;
+                    break;
+                }
+                case META_BLK_OVF_MAGIC: {
+                    ovf_blk_cnt++;
+                    auto* ovf_blk = r_cast< meta_blk_ovf_hdr* >(blk_ptr);
+                    HS_LOG(INFO, metablk, "[OvfBlk] found at blk#{}@c{} {}", global_blk_num, chunk->chunk_id(),
+                           ovf_blk->to_string());
+                    valid_cnt++;
+                    break;
+                }
+                default: {
+                    invalid_cnt++;
+                    HS_LOG(DEBUG, metablk, "Invalid blk at chunk: {}, blk_num={}, offset_in_chunk: {}, magic: {}",
+                           chunk->chunk_id(), global_blk_num, global_blk_num * blk_sz, magic);
+
+                    // Debug specific block if parameters are provided
+                    if (debug_chunk_id.has_value() && debug_blk_num.has_value() &&
+                        chunk->chunk_id() == debug_chunk_id.value() && global_blk_num == debug_blk_num.value()) {
+                        HS_LOG(INFO, metablk, "try to read blk#{}@c{}", debug_blk_num.value(), debug_chunk_id.value());
+                        auto* mblk = r_cast< meta_blk* >(blk_ptr);
+                        HS_LOG(INFO, metablk, "blk#{}@c{} hdr is {}", debug_blk_num.value(), debug_chunk_id.value(),
+                               mblk->to_string());
+
+                        // Print whole 4k data
+                        HS_LOG(INFO, metablk, "blk#{}@c{} whole 4k data:", debug_blk_num.value(), debug_chunk_id.value());
+                        const uint8_t* data_ptr = blk_ptr;
+                        for (size_t i = 0; i < 4096; i += 16) {
+                            std::ostringstream oss;
+                            for (size_t j = 0; j < 16 && (i + j) < 4096; ++j) {
+                                oss << std::hex << std::setw(2) << std::setfill('0')
+                                    << static_cast< int >(data_ptr[i + j]) << " ";
+                            }
+                            HS_LOG(INFO, metablk, "{}", oss.str());
+                        }
+                    }
+                }
+                }
+            }
+
+            // If debug_blk_num is specified, break after processing this batch
+            if (debug_blk_num.has_value()) { break; }
+        }
+
+        hs_utils::iobuf_free(batch_buf, sisl::buftag::metablk);
+        HS_LOG(INFO, metablk,
+               "scanned chunk: {}, valid_cnt: {}, invalid_cnt: {}, ssb_cnt: {}, meta_blk_cnt: {}, ovf_blk_cnt: {}",
+               chunk->chunk_id(), valid_cnt, invalid_cnt, ssb_cnt, meta_blk_cnt, ovf_blk_cnt);
+    });
+}
+
+void MetaBlkService::scan_blks_by_chain() const {
+    // load ssb at first
+    auto bid = m_meta_vdev_context->first_blkid;
+    HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
+    auto* ssb = r_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
+    std::memset(uintptr_cast(ssb), 0, block_size());
+    read(bid, uintptr_cast(ssb), block_size());
+    LOGINFO("Successfully loaded meta ssb from disk: {}", ssb->to_string());
+
+    // scan meta blk chain
+    bid = ssb->next_bid;
+    auto prev_meta_bid = ssb->bid;
+    std::map< meta_sub_type, int > type_cnt;
+
+    while (bid.is_valid()) {
+        auto* mblk = r_cast< meta_blk* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
+        read(bid, uintptr_cast(mblk), block_size());
+        HS_LOG(INFO, metablk, "Scanned meta blk: {}", mblk->to_string());
+        type_cnt[mblk->hdr.h.type] += 1;
+
+        // Check if this is a PGManager meta block
+        if (std::string(mblk->hdr.h.type) == "PGManager") {
+            // Get the context data (pg_info_superblk)
+            const auto* pg_info = r_cast< const pg_info_superblk* >(mblk->get_context_data());
+            HS_LOG(INFO, metablk,
+                   "[PGManager] pg_info: id={}, state={}, num_expected_members={}, "
+                   "num_dynamic_members={}, num_chunks={}, chunk_size={}, pg_size={}, "
+                   "blob_sequence_num={}, active_blob_count={}, tombstone_blob_count={}, "
+                   "total_occupied_blk_count={}, total_reclaimed_blk_count={}",
+                   pg_info->id, static_cast< uint8_t >(pg_info->state), pg_info->num_expected_members,
+                   pg_info->num_dynamic_members, pg_info->num_chunks, pg_info->chunk_size, pg_info->pg_size,
+                   pg_info->blob_sequence_num, pg_info->active_blob_count, pg_info->tombstone_blob_count,
+                   pg_info->total_occupied_blk_count, pg_info->total_reclaimed_blk_count);
+        }
+
+        if (prev_meta_bid.to_integer() != mblk->hdr.h.prev_bid.to_integer()) {
+            HS_LOG(INFO, metablk, "[type={}], meta blk has wrong prev meta bid. expected={}, actual={}",
+                   mblk->hdr.h.type, prev_meta_bid.to_string(), mblk->hdr.h.prev_bid.to_string());
+        }
+        prev_meta_bid = bid;
+
+        auto obid = mblk->hdr.h.ovf_bid;
+        uint64_t read_sz = mblk->hdr.h.context_sz > meta_blk_context_sz() ? 0 : mblk->hdr.h.context_sz;
+        while (obid.is_valid()) {
+            // ovf blk header occupies whole blk;
+            auto* ovf_hdr =
+                r_cast< meta_blk_ovf_hdr* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
+            read(obid, uintptr_cast(ovf_hdr), block_size());
+
+            HS_LOG(INFO, metablk, "Scanned ovf blk: {}", ovf_hdr->to_string(true));
+
+            read_sz += ovf_hdr->h.context_sz;
+            obid = ovf_hdr->h.next_bid;
+            hs_utils::iobuf_free(uintptr_cast(ovf_hdr), sisl::buftag::metablk);
+        }
+
+        if (read_sz != static_cast< uint64_t >(mblk->hdr.h.context_sz)) {
+            LOGERROR("[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
+                     mblk->hdr.h.context_sz);
+        } else {
+            LOGDEBUG("[type={}], meta blk scan completed", mblk->hdr.h.type);
+        }
+
+        // move on to next meta blk;
+        bid = mblk->hdr.h.next_bid;
+        hs_utils::iobuf_free(uintptr_cast(mblk), sisl::buftag::metablk);
+    }
+
+    HS_LOG(INFO, metablk, "Meta blk scan summary:");
+    auto total_valid_count = 0;
+    for (const auto& [type, cnt] : type_cnt) {
+        HS_LOG(INFO, metablk, "type: {}, count: {}", type, cnt);
+        total_valid_count += cnt;
+    }
+    HS_LOG(INFO, metablk, "Total valid meta blk count: {}", total_valid_count);
+
+    hs_utils::iobuf_free(uintptr_cast(ssb), sisl::buftag::metablk);
 }
 
 bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
