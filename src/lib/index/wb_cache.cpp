@@ -863,6 +863,15 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
             IndexBufferPtrList buf_list;
             get_next_bufs(cp_ctx, resource_mgr().get_dirty_buf_qd(), buf_list);
 
+            if (buf_list.empty()) {
+                LOGTRACEMOD(wbcache, "No more buffers to flush for cp {}, exiting flush iteration", cp_ctx->id());
+                // if no dirty buffer, we should complete the cp_ctx here, otherwise it will be waiting for ever and
+                // block the next CP from flushing
+                m_vdev->cp_flush(cp_ctx);
+                cp_ctx->complete(true);
+                return;
+            }
+
             for (auto& buf : buf_list) {
                 do_flush_one_buf(cp_ctx, buf, true);
             }
