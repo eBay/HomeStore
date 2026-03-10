@@ -300,20 +300,15 @@ protected:
 };
 
 TEST_F(SuperblockErrorTest, ReadFirstBlockIOError) {
-    LOGINFO("Test: read_first_block should throw on IO error");
+    LOGINFO("Test: read_first_block should crash on IO error");
 
     // Truncate the file to be too small to contain first block
     truncate_file(512); // Less than first_block::s_io_fb_size (4096)
 
-    // Attempt to read first block should throw system_error
-    ASSERT_THROW({
-        try {
-            PhysicalDev::read_first_block(m_test_file, O_RDWR);
-        } catch (const std::system_error& e) {
-            LOGINFO("Successfully caught expected system_error: {}", e.what());
-            throw;
-        }
-    }, std::system_error);
+    // Attempt to read first block should crash with HS_REL_ASSERT
+    ASSERT_DEATH({
+        PhysicalDev::read_first_block(m_test_file, O_RDWR);
+    }, "IO error reading first block");
 }
 
 TEST_F(SuperblockErrorTest, ReadFirstBlockCorruptedData) {
@@ -365,18 +360,13 @@ TEST_F(SuperblockErrorTest, FooterValidationHDDDevice) {
         LOGINFO("Corrupting footer at offset={}", footer_offset);
         corrupt_file_at_offset(footer_offset, 512);
 
-        // Restart should throw because footer doesn't match header
+        // Restart should crash because footer doesn't match header
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
-        ASSERT_THROW({
-            try {
-                auto dmgr2 = std::make_unique<DeviceManager>(
-                    dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
-                dmgr2->load_devices();
-            } catch (const std::runtime_error& e) {
-                LOGINFO("Successfully caught footer mismatch error: {}", e.what());
-                throw;
-            }
-        }, std::runtime_error);
+        ASSERT_DEATH({
+            auto dmgr2 = std::make_unique<DeviceManager>(
+                dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+            dmgr2->load_devices();
+        }, "Footer first block mismatch");
     } else {
         LOGINFO("Device does not have footer mirroring, skipping footer corruption test");
     }
@@ -415,18 +405,13 @@ TEST_F(SuperblockErrorTest, FooterIOError) {
         LOGINFO("Truncating file to size={} to cause footer IO error", truncate_size);
         truncate_file(truncate_size);
 
-        // Restart should throw because footer cannot be read
+        // Restart should crash because footer cannot be read
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
-        ASSERT_THROW({
-            try {
-                auto dmgr2 = std::make_unique<DeviceManager>(
-                    dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
-                dmgr2->load_devices();
-            } catch (const std::system_error& e) {
-                LOGINFO("Successfully caught footer IO error: {}", e.what());
-                throw;
-            }
-        }, std::system_error);
+        ASSERT_DEATH({
+            auto dmgr2 = std::make_unique<DeviceManager>(
+                dev_infos, [](const vdev_info&, bool) -> shared<VirtualDev> { return nullptr; });
+            dmgr2->load_devices();
+        }, "IO error reading footer first block");
     } else {
         LOGINFO("Device does not have footer mirroring, skipping footer IO error test");
     }

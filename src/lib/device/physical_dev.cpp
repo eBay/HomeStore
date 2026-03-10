@@ -69,11 +69,8 @@ first_block PhysicalDev::read_first_block(const std::string& devname, int oflags
     auto err = iodev->drive_interface()->sync_read(iodev.get(), r_cast< char* >(buf), first_block::s_io_fb_size,
                                                    hs_super_blk::first_block_offset());
 
-    if (err) {
-        hs_utils::iobuf_free(buf, sisl::buftag::superblk);
-        HS_LOG(ERROR, device, "IO error reading first block from device={}, error={}", devname, err.message());
-        throw std::system_error(err, "Failed to read first block from device");
-    }
+    HS_REL_ASSERT(!err, "IO error reading first block from device={}, error={}, homestore will go down", devname,
+                  err.message());
 
     ret = *(r_cast< first_block* >(buf));
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
@@ -157,39 +154,27 @@ void PhysicalDev::sanity_check() {
     auto header_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
                                             m_pdev_info.dev_attr.align_size);
     auto header_err = read_super_block(header_buf, first_block::s_io_fb_size, hs_super_blk::first_block_offset());
-    if (header_err) {
-        hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
-        HS_LOG(ERROR, device, "IO error reading header first block during sanity check on device={}, error={}",
-               m_devname, header_err.message());
-        throw std::system_error(header_err, "Failed to read header first block during sanity check");
-    }
+    HS_REL_ASSERT(!header_err,
+                  "IO error reading header first block during sanity check on device={}, error={}, homestore will go down",
+                  m_devname, header_err.message());
 
     // Read footer first block using the same offset calculation as write_super_block()
     auto footer_offset = data_end_offset() + hs_super_blk::first_block_offset();
     auto footer_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
                                             m_pdev_info.dev_attr.align_size);
     auto footer_err = read_super_block(footer_buf, first_block::s_io_fb_size, footer_offset);
-    if (footer_err) {
-        hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
-        hs_utils::iobuf_free(footer_buf, sisl::buftag::superblk);
-        HS_LOG(ERROR, device,
-               "IO error reading footer first block during sanity check on device={}, offset={}, error={}", m_devname,
-               footer_offset, footer_err.message());
-        throw std::system_error(footer_err, "Failed to read footer first block during sanity check");
-    }
+    HS_REL_ASSERT(
+        !footer_err,
+        "IO error reading footer first block during sanity check on device={}, offset={}, error={}, homestore will go down",
+        m_devname, footer_offset, footer_err.message());
 
     // Compare header and footer
     auto header_blk = r_cast< first_block* >(header_buf);
     auto footer_blk = r_cast< first_block* >(footer_buf);
-    if (std::memcmp(header_blk, footer_blk, first_block::s_atomic_fb_size) != 0) {
-        hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
-        hs_utils::iobuf_free(footer_buf, sisl::buftag::superblk);
-        HS_LOG(ERROR, device,
-               "Footer first block mismatch with header on device={}, header=[{}], footer=[{}], this indicates "
-               "corruption",
-               m_devname, header_blk->to_string(), footer_blk->to_string());
-        throw std::runtime_error("Footer and header first block mismatch - corruption detected");
-    }
+    HS_REL_ASSERT(std::memcmp(header_blk, footer_blk, first_block::s_atomic_fb_size) == 0,
+                  "Footer first block mismatch with header on device={}, header=[{}], footer=[{}], this indicates "
+                  "corruption, homestore will go down",
+                  m_devname, header_blk->to_string(), footer_blk->to_string());
 
     hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
     hs_utils::iobuf_free(footer_buf, sisl::buftag::superblk);
