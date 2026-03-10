@@ -95,7 +95,11 @@ public:
 #ifdef _PRERELEASE
         REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
-        REGISTER_HISTOGRAM(blktrack_erase_blk_rescheduled_latency, "Erase blk rescheduled latency");
+        REGISTER_HISTOGRAM(blktrack_erase_blk_rescheduled_latency, "Erase blk rescheduled latency",
+                           HistogramBucketsType(OpLatecyBuckets));
+#else
+        REGISTER_HISTOGRAM(blktrack_erase_blk_rescheduled_latency, "Erase blk rescheduled latency",
+                           HistogramBucketsType(OpLatecyBuckets), _publish_as::publish_as_sum_count);
 #endif
         register_me_to_farm();
     }
