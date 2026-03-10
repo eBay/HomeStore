@@ -410,12 +410,16 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
                        HistogramBucketsType(OpLatecyBuckets));
 #ifdef _PRERELEASE
     REGISTER_HISTOGRAM(logstore_stream_tracker_lock_latency, "Logstore stream tracker lock latency",
-                       "logstore_stream_tracker_lock_latency");
+                       HistogramBucketsType(OpLatecyBuckets));
+#else
+    REGISTER_HISTOGRAM(logstore_stream_tracker_lock_latency, "Logstore stream tracker lock latency",
+                       HistogramBucketsType(OpLatecyBuckets), _publish_as::publish_as_sum_count);
 #endif
     REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"},
                        HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
+#ifdef _PRERELEASE
     REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
                        HistogramBucketsType(LinearUpto128Buckets));
     REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
@@ -423,6 +427,15 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
                        "Logdev post flush processing (including callbacks) latency",
                        HistogramBucketsType(OpLatecyBuckets));
+#else
+    REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
+                       HistogramBucketsType(LinearUpto128Buckets), _publish_as::publish_as_sum_count);
+    REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
+                       HistogramBucketsType(ExponentialOfTwoBuckets), _publish_as::publish_as_sum_count);
+    REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
+                       "Logdev post flush processing (including callbacks) latency",
+                       HistogramBucketsType(OpLatecyBuckets), _publish_as::publish_as_sum_count);
+#endif
     REGISTER_HISTOGRAM(logdev_flush_time_us, "time elapsed since last flush time in us",
                        HistogramBucketsType(OpLatecyBuckets));
 

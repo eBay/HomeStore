@@ -62,8 +62,13 @@ public:
         REGISTER_COUNTER(compress_backoff_memory_cnt, "compression back-off cnt because of exceending memory limit")
         REGISTER_COUNTER(compress_backoff_ratio_cnt, "compression back-off cnt because of exceeding ratio limit");
 
+#ifdef _PRERELEASE
         REGISTER_HISTOGRAM(compress_ratio_percent, "compression ration percentage",
                            HistogramBucketsType(PercentileBuckets));
+#else
+        REGISTER_HISTOGRAM(compress_ratio_percent, "compression ration percentage",
+                           HistogramBucketsType(PercentileBuckets), _publish_as::publish_as_sum_count);
+#endif
         register_me_to_farm();
     }
 

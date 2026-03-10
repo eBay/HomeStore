@@ -91,8 +91,14 @@ public:
         // follower: from rreq push data received to data write completion;
         REGISTER_HISTOGRAM(rreq_data_write_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
                            {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
+#ifdef _PRERELEASE
         REGISTER_HISTOGRAM(rreq_push_data_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
                            {"op", "push"}, HistogramBucketsType(OpLatecyBuckets));
+#else
+        REGISTER_HISTOGRAM(rreq_push_data_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
+                           {"op", "push"}, HistogramBucketsType(OpLatecyBuckets),
+                           _publish_as::publish_as_sum_count);
+#endif
         // latency from follower->originator->follower, not including actual data write on follower;
         REGISTER_HISTOGRAM(rreq_data_fetch_latency_us, "rreq data fetch latency in us", "rreq_data_op_latency",
                            {"op", "fetch"}, HistogramBucketsType(OpLatecyBuckets));
@@ -101,24 +107,44 @@ public:
         REGISTER_HISTOGRAM(rreq_total_data_write_latency_us, "rreq data write latency in us", "rdev_data_op_latency",
                            {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
 
+#ifdef _PRERELEASE
         REGISTER_HISTOGRAM(rreq_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(SteppedUpto32Buckets));
+#else
+        REGISTER_HISTOGRAM(rreq_pieces_per_write, "Number of individual pieces per write",
+                           HistogramBucketsType(SteppedUpto32Buckets), _publish_as::publish_as_sum_count);
+#endif
 
         // In the identical layout chunk, the blk num of the follower and leader is expected to be the same.
         // However, due to the concurrency between the data channel and the raft channel, there might be some
         // allocation differences on the same lsn. When a leader switch occurs, these differences could become garbage.
         // This metric can partially reflect the potential amount of garbage.
+#ifdef _PRERELEASE
         REGISTER_HISTOGRAM(blk_diff_with_proposer,
                            "allocated blk num diff on the same lsn with proposer when chunk usage >= 0.9",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
+#else
+        REGISTER_HISTOGRAM(blk_diff_with_proposer,
+                           "allocated blk num diff on the same lsn with proposer when chunk usage >= 0.9",
+                           HistogramBucketsType(ExponentialOfTwoBuckets), _publish_as::publish_as_sum_count);
+#endif
 
         // Raft channel metrics
+#ifdef _PRERELEASE
         REGISTER_HISTOGRAM(raft_end_of_append_batch_latency_us, "Raft end_of_append_batch latency in us",
                            "raft_logstore_append_latency", {"op", "end_of_append_batch"},
                            HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(data_channel_wait_latency_us, "Data channel wait latency in us",
                            "raft_logstore_append_latency", {"op", "wait_for_data"},
                            HistogramBucketsType(OpLatecyBuckets));
+#else
+        REGISTER_HISTOGRAM(raft_end_of_append_batch_latency_us, "Raft end_of_append_batch latency in us",
+                           "raft_logstore_append_latency", {"op", "end_of_append_batch"},
+                           HistogramBucketsType(OpLatecyBuckets), _publish_as::publish_as_sum_count);
+        REGISTER_HISTOGRAM(data_channel_wait_latency_us, "Data channel wait latency in us",
+                           "raft_logstore_append_latency", {"op", "wait_for_data"},
+                           HistogramBucketsType(OpLatecyBuckets), _publish_as::publish_as_sum_count);
+#endif
 
         register_me_to_farm();
     }
