@@ -179,13 +179,9 @@ public:
         REGISTER_COUNTER(num_retries, "Number of times it retried because of empty cache");
         REGISTER_COUNTER(num_blks_alloc_direct, "Number of blks alloc attempt directly because of empty cache");
 
-#ifdef _PRERELEASE
-        REGISTER_HISTOGRAM(frag_pct_distribution, "Distribution of fragmentation percentage",
-                           HistogramBucketsType(PercentileBuckets));
-#else
-        REGISTER_HISTOGRAM(frag_pct_distribution, "Distribution of fragmentation percentage",
-                           HistogramBucketsType(PercentileBuckets), _publish_as::publish_as_sum_count);
-#endif
+        REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(frag_pct_distribution,
+                                                              "Distribution of fragmentation percentage",
+                                                              HistogramBucketsType(PercentileBuckets));
 
         register_me_to_farm();
     }

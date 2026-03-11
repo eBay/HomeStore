@@ -46,7 +46,7 @@ The sisl library PR #296 introduces `publish_as_sum_count` mode that reduces his
 | cp | `cp_latency` | 1 | 36 | 36 | System checkpoint operation |
 | **Subtotal** | | | | **2,841** | |
 
-### Convert to Sum/Count (21 metrics)
+### Convert to Sum/Count (19 metrics)
 
 | Component | Metric | Entity Count | Current (Histogram) | After (Sum/Count) | Reduction | Reason |
 |-----------|--------|--------------|---------------------|-------------------|-----------|--------|
@@ -57,32 +57,37 @@ The sisl library PR #296 introduces `publish_as_sum_count` mode that reduces his
 | Index | `btree_exclusive_time_in_leaf_node` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal lock timing |
 | Index | `btree_inclusive_time_in_int_node` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal lock timing |
 | Index | `btree_inclusive_time_in_leaf_node` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal lock timing |
-| **ReplDev (9 metrics)** | | | | | | |
+| **ReplDev (6 metrics)** | | | | | | |
 | rdev | `rreq_push_data_latency_us` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Stage detail (write exists) |
-| rdev | `rreq_total_data_read_latency_us` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Read path (less critical) |
 | rdev | `rreq_pieces_per_write` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Write pattern detail |
 | rdev | `blk_diff_with_proposer` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal raft detail |
 | rdev | `raft_end_of_append_batch_latency_us` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal raft detail |
 | rdev | `data_channel_wait_latency_us` | 24 PGs | 864 (24x36) | 48 (24x2) | -816 | Internal queue detail |
-| **LogDev (4 metrics)** | | | | | | |
+| **LogDev (3 metrics)** | | | | | | |
 | logstore | `logdev_flush_records_distribution` | 1 | 33 (1x33) | 2 (1x2) | -31 | Internal flush detail |
 | logstore | `logstore_record_size` | 1 | 11 (1x11) | 2 (1x2) | -9 | Internal record detail |
 | logstore | `logdev_post_flush_processing_latency` | 1 | 36 (1x36) | 2 (1x2) | -34 | Internal flush stage |
-| logstore | `logstore_stream_tracker_lock_latency` | 1 | 36 (1x36) | 2 (1x2) | -34 | Internal lock detail |
-| **Other (4 metrics)** | | | | | | |
+| **Other (3 metrics)** | | | | | | |
 | allocator | `frag_pct_distribution` | 58 chunks | 986 (58x17) | 116 (58x2) | -870 | Allocator health monitoring |
 | vdev | `blk_alloc_latency` | 1 | 36 (1x36) | 2 (1x2) | -34 | Minimal latency |
 | meta | `compress_ratio_percent` | 1 | 36 (1x36) | 2 (1x2) | -34 | Compression efficiency |
-| blkdata | `blktrack_erase_blk_rescheduled_latency` | 1 | 36 (1x36) | 2 (1x2) | -34 | Debug metric (_PRERELEASE only) |
-| **Subtotal** | | | **14,158** | **854** | **-13,304** | |
+| **Subtotal** | | | **14,086** | **782** | **-13,304** | |
+
+### Debug-Only Metrics (Not in Production)
+
+| Component | Metric | Reason |
+|-----------|--------|--------|
+| logstore | `logstore_stream_tracker_lock_latency` | Internal lock detail (_PRERELEASE only) |
+| blkdata | `blktrack_erase_blk_rescheduled_latency` | Debug metric (_PRERELEASE only) |
 
 ### Impact Summary
 
 | Category | Time Series |
 |----------|-------------|
 | Keep as Histogram (12 metrics) | 2,841 |
-| Convert to Sum/Count (21 metrics) | 854 |
-| **Total After Conversion** | **3,695** |
+| Convert to Sum/Count (19 metrics) | 782 |
+| Debug-Only Metrics (2 metrics, _PRERELEASE only) | 0 (production) |
+| **Total After Conversion** | **3,623** |
 | **Original Total** | **~17,000** |
 | **Reduction** | **~79%** |
 
@@ -90,15 +95,31 @@ The sisl library PR #296 introduces `publish_as_sum_count` mode that reduces his
 
 ### Code Changes
 
-Modify 21 histogram registrations across 7 files to use conditional compilation:
+Modify 19 histogram registrations across 6 files to use conditional compilation with the `REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION` macro:
 
-**Pattern:**
+**Macro Definition** (in `src/include/homestore/homestore_decl.hpp`):
 ```cpp
 #ifdef _PRERELEASE
-    REGISTER_HISTOGRAM(metric_name, "Description", ...);  // Full histogram in debug
+#define REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(...) REGISTER_HISTOGRAM(__VA_ARGS__)
 #else
-    REGISTER_HISTOGRAM(metric_name, "Description", ..., _publish_as::publish_as_sum_count);  // Sum/count in production
+#define REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(...) \
+    REGISTER_HISTOGRAM(__VA_ARGS__, sisl::_publish_as::publish_as_sum_count)
 #endif
+```
+
+**Usage Pattern:**
+```cpp
+// Before (verbose):
+#ifdef _PRERELEASE
+    REGISTER_HISTOGRAM(metric_name, "Description", HistogramBucketsType(OpLatecyBuckets));
+#else
+    REGISTER_HISTOGRAM(metric_name, "Description", HistogramBucketsType(OpLatecyBuckets),
+                       _publish_as::publish_as_sum_count);
+#endif
+
+// After (using macro):
+REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(metric_name, "Description",
+                                              HistogramBucketsType(OpLatecyBuckets));
 ```
 
 ### Files to Modify
@@ -111,19 +132,17 @@ Modify 21 histogram registrations across 7 files to use conditional compilation:
    - `btree_inclusive_time_in_int_node`
    - `btree_inclusive_time_in_leaf_node`
 
-2. **src/lib/replication/repl_dev/raft_repl_dev.h** (9 metrics)
+2. **src/lib/replication/repl_dev/raft_repl_dev.h** (5 metrics)
    - `rreq_push_data_latency_us`
-   - `rreq_total_data_read_latency_us`
    - `rreq_pieces_per_write`
    - `blk_diff_with_proposer`
    - `raft_end_of_append_batch_latency_us`
    - `data_channel_wait_latency_us`
 
-3. **src/lib/logstore/log_store_service.cpp** (4 metrics)
+3. **src/lib/logstore/log_store_service.cpp** (3 metrics)
    - `logdev_flush_records_distribution`
    - `logstore_record_size`
    - `logdev_post_flush_processing_latency`
-   - `logstore_stream_tracker_lock_latency`
 
 4. **src/lib/blkalloc/varsize_blk_allocator.h** (1 metric)
    - `frag_pct_distribution`
@@ -133,9 +152,6 @@ Modify 21 histogram registrations across 7 files to use conditional compilation:
 
 6. **src/include/homestore/meta_service.hpp** (1 metric)
    - `compress_ratio_percent`
-
-7. **src/lib/blkdata_svc/blk_read_tracker.hpp** (1 metric)
-   - `blktrack_erase_blk_rescheduled_latency` (already in _PRERELEASE block, just add flag)
 
 ### Dependencies
 

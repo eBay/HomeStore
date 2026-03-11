@@ -214,3 +214,11 @@ struct cap_attrs {
 ////////////// Misc ///////////////////
 #define HOMESTORE_LOG_MODS                                                                                             \
     btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication, journalvdev, solorepl
+
+// Macro to conditionally register histograms: full histogram in prerelease, sum/count in production
+#ifdef _PRERELEASE
+#define REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(...) REGISTER_HISTOGRAM(__VA_ARGS__)
+#else
+#define REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(...)                                                             \
+    REGISTER_HISTOGRAM(__VA_ARGS__, sisl::_publish_as::publish_as_sum_count)
+#endif
