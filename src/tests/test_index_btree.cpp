@@ -455,6 +455,111 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("ThreadedCpFlush test end");
 }
 
+/**
+ * RootCollapseCpFlush - Verify root collapse works correctly across CP boundaries
+ *
+ * Test Objective:
+ * Ensure that when root collapse occurs and the promoted child buffer is added to the same CP with the meta buf,
+ * the CP flush completes successfully without hanging.
+ *
+ * Test Scenario:
+ * This test constructs a two-CP scenario:
+ *
+ * CP2 (Setup):
+ * - Insert 600 entries → creates 3-child tree (depth=1, interior=1, leaf=3)
+ * - Delete 300 entries → triggers merge, leaving root with only 1 edge child
+ *   (depth=1, interior=1, leaf=1, root.total_entries()==0)
+ * - Trigger CP2 to flush → all buffers become CLEAN for next CP
+ *
+ * CP3 (Collapse):
+ * - Remove non-existent key → triggers check_collapse_root()
+ * - Edge child (CLEAN, created in CP2) gets promoted to new_root
+ * - No subsequent modifications → child stays CLEAN
+ * - Trigger CP3 → must complete successfully
+ */
+TYPED_TEST(BtreeTest, RootCollapseCpFlush) {
+    LOGINFO("=== Root Collapse CP Flush Test ===");
+
+    // Node capacity is ~170-200 entries per leaf (empirically determined with 4KB nodes)
+    // 600 entries creates 3 children: each leaf holds ~200 entries
+    const uint32_t total_entries = 600;
+
+    // Delete 300 entries to trigger merge down to 1 child
+    // Remaining 300 entries fit in single leaf → root left with only edge
+    const uint32_t delete_count = 300;
+
+    LOGINFO("CP2 Phase - Step 1: Insert {} entries to create 3-child tree", total_entries);
+    for (uint32_t i = 0; i < total_entries; ++i) {
+        this->put(i, btree_put_type::INSERT);
+    }
+
+    auto [interior_before, leaf_before] = this->m_bt->compute_node_count();
+    uint32_t depth_before = this->m_bt->get_btree_depth();
+    LOGINFO("After insert: depth={}, interior={}, leaf={}", depth_before, interior_before, leaf_before);
+
+    if (depth_before == 0) {
+        LOGWARN("Tree did not split - need more entries. Skipping test.");
+        return;
+    }
+
+    // Step 2: Delete entries to trigger merge → root left with only edge (total_entries==0)
+    LOGINFO("CP2 Phase - Step 2: Deleting {} entries to trigger merge to 1 child", delete_count);
+    for (uint32_t i = 0; i < delete_count; ++i) {
+        this->remove_one(i);
+    }
+
+    auto [interior_mid, leaf_mid] = this->m_bt->compute_node_count();
+    uint32_t depth_mid = this->m_bt->get_btree_depth();
+    LOGINFO("After merge: depth={}, interior={}, leaf={}", depth_mid, interior_mid, leaf_mid);
+
+    // Trigger CP2 to flush all changes from Steps 1-2
+    LOGINFO("CP2 Phase - Step 3: Triggering CP2 to flush all merge changes");
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+    LOGINFO("CP2 completed - all buffers are now CLEAN for the next CP");
+
+    // CP3 Phase - Step 4: Remove non-existent key to trigger collapse
+    LOGINFO("CP3 Phase - Step 4: Removing non-existent key to trigger collapse");
+    const uint32_t non_existent_key = total_entries + 1000;
+    LOGINFO("Attempting to remove key {} (doesn't exist)", non_existent_key);
+    this->remove_one(non_existent_key); // Will trigger collapse on retry
+
+    auto [interior_after, leaf_after] = this->m_bt->compute_node_count();
+    uint32_t depth_after = this->m_bt->get_btree_depth();
+    uint64_t keys_after = this->m_bt->count_keys(this->m_bt->root_node_id());
+
+    LOGINFO("After collapse attempt: depth={}, interior={}, leaf={}, keys={}", depth_after, interior_after, leaf_after,
+            keys_after);
+
+    if (depth_after < depth_mid) {
+        LOGINFO("Root collapse occurred: depth {} → {}", depth_mid, depth_after);
+    } else {
+        LOGWARN("Root collapse did not occur - depth unchanged. Test may not verify the scenario.");
+    }
+
+    // CP3 Phase - Step 5: Verify CP3 completes successfully
+    LOGINFO("CP3 Phase - Step 5: Triggering CP3 to verify it completes successfully...");
+
+    std::atomic< bool > cp_done{false};
+    std::thread t([this, &cp_done]() {
+        test_common::HSTestHelper::trigger_cp(true /* wait */);
+        cp_done.store(true);
+    });
+
+    // Wait 10 seconds max
+    for (int i = 0; i < 100 && !cp_done.load(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if (!cp_done.load()) {
+        LOGERROR("CP3 TIMEOUT, CP did not complete within timeout!");
+        t.detach();
+        FAIL() << "CP3 timeout - root collapse with CLEAN child failed to complete";
+    } else {
+        t.join();
+        LOGINFO("CP3 completed successfully");
+    }
+}
+
 template < typename TestType >
 struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
