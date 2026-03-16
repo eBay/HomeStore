@@ -430,6 +430,16 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
         down_buf->m_up_buffer->remove_down_buffer(down_buf);
     }
     down_buf->m_up_buffer = real_up_buf;
+
+    // Log when adding CLEAN buffer as dependency, should not happen
+    if (down_buf->state() == index_buf_state_t::CLEAN) {
+        LOGWARNMOD(wbcache,
+                   "CLEAN_BUF_DEBUG: Adding CLEAN down_buf {} to up_buf {}, up_buf wait_count before={}, may lead to "
+                   "up_buf being stuck in cp flush",
+                   down_buf->blkid().to_integer(), real_up_buf->blkid().to_integer(),
+                   real_up_buf->m_wait_for_down_buffers.get());
+    }
+
     real_up_buf->add_down_buffer(down_buf);
 }
 
@@ -818,7 +828,11 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 
 //////////////////// CP Related API section /////////////////////////////////
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
+#ifdef _PRERELEASE
     LOGTRACEMOD(wbcache, "Starting Index CP Flush with cp \ndag={}", cp_ctx->to_string_with_dags());
+#else
+    LOGINFOMOD(wbcache, "Starting Index CP Flush with cp {}", cp_ctx->id());
+#endif
     // #ifdef _PRERELEASE
     //     static int id = 0;
     //     auto filename = "cp_" + std::to_string(id++) + "_" + std::to_string(rand() % 100) + ".dot";
@@ -833,6 +847,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
         } else {
             CP_PERIODIC_LOG(DEBUG, unmove(cp_ctx->id()), "Btree does not have any dirty buffers to flush");
         }
+        cp_ctx->complete(true);
         return folly::makeFuture< bool >(true); // nothing to flush
     }
 

@@ -200,6 +200,24 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
         goto done;
     }
 
+    // CRITICAL: Write the child node BEFORE calling on_root_changed()
+    // This prevents two critical CP hang scenarios:
+    // 1. CLEAN Buffer Case:
+    //    If child is CLEAN (created in previous CP), on_root_changed() would add it as a
+    //    dependency to Meta buffer via link_buf(). Since CLEAN buffers never enter the CP
+    //    dirty list, Meta's wait_count would never decrement to 0, causing CP hang.
+    // 2. Overlapping CP Case:
+    //    Without this write_node(), there's a gap between dependency creation (link_buf in
+    //    on_root_changed) and dirty list addition (write_buf in later transact_nodes). If
+    //    CP switches during this gap:
+    //    - Meta buffer added to CP X dirty list with wait_count=1
+    //    - Child buffer added to CP X+1 dirty list (wrong CP!)
+    //    - Meta in CP X waits forever for child that's in CP X+1
+    //    This creates cross-CP dependency causing CP hang.
+    //
+    // By calling write_node() here, we ensure the child is already in the current CP's
+    // dirty list before on_root_changed() creates the dependency link.
+    write_node(child, req.m_op_context);
     ret = on_root_changed(child, req.m_op_context);
     if (ret != btree_status_t::success) {
         unlock_node(child, locktype_t::WRITE);
