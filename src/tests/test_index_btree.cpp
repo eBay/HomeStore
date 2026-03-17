@@ -480,6 +480,14 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
 TYPED_TEST(BtreeTest, RootCollapseCpFlush) {
     LOGINFO("=== Root Collapse CP Flush Test ===");
 
+#ifdef _PRERELEASE
+    // Use max/min keys to control tree structure more precisely
+    this->m_cfg.m_max_keys_in_node = 200;
+    this->m_cfg.m_min_keys_in_node = 100;
+    LOGINFO("Using m_max_keys_in_node={}, m_min_keys_in_node={}", this->m_cfg.m_max_keys_in_node,
+            this->m_cfg.m_min_keys_in_node);
+#endif
+
     // Node capacity is ~170-200 entries per leaf (empirically determined with 4KB nodes)
     // 600 entries creates 3 children: each leaf holds ~200 entries
     const uint32_t total_entries = 600;
