@@ -63,7 +63,22 @@ nlohmann::json Chunk::get_status([[maybe_unused]] int log_level) const {
 }
 
 void Chunk::reset_block_allocator() {
+#ifdef _PRERELEASE
+    // Flip point: before calling allocator reset()
+    if (iomgr_flip::instance()->callback_flip("before_allocator_reset", chunk_id())) {
+        LOGINFO("Flip triggered: before_allocator_reset for chunk_id={}", chunk_id());
+    }
+#endif
+
     m_blk_allocator->reset();
+
+#ifdef _PRERELEASE
+    // Flip point: after reset(), before replacing allocator
+    if (iomgr_flip::instance()->callback_flip("after_allocator_reset", chunk_id())) {
+        LOGINFO("Flip triggered: after_allocator_reset for chunk_id={}", chunk_id());
+    }
+#endif
+
     auto vdev_ptr = hs()->device_mgr()->get_vdev_mutable(vdev_id());
     RELEASE_ASSERT(vdev_ptr, "VDev not found for vdev_id: {}", vdev_id());
     vdev_ptr->reset_chunk_blk_allocator(this);

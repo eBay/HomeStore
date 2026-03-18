@@ -20,7 +20,7 @@ class BlkAllocator;
 class CP;
 class Chunk {
 private:
-    std::mutex m_mgmt_mutex;
+    std::shared_mutex m_mgmt_mutex;
     chunk_info m_chunk_info;
     PhysicalDev* const m_pdev;
     const uint32_t m_chunk_slot;
@@ -67,12 +67,19 @@ public:
     nlohmann::json get_status([[maybe_unused]] int log_level) const;
     const BlkAllocator* blk_allocator() const { return m_blk_allocator.get(); }
     BlkAllocator* blk_allocator_mutable() { return m_blk_allocator.get(); }
+    std::shared_ptr< BlkAllocator > blk_allocator_shared() {
+        std::shared_lock lg{m_mgmt_mutex};
+        return m_blk_allocator;
+    }
     float get_blk_usage_report_threshold() const { return blk_usage_report_threshold; }
     float get_blk_usage() const;
 
     ////////////// Setters /////////////////////
     void set_user_private(const sisl::blob& data);
-    void set_block_allocator(cshared< BlkAllocator >& blkalloc) { m_blk_allocator = blkalloc; }
+    void set_block_allocator(cshared< BlkAllocator >& blkalloc) {
+        std::unique_lock lg{m_mgmt_mutex};
+        m_blk_allocator = blkalloc;
+    }
     void set_vdev_ordinal(uint32_t vdev_ordinal) { m_vdev_ordinal = vdev_ordinal; }
 
     ////////////// Misc ////////////////////////

@@ -127,6 +127,7 @@ private:
     std::atomic< blk_num_t > m_commit_offset{0};      // offset in on-disk version
     std::atomic< bool > m_is_dirty{false};
     // AppendBlkAllocMetrics m_metrics;
+    std::mutex m_sb_mtx; // Mutex used while operating on superblk to avoid race condition between cp flush and reset
     superblk< append_blk_sb_t > m_sb; // only cp will be writing to this disk
 };
 

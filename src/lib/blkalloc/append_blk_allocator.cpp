@@ -16,6 +16,7 @@
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/checkpoint/cp.hpp>
 #include <homestore/meta_service.hpp>
+#include <iomgr/iomgr_flip.hpp>
 
 #include "append_blk_allocator.h"
 
@@ -125,6 +126,14 @@ BlkAllocStatus AppendBlkAllocator::reserve_on_cache(BlkId const& blkid) {
 
 void AppendBlkAllocator::cp_flush(CP* cp) {
     // check if current cp's context has dirty buffer already
+    std::lock_guard lg(m_sb_mtx);
+
+#ifdef _PRERELEASE
+    // Flip point: inside cp_flush with lock held
+    if (iomgr_flip::instance()->callback_flip("inside_append_cp_flush")) {
+        LOGINFO("Flip triggered: inside_append_cp_flush");
+    }
+#endif
     if (m_is_dirty.exchange(false)) {
         m_sb->commit_offset = m_commit_offset.load();
         m_sb->freeable_nblks = m_freeable_nblks.load();
@@ -146,13 +155,17 @@ bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
 }
 
 void AppendBlkAllocator::reset() {
+    std::lock_guard lg(m_sb_mtx);
     m_is_dirty.store(false);
     m_sb.destroy();
     meta_service().deregister_handler(get_name());
 }
 
-bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const& bid, bool) const {
-    return bid.blk_num() < m_sb->commit_offset;
+bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const& bid, bool use_lock) const {
+    std::lock_guard lg(m_sb_mtx);
+    if (!m_sb.is_empty()) { return bid.blk_num() < m_sb->commit_offset; }
+    // if allocator is reset, the sb will be destroyed, and all the blks will be treated as free;
+    return false;
 }
 
 std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_" + std::to_string(m_chunk_id); }
