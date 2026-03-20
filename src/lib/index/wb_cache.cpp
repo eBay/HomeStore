@@ -828,13 +828,10 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 
 //////////////////// CP Related API section /////////////////////////////////
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
-#ifdef _PRERELEASE
-    LOGTRACEMOD(wbcache, "Starting Index CP Flush with cp \ndag={}", cp_ctx->to_string_with_dags());
-#else
     LOGINFOMOD(wbcache, "Starting Index CP Flush with cp {}, dirty_buf_count={}, nodes_added={}, nodes_removed={}",
-               cp_ctx->id(), cp_ctx->m_dirty_buf_count.get(), cp_ctx->m_num_nodes_added.load(),
-               cp_ctx->m_num_nodes_removed.load());
-#endif
+           cp_ctx->id(), cp_ctx->m_dirty_buf_count.get(), cp_ctx->m_num_nodes_added.load(),
+           cp_ctx->m_num_nodes_removed.load());
+    LOGTRACEMOD(wbcache, "Index CP Flush with cp {}, \ndag={}", cp_ctx->id(), cp_ctx->to_string_with_dags());
     // #ifdef _PRERELEASE
     //     static int id = 0;
     //     auto filename = "cp_" + std::to_string(id++) + "_" + std::to_string(rand() % 100) + ".dot";

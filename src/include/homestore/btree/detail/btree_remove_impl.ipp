@@ -217,6 +217,7 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
     //
     // By calling write_node() here, we ensure the child is already in the current CP's
     // dirty list before on_root_changed() creates the dependency link.
+    BT_LOG(DEBUG, "going to update new root, child_id={} root_id={}", child->node_id(), root->node_id());
     write_node(child, req.m_op_context);
     ret = on_root_changed(child, req.m_op_context);
     if (ret != btree_status_t::success) {
