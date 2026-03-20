@@ -299,6 +299,8 @@ protected:
 
         node->set_checksum();
         auto prev_state = idx_node->m_idx_buf->m_state.exchange(index_buf_state_t::DIRTY);
+        LOGTRACEMOD(wbcache, "write_node_impl: node_id={} cp_id={} prev_state={} -> DIRTY", node->node_id(),
+                    cp_ctx->id(), static_cast<int>(prev_state));
         idx_node->m_idx_buf->m_node_level = node->level();
         if (prev_state == index_buf_state_t::CLEAN) {
             // It was clean before, dirtying it first time, add it to the wb_cache list to flush

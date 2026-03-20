@@ -38,7 +38,9 @@
 #include "device/chunk.h"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
+#define private public
 #include "blkalloc/blk_allocator.h"
+#include "blkalloc/append_blk_allocator.h"
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
 
@@ -1020,6 +1022,284 @@ TEST_F(BlkDataServiceTest, TestRestartWithMissingDrive) {
     wait_for_outstanding_io_done();
     LOGINFO("Step 11: I/O completed, do shutdown.");
 }
+
+// Separate test fixture for tests requiring append allocator
+class BlkDataServiceAppendTest : public testing::Test {
+public:
+    BlkDataService& inst() { return homestore::data_service(); }
+
+    virtual void SetUp() override {
+        m_helper.start_homestore(
+            "test_data_service_append",
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append}}});
+    }
+
+    virtual void TearDown() override { m_helper.shutdown_homestore(); }
+
+private:
+    test_common::HSTestHelper m_helper;
+};
+
+#ifdef _PRERELEASE
+// Scenario 1: Order: reset_block_allocator completes first -> cp_flush runs
+// Test that cp_flush can execute successfully after reset_block_allocator is called
+TEST_F(BlkDataServiceAppendTest, TestResetCompletedBeforeCpFlush) {
+    vdev_info vinfo;
+    auto data_vdev = inst().open_vdev(vinfo, true);
+    auto chunks = data_vdev->get_chunks();
+
+    auto it = std::find_if(chunks.begin(), chunks.end(), [](const auto& pair) {
+        return pair.second && pair.second->blk_allocator() &&
+            pair.second->blk_allocator()->get_name().find("append_chunk_") == 0;
+    });
+    ASSERT_NE(it, chunks.end()) << "No AppendBlkAllocator chunks found";
+    auto chunk = it->second;
+    auto chunk_id = chunk->chunk_id();
+    static_cast< AppendBlkAllocator* >(chunk->blk_allocator_mutable())->m_is_dirty.store(true);
+
+    LOGINFO("Scenario 1: Testing chunk_id={}", chunk_id);
+
+    std::atomic< bool > cp_flush_got_shared_ptr{false};
+    std::atomic< bool > reset_completed{false};
+    std::atomic< bool > cp_flush_completed{false};
+
+    auto* fc = iomgr_flip::client_instance();
+    flip::FlipCondition dont_care = fc->create_condition("", flip::Operator::DONT_CARE, 0);
+    flip::FlipFrequency freq;
+    freq.set_count(10);
+    freq.set_percent(100);
+
+    // Flip 1: After getting shared_ptr, wait for reset_block_allocator to complete
+    fc->inject_callback_flip< void, uint16_t >(
+        "after_get_allocator_shared", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            LOGINFO("Scenario 1: cp_flush got shared_ptr for chunk_id={}", cid);
+            cp_flush_got_shared_ptr.store(true);
+
+            // Wait for reset_block_allocator to complete
+            for (int i = 0; i < 200 && !reset_completed.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(reset_completed.load(), "reset_block_allocator should complete before cp_flush continues");
+            LOGINFO("Scenario 1: cp_flush proceeding after reset_block_allocator completed");
+        }));
+
+    // Flip 2: Before calling reset(), wait for cp_flush to get shared_ptr
+    fc->inject_callback_flip< void, uint16_t >(
+        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            for (int i = 0; i < 200 && !cp_flush_got_shared_ptr.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(cp_flush_got_shared_ptr.load(), "cp_flush should get shared_ptr first");
+            LOGINFO("Scenario 1: About to call reset() after cp_flush got shared_ptr");
+        }));
+
+    std::thread flush_thread([&]() {
+        VDevCPContext cp_ctx(nullptr);
+        data_vdev->cp_flush(&cp_ctx);
+        cp_flush_completed.store(true);
+        LOGINFO("Scenario 1: cp_flush completed successfully");
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    std::thread reset_thread([&]() {
+        chunk->reset_block_allocator();
+        reset_completed.store(true);
+        LOGINFO("Scenario 1: reset_block_allocator completed");
+    });
+
+    flush_thread.join();
+    reset_thread.join();
+
+    // Cleanup: remove injected flips
+    fc->remove_flip("after_get_allocator_shared");
+    fc->remove_flip("before_allocator_reset");
+
+    ASSERT_TRUE(cp_flush_completed.load());
+    ASSERT_TRUE(reset_completed.load());
+    LOGINFO("Scenario 1: PASSED - Order: get_ptr -> reset_block_allocator -> cp_flush");
+}
+
+// Scenario 2: Order: cp_flush holds shared_ptr -> old allocator reset -> cp_flush on old -> create new allocator
+// Test that cp_flush executes after old allocator reset, then new allocator is created
+TEST_F(BlkDataServiceAppendTest, TestResetDuringCpFlushHoldsSharedPtr) {
+    vdev_info vinfo;
+    auto data_vdev = inst().open_vdev(vinfo, true);
+    auto chunks = data_vdev->get_chunks();
+
+    auto it = std::find_if(chunks.begin(), chunks.end(), [](const auto& pair) {
+        return pair.second && pair.second->blk_allocator() &&
+            pair.second->blk_allocator()->get_name().find("append_chunk_") == 0;
+    });
+    ASSERT_NE(it, chunks.end());
+    auto chunk = it->second;
+    auto chunk_id = chunk->chunk_id();
+    static_cast< AppendBlkAllocator* >(chunk->blk_allocator_mutable())->m_is_dirty.store(true);
+
+    LOGINFO("Scenario 2: Testing chunk_id={}", chunk_id);
+
+    std::atomic< bool > cp_flush_got_shared_ptr{false};
+    std::atomic< bool > old_allocator_reset{false};
+    std::atomic< bool > reset_completed{false};
+    std::atomic< bool > cp_flush_completed{false};
+
+    auto* fc = iomgr_flip::client_instance();
+    flip::FlipCondition dont_care = fc->create_condition("", flip::Operator::DONT_CARE, 0);
+    flip::FlipFrequency freq;
+    freq.set_count(10);
+    freq.set_percent(100);
+
+    // Flip 1: After getting shared_ptr, wait for old allocator reset to complete
+    fc->inject_callback_flip< void, uint16_t >(
+        "after_get_allocator_shared", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            LOGINFO("Scenario 2: cp_flush got shared_ptr for chunk_id={}", cid);
+            cp_flush_got_shared_ptr.store(true);
+
+            // Wait for old allocator reset to complete
+            for (int i = 0; i < 200 && !old_allocator_reset.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(old_allocator_reset.load(), "Old allocator reset should complete before cp_flush continues");
+            LOGINFO("Scenario 2: cp_flush proceeding after old allocator reset completed");
+        }));
+
+    // Flip 2: Before calling reset(), wait for cp_flush to get shared_ptr
+    fc->inject_callback_flip< void, uint16_t >(
+        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            for (int i = 0; i < 200 && !cp_flush_got_shared_ptr.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(cp_flush_got_shared_ptr.load(), "cp_flush should get shared_ptr first");
+            LOGINFO("Scenario 2: About to call reset() on old allocator");
+        }));
+
+    // Flip 3: After old allocator reset completes, mark flag and wait for cp_flush to finish
+    fc->inject_callback_flip< void, uint16_t >(
+        "after_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            LOGINFO("Scenario 2: Old allocator reset() completed");
+            old_allocator_reset.store(true);
+
+            // Wait for cp_flush to complete on old allocator before creating new one
+            for (int i = 0; i < 200 && !cp_flush_completed.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(cp_flush_completed.load(), "cp_flush should complete before creating new allocator");
+            LOGINFO("Scenario 2: cp_flush completed, proceeding to create new allocator");
+        }));
+
+    std::thread flush_thread([&]() {
+        VDevCPContext cp_ctx(nullptr);
+        data_vdev->cp_flush(&cp_ctx);
+        cp_flush_completed.store(true);
+        LOGINFO("Scenario 2: cp_flush completed successfully on old allocator");
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    std::thread reset_thread([&]() {
+        chunk->reset_block_allocator();
+        reset_completed.store(true);
+        LOGINFO("Scenario 2: reset_block_allocator completed (new allocator created)");
+    });
+
+    flush_thread.join();
+    reset_thread.join();
+
+    // Cleanup: remove injected flips
+    fc->remove_flip("after_get_allocator_shared");
+    fc->remove_flip("before_allocator_reset");
+    fc->remove_flip("after_allocator_reset");
+
+    ASSERT_TRUE(cp_flush_completed.load());
+    ASSERT_TRUE(reset_completed.load());
+    ASSERT_TRUE(old_allocator_reset.load());
+    LOGINFO("Scenario 2: PASSED - Order: get_ptr -> old_allocator_reset -> cp_flush -> create new allocator");
+}
+
+// Scenario 3: Order: cp_flush acquires mutex first -> reset_block_allocator blocks on mutex
+// Test that mutex protects m_sb during concurrent cp_flush and reset_block_allocator
+TEST_F(BlkDataServiceAppendTest, TestCpFlushBlocksResetWithMutex) {
+    vdev_info vinfo;
+    auto data_vdev = inst().open_vdev(vinfo, true);
+    auto chunks = data_vdev->get_chunks();
+
+    auto it = std::find_if(chunks.begin(), chunks.end(), [](const auto& pair) {
+        return pair.second && pair.second->blk_allocator() &&
+            pair.second->blk_allocator()->get_name().find("append_chunk_") == 0;
+    });
+    ASSERT_NE(it, chunks.end());
+    auto chunk = it->second;
+    auto chunk_id = chunk->chunk_id();
+    static_cast< AppendBlkAllocator* >(chunk->blk_allocator_mutable())->m_is_dirty.store(true);
+
+    LOGINFO("Scenario 3: Testing chunk_id={}", chunk_id);
+
+    std::atomic< bool > cp_flush_inside{false};
+    std::atomic< bool > reset_completed{false};
+    std::atomic< bool > cp_flush_completed{false};
+
+    auto* fc = iomgr_flip::client_instance();
+    flip::FlipCondition dont_care = fc->create_condition("", flip::Operator::DONT_CARE, 0);
+    flip::FlipFrequency freq;
+    freq.set_count(10);
+    freq.set_percent(100);
+
+    // Flip 1: Inside cp_flush with lock held, give reset time to attempt acquiring lock
+    fc->inject_callback_flip< void >(
+        "inside_append_cp_flush", {dont_care}, freq, std::function< void() >([&]() {
+            LOGINFO("Scenario 3: Inside cp_flush with lock held");
+            cp_flush_inside.store(true);
+
+            // Give reset_block_allocator time to attempt acquiring lock
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            LOGINFO("Scenario 3: cp_flush continuing (reset_block_allocator should be blocked on lock)");
+        }));
+
+    // Flip 2: Before calling reset(), wait for cp_flush to be inside critical section
+    fc->inject_callback_flip< void, uint16_t >(
+        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+            if (cid != chunk_id) return;
+            for (int i = 0; i < 200 && !cp_flush_inside.load(); ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            RELEASE_ASSERT(cp_flush_inside.load(), "cp_flush should be inside critical section");
+            LOGINFO("Scenario 3: cp_flush is inside, about to call reset() (should block on m_sb_mtx)");
+        }));
+
+    std::thread flush_thread([&]() {
+        chunk->blk_allocator_shared()->cp_flush(nullptr);
+        cp_flush_completed.store(true);
+        LOGINFO("Scenario 3: cp_flush completed successfully");
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    std::thread reset_thread([&]() {
+        chunk->reset_block_allocator();
+        reset_completed.store(true);
+        LOGINFO("Scenario 3: reset_block_allocator completed (after waiting for cp_flush lock)");
+    });
+
+    flush_thread.join();
+    reset_thread.join();
+
+    // Cleanup: remove injected flips
+    fc->remove_flip("inside_append_cp_flush");
+    fc->remove_flip("before_allocator_reset");
+
+    ASSERT_TRUE(cp_flush_completed.load());
+    ASSERT_TRUE(reset_completed.load());
+    LOGINFO("Scenario 3: PASSED - mutex protected m_sb from concurrent reset_block_allocator during cp_flush");
+}
+
+#endif // _PRERELEASE
 
 // Stream related test
 
