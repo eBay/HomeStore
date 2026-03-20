@@ -156,7 +156,7 @@ public:
     void format_devices();
     uint32_t format_single_device(dev_info& dinfo);
     void commit_formatting();
-    void load_devices();
+    void load_devices(bool ignore_unkown_vdevs=false);
     void close_devices();
     bool is_boot_in_degraded_mode() const { return m_boot_in_degraded_mode; }
 
@@ -200,7 +200,7 @@ public:
     void remove_chunk_locked(shared< Chunk > chunk);
 
 private:
-    void load_vdevs();
+    void load_vdevs(bool ignore_unkown_vdevs);
     int device_open_flags(const std::string& devname) const;
 
     std::vector< vdev_info > read_vdev_infos(const std::vector< PhysicalDev* >& pdevs);
