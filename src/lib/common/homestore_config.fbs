@@ -316,6 +316,14 @@ table Consensus {
 
     // ca file for nuraft mesg client verification
     ssl_ca_file: string;
+
+    // Log frequency for flush_durable_commit_lsn messages (log every N times)
+    // 7200 * flush_durable_commit_interval_ms (500ms) means every 1 hour we will log the durable commit lsn.
+    flush_durable_commit_lsn_log_frequency: uint32 = 7200 (hotswap);
+
+    // Log frequency for gc_repl_reqs messages (log every N times)
+    // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
+    gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
 }
 
 table HomeStoreSettings {
