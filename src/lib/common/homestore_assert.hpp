@@ -318,7 +318,8 @@
     auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0));
     HS_REL_ASSERT(it != std::cend(log_map), "Expected entry to be either present or new insertion to succeed");
     auto& [tm, count] = it->second;
+    auto result = count;
     count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? static_cast< decltype(count) >(0) : count + 1;
     tm = Clock::now();
-    return count;
+    return result;
 }

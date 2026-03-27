@@ -2486,7 +2486,8 @@ void RaftReplDev::flush_durable_commit_lsn() {
         return;
     }
 
-    RD_LOGT(NO_TRACE_ID, "Flushing durable commit lsn to {}", lsn);
+    RD_LOGT_EVERY_N(unmove(HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_lsn_log_frequency)), NO_TRACE_ID,
+                    "Flushing durable commit lsn to {}", lsn);
     std::unique_lock lg{m_sb_mtx};
     m_rd_sb->durable_commit_lsn = lsn;
     m_rd_sb.write();
@@ -2620,8 +2621,10 @@ void RaftReplDev::gc_repl_reqs() {
     // <LSN=100, DSN=102> and <LSN=101, DSN =101> during the window.
     std::vector< repl_req_ptr_t > expired_rreqs;
 
+    const auto gc_log_freq = HS_DYNAMIC_CONFIG(consensus.gc_repl_reqs_log_frequency);
     auto req_map_size = m_repl_key_req_map.size();
-    RD_LOGI(NO_TRACE_ID, "m_repl_key_req_map size is {};", req_map_size);
+    // The map is unlikely to change when there is no write, here we use log_every_n to avoid logging too frequently
+    RD_LOGI_EVERY_N(unmove(gc_log_freq), NO_TRACE_ID, "m_repl_key_req_map size is {};", req_map_size);
     for (auto [key, rreq] : m_repl_key_req_map) {
         // FIXME: Skipping proposer for now, the DSN in proposer increased in proposing stage, not when commit().
         // Need other mechanism.
@@ -2631,10 +2634,11 @@ void RaftReplDev::gc_repl_reqs() {
         }
         if (rreq->dsn() < cur_dsn && rreq->is_expired()) {
             // The DSN can be out of order, wait till rreq expired.
-            RD_LOGD(rreq->traceID(),
-                    "legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_time_sec {}",
-                    rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
-                    get_elapsed_time_sec(rreq->created_time()));
+            RD_LOGD_EVERY_N(
+                unmove(gc_log_freq), rreq->traceID(),
+                "legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_hours {}",
+                rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
+                get_elapsed_time_sec(rreq->created_time()) / 3600);
             expired_rreqs.push_back(rreq);
         }
     }
@@ -2643,24 +2647,25 @@ void RaftReplDev::gc_repl_reqs() {
     // and during pre-commit/commit we retrieve rreq from state_machine. Removing requests outside of state
     // machine is risky.
     // Below logs are logging only, can be removed once we get more confidence.
-    m_state_machine->iterate_repl_reqs([this, cur_dsn, &sm_req_cnt](auto key, auto rreq) {
+    m_state_machine->iterate_repl_reqs([this, cur_dsn, &sm_req_cnt, gc_log_freq](auto key, auto rreq) {
         sm_req_cnt++;
         if (rreq->is_proposer()) {
             // don't clean up proposer's request
             return;
         }
         if (rreq->is_expired()) {
-            RD_LOGD(rreq->traceID(), "StateMachine: rreq=[{}] is expired, elapsed_time_sec{};", rreq->to_string(),
-                    get_elapsed_time_sec(rreq->created_time()));
+            RD_LOGD_EVERY_N(unmove(gc_log_freq), rreq->traceID(),
+                            "StateMachine: rreq=[{}] is expired, elapsed_hours {};", rreq->to_string(),
+                            get_elapsed_time_sec(rreq->created_time()) / 3600);
         }
     });
-    RD_LOGT(NO_TRACE_ID, "state_machine req map size is {};", sm_req_cnt);
+    RD_LOGT_EVERY_N(unmove(gc_log_freq), NO_TRACE_ID, "state_machine req map size is {};", sm_req_cnt);
 
     for (auto removing_rreq : expired_rreqs) {
         // once log flushed, the commit progress controlled by raft
         if (removing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
-            RD_LOGT(removing_rreq->traceID(), "Skipping GC rreq [{}] because it is in state machine",
-                    removing_rreq->to_string());
+            RD_LOGT_EVERY_N(unmove(gc_log_freq), removing_rreq->traceID(),
+                            "Skipping GC rreq [{}] because it is in state machine", removing_rreq->to_string());
             continue;
         }
         // do garbage collection

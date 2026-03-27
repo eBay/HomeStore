@@ -79,6 +79,14 @@ class StateMachineStore;
 #define RD_LOGE(traceID, ...) RD_LOG(ERROR, traceID, ##__VA_ARGS__)
 #define RD_LOGC(traceID, ...) RD_LOG(CRITICAL, traceID, ##__VA_ARGS__)
 
+#define RD_LOG_EVERY_N(level, freq, traceID, msg, ...)                                                                 \
+    HS_LOG_EVERY_N(level, replication, freq, "[traceID={}] [{}] " msg, traceID, identify_str(), ##__VA_ARGS__)
+#define RD_LOGT_EVERY_N(freq, traceID, ...) RD_LOG_EVERY_N(TRACE, freq, traceID, ##__VA_ARGS__)
+#define RD_LOGD_EVERY_N(freq, traceID, ...) RD_LOG_EVERY_N(DEBUG, freq, traceID, ##__VA_ARGS__)
+#define RD_LOGI_EVERY_N(freq, traceID, ...) RD_LOG_EVERY_N(INFO, freq, traceID, ##__VA_ARGS__)
+#define RD_LOGW_EVERY_N(freq, traceID, ...) RD_LOG_EVERY_N(WARN, freq, traceID, ##__VA_ARGS__)
+#define RD_LOGE_EVERY_N(freq, traceID, ...) RD_LOG_EVERY_N(ERROR, freq, traceID, ##__VA_ARGS__)
+
 // For the logic snapshot obj_id, we use the highest bit to indicate the type of the snapshot message.
 // 0 is for HS, 1 is for Application.
 static constexpr uint64_t snp_obj_id_type_app = 1ULL << 63;
