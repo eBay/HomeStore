@@ -198,13 +198,33 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         LOGINFO("Shutdown replica 2");
     }
 
+    LOGINFO("Sleep 10 seconds to waiting for leadership expiring");
+    sleep(10);
     std::string task_id = "task_id";
     if (g_helper->replica_num() == 0) {
         // Replace down replica 2 with spare replica 3 with commit quorum 1
         // so that leader can go ahead with replacing member.
+        // After reset_quorum_size(1) is applied, the node may need one election timeout
+        // to self-elect as leader, so retry on NOT_LEADER.
         LOGINFO("Replace member started, task_id={}", task_id);
-        replace_member(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in),
-                       1 /* commit quorum*/);
+        constexpr int max_retries = 3;
+        bool succeeded = false;
+        for (int i = 0; i < max_retries; ++i) {
+            auto result = hs()->repl_service()
+                              .replace_member(db->repl_dev()->group_id(), task_id,
+                                              replica_member_info{g_helper->replica_id(member_out), ""},
+                                              replica_member_info{g_helper->replica_id(member_in), ""}, 1)
+                              .get();
+            if (!result.hasError()) {
+                succeeded = true;
+                break;
+            }
+            ASSERT_EQ(result.error(), ReplServiceError::NOT_LEADER)
+                << "Replace member failed with unexpected error: " << result.error();
+            LOGINFO("Replace member returned NOT_LEADER, retry {}/{}", i + 1, max_retries);
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+        ASSERT_TRUE(succeeded) << "Replace member failed after " << max_retries << " retries";
         this->write_on_leader(num_io_entries, true /* wait_for_commit */);
         LOGINFO("Leader completed num_io={}", num_io_entries);
     }
