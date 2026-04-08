@@ -780,24 +780,33 @@ public:
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
     repl_lsn_t get_truncation_upper_limit() { return dbs_[0]->get_truncation_upper_limit(); }
 
+    void do_replace_member(std::shared_ptr< TestReplicatedDB > db, std::string& task_id, replica_id_t member_out,
+                           replica_id_t member_in, uint32_t commit_quorum,
+                           ReplServiceError error = ReplServiceError::OK) {
+        LOGINFO("Start replace member task_id={}, out={}, in={}", task_id, boost::uuids::to_string(member_out),
+                boost::uuids::to_string(member_in));
+        replica_member_info out{member_out, ""};
+        replica_member_info in{member_in, ""};
+        auto result =
+            hs()->repl_service().replace_member(db->repl_dev()->group_id(), task_id, out, in, commit_quorum).get();
+        if (error == ReplServiceError::OK) {
+            ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
+        } else {
+            ASSERT_EQ(result.hasError(), true);
+            ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
+        }
+    }
+
     void replace_member(std::shared_ptr< TestReplicatedDB > db, std::string& task_id, replica_id_t member_out,
                         replica_id_t member_in, uint32_t commit_quorum = 0,
                         ReplServiceError error = ReplServiceError::OK) {
-        this->run_on_leader(db, [this, error, db, &task_id, member_out, member_in, commit_quorum]() {
-            LOGINFO("Start replace member task_id={}, out={}, in={}", task_id, boost::uuids::to_string(member_out),
-                    boost::uuids::to_string(member_in));
-
-            replica_member_info out{member_out, ""};
-            replica_member_info in{member_in, ""};
-            auto result =
-                hs()->repl_service().replace_member(db->repl_dev()->group_id(), task_id, out, in, commit_quorum).get();
-            if (error == ReplServiceError::OK) {
-                ASSERT_EQ(result.hasError(), false) << "Error in replacing member, err=" << result.error();
-            } else {
-                ASSERT_EQ(result.hasError(), true);
-                ASSERT_EQ(result.error(), error) << "Error in replacing member, err=" << result.error();
-            }
-        });
+        if (commit_quorum == 0) {
+            this->run_on_leader(db, [this, error, db, &task_id, member_out, member_in, commit_quorum]() {
+                do_replace_member(db, task_id, member_out, member_in, commit_quorum, error);
+            });
+        } else {
+            do_replace_member(db, task_id, member_out, member_in, commit_quorum, error);
+        }
     }
 
     void remove_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_id) {

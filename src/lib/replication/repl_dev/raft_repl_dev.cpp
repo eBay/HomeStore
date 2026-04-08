@@ -219,12 +219,40 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
             boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
 
     // Step1, validate request
+    bool is_leader = m_my_repl_id == get_leader_id();
+    // Check if leader itself is requested to move out.
+    if (m_my_repl_id == member_out.id) {
+        // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
+        // until the successor finishes the catch-up of the latest log, and then resign. Return NOT_LEADER and let
+        // client retry.
+        if (is_leader) {
+            RD_LOGI(trace_id, "Step1. Replace member, leader is the member_out so yield leadership, task_id={}", task_id);
+            raft_server()->yield_leadership(false /* immediate */, -1 /* successor */);
+        }
+        RD_LOGE(trace_id, "Step1. Replace member, I am not leader, can not handle the request, task_id={}", task_id);
+        return make_async_error<>(ReplServiceError::NOT_LEADER);
+    }
+    if (commit_quorum >= 1) {
+        // Reduce the quorum size BEFORE checking leadership. When two members are down, the raft leader will
+        // eventually yield its leadership after leadership_expiry (default: 20x heartbeat interval) because it
+        // cannot reach majority. Once leadership is lost, the remaining single node cannot elect itself without a
+        // reduced election quorum. By calling reset_quorum_size here first (which sets both custom_commit_quorum
+        // and custom_election_quorum to 1), the current leader is able to maintain leadership, and if leadership
+        // was already lost, the node will self-elect on the next election timeout. The caller should retry on
+        // NOT_LEADER to allow time for self-election to complete.
+        reset_quorum_size(commit_quorum, trace_id);
+    }
+
+    if (!is_leader) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
+
+    // I am leader and not out_member
     // TODO support rollback, this could happen when the first task failed, and we want to launch a new task to
     // remediate it. Need to rollback the first task. And for the same task, it's reentrant and idempotent.
     auto existing_task_id = get_replace_member_task_id();
     if (!existing_task_id.empty() && existing_task_id != task_id) {
         RD_LOGE(trace_id, "Step1. Replace member, task_id={} is not the same as existing task_id={}", task_id,
                 existing_task_id);
+        reset_quorum_size(0, trace_id);
         return make_async_error<>(ReplServiceError::REPLACE_MEMBER_TASK_MISMATCH);
     }
 
@@ -239,18 +267,10 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
             return make_async_success<>();
         }
         RD_LOGE(trace_id, "Step1. Replace member invalid parameter, out member is not found, task_id={}", task_id);
+        reset_quorum_size(0, trace_id);
         return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND);
     }
-    if (m_my_repl_id != get_leader_id()) { return make_async_error<>(ReplServiceError::NOT_LEADER); }
-    // Check if leader itself is requested to move out.
-    if (m_my_repl_id == member_out.id) {
-        // immediate=false successor=-1, nuraft will choose an alive peer with highest priority as successor, and wait
-        // until the successor finishes the catch-up of the latest log, and then resign. Return NOT_LEADER and let
-        // client retry.
-        raft_server()->yield_leadership(false /* immediate */, -1 /* successor */);
-        RD_LOGI(trace_id, "Step1. Replace member, leader is the member_out so yield leadership, task_id={}", task_id);
-        return make_async_error<>(ReplServiceError::NOT_LEADER);
-    }
+
     // quorum safety check. TODO currently only consider lsn, need to check last response time.
     auto active_peers = get_active_peers();
     // active_peers doesn't include leader itself.
@@ -272,18 +292,15 @@ AsyncReplResult<> RaftReplDev::start_replace_member(std::string& task_id, const 
                 "Step1. Replace member, quorum safety check failed, active_peers={}, "
                 "active_peers_exclude_out/in_member={}, required_quorum={}, commit_quorum={}, task_id={}",
                 active_peers.size(), active_num, quorum, commit_quorum, task_id);
+        reset_quorum_size(0, trace_id);
         return make_async_error<>(ReplServiceError::QUORUM_NOT_MET);
-    }
-
-    if (commit_quorum >= 1) {
-        // Two members are down and leader cant form the quorum. Reduce the quorum size.
-        reset_quorum_size(commit_quorum, trace_id);
     }
 
     // Step 2: Handle out member.
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("replace_member_set_learner_failure")) {
         RD_LOGE(trace_id, "Simulating set member to learner failure");
+        reset_quorum_size(0, trace_id);
         return make_async_error(ReplServiceError::FAILED);
     }
 #endif
