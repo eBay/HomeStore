@@ -319,6 +319,7 @@ public:
     void set_stage(repl_dev_stage_t stage);
     repl_dev_stage_t get_stage() const;
     uint32_t get_quorum_for_commit() const;
+    uint32_t get_custom_commit_quorum() const override;
 
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
     bool is_ready_for_traffic() const override;

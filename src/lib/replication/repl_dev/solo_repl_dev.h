@@ -109,6 +109,7 @@ public:
     repl_lsn_t get_last_append_lsn() override { return 0; };
 
     uint32_t get_blk_size() const override;
+    uint32_t get_custom_commit_quorum() const override { return 0; }
 
     void quiesce_reqs() override { return; }
     void resume_accepting_reqs() override { return; }

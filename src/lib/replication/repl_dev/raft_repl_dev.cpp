@@ -2135,6 +2135,11 @@ uint32_t RaftReplDev::get_quorum_for_commit() const {
     return quorum / 2 + 1;
 }
 
+uint32_t RaftReplDev::get_custom_commit_quorum() const {
+    if (!m_repl_svc_ctx || !m_repl_svc_ctx->_server) { return 0; }
+    return static_cast< uint32_t >(m_repl_svc_ctx->_server->get_current_params().custom_commit_quorum_size_);
+}
+
 uint32_t RaftReplDev::get_blk_size() const { return data_service().get_blk_size(); }
 
 nuraft_mesg::repl_service_ctx* RaftReplDev::group_msg_service() { return m_repl_svc_ctx.get(); }
