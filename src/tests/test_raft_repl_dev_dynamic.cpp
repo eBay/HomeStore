@@ -221,6 +221,10 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
             }
             ASSERT_EQ(result.error(), ReplServiceError::NOT_LEADER)
                 << "Replace member failed with unexpected error: " << result.error();
+            // commit_quorum was set to 1 by reset_quorum_size() before the NOT_LEADER check; it is not
+            // cleared on the NOT_LEADER path so it should still read 1 here.
+            EXPECT_EQ(db->repl_dev()->get_custom_commit_quorum(), 1u)
+                << "commit_quorum should be 1 after NOT_LEADER retry with commit_quorum=1";
             LOGINFO("Replace member returned NOT_LEADER, retry {}/{}", i + 1, max_retries);
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
@@ -244,6 +248,10 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         ASSERT_EQ(
             check_replace_member_status(db, task_id, g_helper->replica_id(member_out), g_helper->replica_id(member_in)),
             ReplaceMemberStatus::IN_PROGRESS);
+        // start_replace_member resets commit_quorum to 0 on success (before returning), so by the time
+        // replace_member() returned the custom commit quorum should already be cleared.
+        EXPECT_EQ(db->repl_dev()->get_custom_commit_quorum(), 0u)
+            << "commit_quorum should be reset to 0 after successful replace_member";
     });
 
     if (g_helper->replica_num() == 1) {

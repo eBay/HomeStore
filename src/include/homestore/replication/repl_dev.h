@@ -579,6 +579,10 @@ public:
     /// @return Block size
     virtual uint32_t get_blk_size() const = 0;
 
+    /// @brief Gets the current custom commit quorum size. Returns 0 if not customized (majority-based).
+    /// @return custom commit quorum size, or 0 if using default majority
+    virtual uint32_t get_custom_commit_quorum() const = 0;
+
     /// @brief Gets the last commit lsn of this repldev
     /// @return last_commit_lsn
     virtual repl_lsn_t get_last_commit_lsn() const = 0;
