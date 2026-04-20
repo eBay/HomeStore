@@ -1180,6 +1180,154 @@ TYPED_TEST(IndexCrashTest, MetricsTest) {
 //         }
 //     }
 // }
+
+// ============================================================================
+// Regression test for SDSTOR-21880:
+//   MetaIndexBuffer blkid ({0,0,0,0}) collision in buf_map during recovery
+//   when two BTree tables both have a root split in the same CP.
+//
+// Root cause: all MetaIndexBuffer objects use BlkId{} (zero) as their blkid.
+// buf_map is keyed by BlkId, so the MetaBuf for ordinal=1 hits the already-
+// inserted MetaBuf for ordinal=0.  The child node for ordinal=1 gets linked to
+// the wrong MetaBuf (ordinal=0), and the sanity check in
+// IndexCPContext::recover() fires: up_buffer->m_index_ordinal(0) !=
+// bufferPtr->m_index_ordinal(1) → HS_REL_ASSERT → crash.
+// ============================================================================
+struct IndexCrashTestTwoTables : public test_common::HSTestHelper,
+                                 BtreeTestHelper< FixedLenBtree >,
+                                 public ::testing::Test {
+    using T = FixedLenBtree;
+    using K = T::KeyType;
+    using V = T::ValueType;
+    using BtType = T::BtreeType;
+
+    std::shared_ptr< BtType > m_bt2;
+
+    // During recovery each table's superblk triggers on_index_table_found.
+    // We route by ordinal: 0 → m_bt, 1 → m_bt2.
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(IndexCrashTestTwoTables* test) : m_test(test) {}
+
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
+            LOGINFO("Index table recovered ordinal={} uuid={}", sb->ordinal, boost::uuids::to_string(sb->uuid));
+            m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
+            m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
+            m_test->m_cfg.m_int_node_type = T::interior_node_type;
+            m_test->m_cfg.m_max_keys_in_node = 5;
+            m_test->m_cfg.m_min_keys_in_node = 2;
+            if (sb->ordinal == 0) {
+                m_test->m_bt = std::make_shared< BtType >(std::move(sb), m_test->m_cfg);
+                return m_test->m_bt;
+            } else {
+                m_test->m_bt2 = std::make_shared< BtType >(std::move(sb), m_test->m_cfg);
+                return m_test->m_bt2;
+            }
+        }
+
+    private:
+        IndexCrashTestTwoTables* m_test;
+    };
+
+    IndexCrashTestTwoTables() : testing::Test() { this->m_is_multi_threaded = false; }
+
+    void SetUp() override {
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            s.generic.cp_timer_us = 0x8000000000000000; // disable auto CP
+            s.resource_limits.dirty_buf_percent = 100;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        this->start_homestore(
+            "test_index_crash_recovery",
+            {{HS_SERVICE::META, {.size_pct = 10.0}},
+             {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+            nullptr, {}, true /* init_device */);
+
+        this->m_cfg = BtreeConfig(hs()->index_service().node_size());
+        this->m_cfg.m_leaf_node_type = T::leaf_node_type;
+        this->m_cfg.m_int_node_type = T::interior_node_type;
+        this->m_cfg.m_max_keys_in_node = 5;
+        this->m_cfg.m_min_keys_in_node = 2;
+
+        BtreeTestHelper< FixedLenBtree >::SetUp();
+
+        // Create table 0 (ordinal=0)
+        auto uuid1 = boost::uuids::random_generator()();
+        auto parent_uuid1 = boost::uuids::random_generator()();
+        this->m_bt = std::make_shared< BtType >(uuid1, parent_uuid1, 0, this->m_cfg);
+        hs()->index_service().add_index_table(this->m_bt);
+
+        // Create table 1 (ordinal=1)
+        auto uuid2 = boost::uuids::random_generator()();
+        auto parent_uuid2 = boost::uuids::random_generator()();
+        this->m_bt2 = std::make_shared< BtType >(uuid2, parent_uuid2, 0, this->m_cfg);
+        hs()->index_service().add_index_table(this->m_bt2);
+
+        LOGINFO("SetUp: created {} index tables", hs()->index_service().num_tables());
+    }
+
+    void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
+        this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        test_common::HSTestHelper::restart_homestore(shutdown_delay_sec);
+    }
+
+    void TearDown() override {
+        BtreeTestHelper< FixedLenBtree >::TearDown();
+        this->shutdown_homestore(false);
+    }
+
+    // Insert sequential keys directly into a given BTree (no shadow map tracking)
+    void insert_into(std::shared_ptr< BtType >& bt, uint32_t start, uint32_t end) {
+        for (uint32_t k = start; k < end; ++k) {
+            K key{k};
+            V value{V::generate_rand()};
+            auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::INSERT};
+            auto ret = bt->put(sreq);
+            ASSERT_EQ(ret, btree_status_t::success) << "insert key=" << k << " failed";
+        }
+    }
+};
+
+TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
+    // With max_keys_in_node=5, inserting 6+ entries into a single-node BTree
+    // forces a root split where MetaIndexBuffer becomes the DAG parent.
+    // Both tables must split in the SAME CP so the txn_journal contains:
+    //   rec0: ordinal=0, parent=meta@{0,0,0,0}, ...
+    //   rec1: ordinal=1, parent=meta@{0,0,0,0}, ...
+    // On recovery, buf_map[{0,0,0,0}] is shared → ordinal mismatch → crash.
+    const uint32_t n = 10; // well above max_keys_in_node=5; forces root split
+
+    // crash_flush_on_root fires inside transact_bufs() when parent_buf->is_meta_buf()
+    // (i.e., during a root split).  It marks child_buf with a crash flag and calls
+    // set_will_crash(true); the actual crash fires when that buffer is later flushed
+    // by the CP.  The flip is one-shot so it fires on table 0's root split; table 1's
+    // root split records still land in the txn_journal in the same CP epoch.
+    LOGINFO("Step 1: Set crash_flush_on_root flip (must precede inserts)");
+    this->set_basic_flip("crash_flush_on_root");
+
+    LOGINFO("Step 2: Insert {} entries into table 0 (root split fires the flip)", n);
+    insert_into(this->m_bt, 0, n);
+
+    LOGINFO("Step 3: Insert {} entries into table 1 (root split, flip already consumed)", n);
+    insert_into(this->m_bt2, 1000, 1000 + n);
+
+    // Both tables' root-split records are now in the txn_journal (same CP epoch).
+    // Trigger CP: journal is persisted first, then buffer flush crashes on child_buf.
+    LOGINFO("Step 4: Trigger CP (will crash during buffer flush)");
+    test_common::HSTestHelper::trigger_cp(false);
+
+    // Wait for crash + HS restart.  If the bug is present, recovery will
+    // HS_REL_ASSERT inside IndexCPContext::sanityCheck() and abort the process.
+    // If the bug is fixed, recovery succeeds and we reach the assertion below.
+    LOGINFO("Step 5: Waiting for crash recovery");
+    this->wait_for_crash_recovery(true);
+
+    LOGINFO("Step 6: Recovery succeeded - bug is fixed (SDSTOR-21880)");
+    ASSERT_EQ(hs()->index_service().num_tables(), 2) << "Both tables should be recovered";
+}
+
 #endif
 
 int main(int argc, char* argv[]) {
