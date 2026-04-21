@@ -431,11 +431,10 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     }
     down_buf->m_up_buffer = real_up_buf;
 
-    // Log when adding CLEAN buffer as dependency, should not happen
     if (down_buf->state() == index_buf_state_t::CLEAN) {
-        LOGWARNMOD(wbcache,
-                   "CLEAN_BUF_DEBUG: Adding CLEAN down_buf {} to up_buf {}, up_buf wait_count before={}, may lead to "
-                   "up_buf being stuck in cp flush",
+        //In root collapse case, down_buf is written before up_buf, but in root split case, down_buf is written after up_buf.
+        LOGDEBUGMOD(wbcache,
+                   "CLEAN_BUF_DEBUG: Adding CLEAN down_buf {} to up_buf {}, up_buf wait_count before={}, might be dirtied later",
                    down_buf->blkid().to_integer(), real_up_buf->blkid().to_integer(),
                    real_up_buf->m_wait_for_down_buffers.get());
     }

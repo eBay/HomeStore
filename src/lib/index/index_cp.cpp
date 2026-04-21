@@ -290,12 +290,14 @@ std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
                     "Sanity check failed: Buffer {} blkdid {} has an up_buffer {} blkid that is marked as freed.",
                     bufferPtr->to_string(), blkid.to_integer(), up_buffer->to_string(),
                     up_buffer->blkid().to_integer());
-                HS_REL_ASSERT_EQ(up_buffer->m_created_cp_id, -1,
-                                 "Sanity check failed: Buffer {} has an up_buffer {} that just created",
-                                 bufferPtr->to_string(), up_buffer->to_string());
-                HS_REL_ASSERT_EQ(up_buffer->m_index_ordinal, bufferPtr->m_index_ordinal,
-                                 "Sanity check failed: Buffer {} has an up_buffer {} that has different index_ordinal.",
-                                 bufferPtr->to_string(), up_buffer->to_string());
+                HS_REL_ASSERT(up_buffer->m_created_cp_id == -1,
+                              "Sanity check failed: Buffer {} has an up_buffer {} that just created (created_cp_id={})",
+                              bufferPtr->to_string(), up_buffer->to_string(), up_buffer->m_created_cp_id);
+                HS_REL_ASSERT(up_buffer->m_index_ordinal == bufferPtr->m_index_ordinal,
+                              "Sanity check failed: Buffer {} has an up_buffer {} with different index_ordinal "
+                              "(up_ordinal={}, buf_ordinal={})",
+                              bufferPtr->to_string(), up_buffer->to_string(), up_buffer->m_index_ordinal,
+                              bufferPtr->m_index_ordinal);
                 HS_REL_ASSERT(!bufferPtr->is_meta_buf(),
                               "Sanity check failed: down buffer {} is meta buffer of up buffer {}",
                               bufferPtr->to_string(), up_buffer->to_string());
@@ -331,7 +333,12 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
     auto const rec_to_buf = [&buf_map, &cpg](txn_record const* rec, bool is_meta, BlkId const& bid,
                                              IndexBufferPtr const& up_buf) -> IndexBufferPtr {
         IndexBufferPtr buf;
-        auto it = buf_map.find(bid);
+        // MetaIndexBuffer always has blkid={0,0,0,0} regardless of which BTree table it belongs to.
+        // When multiple tables have a root split in the same CP, all their MetaBufs share the same blkid
+        // and would collide in buf_map.  Use a synthetic key BlkId{ordinal, 0, 0} (nblks=0 is never
+        // valid for a real block) so each table's MetaBuf gets a unique, collision-free slot.
+        BlkId const effective_bid = is_meta ? BlkId{rec->index_ordinal, 0, 0} : bid;
+        auto it = buf_map.find(effective_bid);
         if (it == buf_map.end()) {
             if (is_meta) {
                 superblk< index_table_sb > tmp_sb;
@@ -340,7 +347,7 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
                 buf = std::make_shared< IndexBuffer >(nullptr, bid);
             }
 
-            [[maybe_unused]] auto [it2, happened] = buf_map.insert(std::make_pair(bid, buf));
+            [[maybe_unused]] auto [it2, happened] = buf_map.insert(std::make_pair(effective_bid, buf));
             DEBUG_ASSERT(happened, "buf_map insert failed");
 
             buf->m_dirtied_cp_id = cpg->id();
