@@ -10,12 +10,18 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Check if file is modified
+      - name: Check if version bump is required
         run: |
-          if git diff -r HEAD^1 HEAD -- conanfile.py | egrep "[ ]+version = "; then
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          non_test=$(echo "$changed" | grep -Ev '^src/tests/|CMakeLists\.txt$|^\.github/|^\.jenkins|\.md$' || true)
+          if [ -z "$non_test" ]; then
+            echo "Only test files changed — version bump not required"
+            exit 0
+          fi
+          if git diff -r HEAD^1 HEAD -- conanfile.py | grep -E "[ ]+version = "; then
             echo "Version is updated with this PR, OK"
           else
             echo "Conan version is not updated with this PR. Please update that to allow PR merge"

@@ -120,7 +120,7 @@ jobs:
       with:
         repository: eBay/iomanager
         path: import/iomgr
-        ref: master
+        ref: stable/v12.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
