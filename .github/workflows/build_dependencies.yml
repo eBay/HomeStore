@@ -83,40 +83,40 @@ jobs:
     timeout-minutes: 1440
     steps:
     - name: Retrieve Code
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'True' }}
 
     - name: Retrieve Recipe
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         repository: eBay/Homestore
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'False' }}
 
     - name: Setup Conan
-      uses: ebay/sisl/.github/actions/setup_conan2@master
+      uses: ebay/sisl/.github/actions/setup_conan2@stable/v13.x
       with:
         platform: ${{ inputs.platform }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load Homestore Cache
       id: restore-cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         testing: ${{ inputs.testing }}
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Load Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         load_any: 'True'
         key_prefix: SislDeps13-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         repository: eBay/iomanager
         path: import/iomgr
@@ -124,15 +124,15 @@ jobs:
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         repository: eBay/nuraft_mesg
         path: import/nuraft_mesg
-        ref: main
+        ref: stable/v4.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         testing: 'False'
         path: import/iomgr
@@ -141,7 +141,7 @@ jobs:
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         testing: 'False'
         path: import/nuraft_mesg
@@ -160,8 +160,8 @@ jobs:
         sudo rm -rf /usr/lib/google-cloud-sdk
         
         python -m pip install pyelftools
-        conan export --user oss --channel master import/iomgr
-        conan export --user oss --channel main import/nuraft_mesg
+        conan export import/iomgr
+        conan export import/nuraft_mesg
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
@@ -182,20 +182,20 @@ jobs:
       if: ${{ steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Save Conan Cache
-      uses: eBay/sisl/.github/actions/store_conan2@master
+      uses: eBay/sisl/.github/actions/store_conan2@stable/v13.x
       with:
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload Sisl Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         load_any: 'True'
         key_prefix: SislDeps13-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload IOMgr Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         testing: 'False'
         path: import/iomgr
@@ -204,7 +204,7 @@ jobs:
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload NuraftMesg Cache
-      uses: eBay/sisl/.github/actions/load_conan2@master
+      uses: eBay/sisl/.github/actions/load_conan2@stable/v13.x
       with:
         testing: 'False'
         path: import/nuraft_mesg

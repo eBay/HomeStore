@@ -48,17 +48,17 @@ class HomestoreConan(ConanFile):
                     raise ConanInvalidConfiguration("Coverage/Sanitizer requires Testing!")
 
     def build_requirements(self):
-        self.test_requires("benchmark/1.9.4")
-        self.test_requires("gtest/1.17.0")
+        self.test_requires("benchmark/[^1.9]")
+        self.test_requires("gtest/[^1.17]")
 
     def requirements(self):
-        self.requires("iomgr/[^12]@oss/master", transitive_headers=True)
-        self.requires("sisl/[^13.2.4]@oss/master", transitive_headers=True)
-        self.requires("nuraft_mesg/[^4]@oss/main", transitive_headers=True)
+        self.requires("iomgr/[^12.0]", transitive_headers=True)
+        self.requires("sisl/[^13.2]", transitive_headers=True)
+        self.requires("nuraft_mesg/[^4.0]", transitive_headers=True)
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
-            self.requires("isa-l/2.30.0", transitive_headers=True)
+            self.requires("isa-l/[^2.30]", transitive_headers=True)
 
         # Tests require OpenSSL 3.x
         self.requires("openssl/[^3.1]", override=True)
