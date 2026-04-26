@@ -1,7 +1,7 @@
 # HomeStore
 [![Conan Build](https://github.com/eBay/HomeStore/actions/workflows/merge_build.yml/badge.svg?branch=master)](https://github.com/eBay/HomeStore/actions/workflows/merge_build.yml)
 [![CodeCov](https://codecov.io/gh/eBay/homestore/branch/master/graph/badge.svg)](https://codecov.io/gh/eBay/homestore)
-
+ 
 Homestore is a generic *StorageEngine* upon which different *StorageSolution*s can be built. These Solutions can model
 Block, K/V, Object or Database *StorageInterface*s.
 
