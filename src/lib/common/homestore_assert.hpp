@@ -361,7 +361,7 @@
 
     const auto now = Clock::now();
     if (get_elapsed_time_sec(last_cleanup) > COUNTER_RESET_SEC) {
-        log_map.clear();
+        std::unordered_map< size_t, std::pair< uint32_t, uint64_t > >().swap(log_map); // Actually release memory
         last_cleanup = now;
     }
 
@@ -373,9 +373,9 @@
     const uint32_t now_ms =
         std::chrono::duration_cast< std::chrono::milliseconds >(now - last_cleanup).count();
 
-    auto [it, happened] = log_map.emplace(msg_hash, std::make_pair(now_ms, 1));
+    auto [it, happened] = log_map.emplace(msg_hash, std::make_pair(now_ms, 0));
     uint32_t elapsed_ms = 0;
-    uint64_t count = 1;
+    uint64_t count = 0;
 
     if (!happened) {
         // Entry exists - increment count and calculate elapsed time
@@ -386,8 +386,8 @@
 
     // Decide if we should log
     bool should_log = false;
-    if (count == 1) {
-        // Always log first occurrence
+    if (happened) {
+        // Always log first occurrence (new entry)
         should_log = true;
     } else if (freq > 0 && count % freq == 0) {
         // Count-based: log every Nth occurrence
@@ -400,7 +400,7 @@
     // If logging, update timestamp and append suffix
     if (should_log) {
         // Append formatted suffix if not first occurrence
-        if (count > 1) {
+        if (!happened && count > 0) {
             // Always show elapsed time and count since last log
             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" ...Last logged {}ms ago, {} occurrences"},
                             fmt::make_format_args(elapsed_ms, count));
@@ -409,7 +409,7 @@
         // Update state after logging (so next log shows "since this log")
         if (!happened) {
             it->second.first = now_ms;  // Update timestamp
-            it->second.second = 1;      // Reset count (next occurrence will be "1 since this log")
+            it->second.second = 0;      // Reset count (next occurrence will be "1 since this log")
         }
     }
 
