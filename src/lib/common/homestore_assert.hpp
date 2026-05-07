@@ -143,20 +143,62 @@
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
-                const auto count{check_logged_already(buf)};                                                           \
-                if (count % freq == 0) {                                                                               \
-                    if (count) {                                                                                       \
-                        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" ...Repeated {} times in this thread"},  \
-                                        fmt::make_format_args(freq));                                                  \
-                    }                                                                                                  \
-                    return true;                                                                                       \
-                }                                                                                                      \
-                return false;                                                                                          \
+                return check_and_format_log(buf, freq, 0);                                                                                          \
             }),                                                                                                        \
             msg, ##__VA_ARGS__);                                                                                       \
     }
 
 #define HS_LOG_EVERY_N(level, mod, freq, msg, ...) HS_DETAILED_LOG_EVERY_N(level, mod, freq, , , , , msg, ##__VA_ARGS__)
+
+#define HS_DETAILED_LOG_EVERY_N_SEC(level, mod, interval_sec, submod_name, submod_val, detail_name, detail_val, msg,   \
+                                     ...)                                                                              \
+    {                                                                                                                  \
+        LOG##level##MOD_FMT(                                                                                           \
+            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                                           \
+            ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                           \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
+                                fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__)));                 \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},        \
+                                                              fmt::make_format_args(submod_name, submod_val))))        \
+                ();                                                                                                    \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},        \
+                                                              fmt::make_format_args(detail_name, detail_val))))        \
+                ();                                                                                                    \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
+                return check_and_format_log(buf, 0, interval_sec);                                                                                          \
+            }),                                                                                                        \
+            msg, ##__VA_ARGS__);                                                                                       \
+    }
+
+#define HS_LOG_EVERY_N_SEC(level, mod, interval_sec, msg, ...)                                                         \
+    HS_DETAILED_LOG_EVERY_N_SEC(level, mod, interval_sec, , , , , msg, ##__VA_ARGS__)
+
+#define HS_DETAILED_LOG_EVERY_N_OR_SEC(level, mod, freq, interval_sec, submod_name, submod_val, detail_name,          \
+                                        detail_val, msg, ...)                                                          \
+    {                                                                                                                  \
+        LOG##level##MOD_FMT(                                                                                           \
+            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                                           \
+            ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                           \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
+                                fmt::make_format_args(unmove(file_name(__FILE__)), unmove(__LINE__)));                 \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},        \
+                                                              fmt::make_format_args(submod_name, submod_val))))        \
+                ();                                                                                                    \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},        \
+                                                              fmt::make_format_args(detail_name, detail_val))))        \
+                ();                                                                                                    \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
+                return check_and_format_log(buf, freq, interval_sec);                                                                                          \
+            }),                                                                                                        \
+            msg, ##__VA_ARGS__);                                                                                       \
+    }
+
+#define HS_LOG_EVERY_N_OR_SEC(level, mod, freq, interval_sec, msg, ...)                                                \
+    HS_DETAILED_LOG_EVERY_N_OR_SEC(level, mod, freq, interval_sec, , , , , msg, ##__VA_ARGS__)
 
 #define HS_SUBMOD_LOG(level, mod, req, submod_name, submod_val, msg, ...)                                              \
     HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, , , msg, ##__VA_ARGS__)
@@ -310,16 +352,66 @@
 #define HS_REL_ASSERT_NULL(val, ...) HS_ASSERT_NULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 #define HS_REL_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 
-[[maybe_unused]] static uint64_t check_logged_already(const fmt::memory_buffer& buf) {
+[[maybe_unused]] static bool check_and_format_log(fmt::memory_buffer& buf, uint64_t freq = 0,
+                                                    uint64_t interval_sec = 0) {
     static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
-    static thread_local std::unordered_map< std::string, std::pair< Clock::time_point, uint64_t > > log_map{};
+    static thread_local Clock::time_point last_cleanup{Clock::now()};
+    static thread_local std::unordered_map< size_t, std::pair< uint32_t, uint64_t > > log_map{};
+    // hash -> (last_log_ms, count)
 
-    const std::string_view msg{buf.data()};
-    auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0));
-    HS_REL_ASSERT(it != std::cend(log_map), "Expected entry to be either present or new insertion to succeed");
-    auto& [tm, count] = it->second;
-    auto result = count;
-    count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? static_cast< decltype(count) >(0) : count + 1;
-    tm = Clock::now();
-    return result;
+    const auto now = Clock::now();
+    if (get_elapsed_time_sec(last_cleanup) > COUNTER_RESET_SEC) {
+        log_map.clear();
+        last_cleanup = now;
+    }
+
+    // Hash the buffer content BEFORE appending any suffix
+    const std::string_view msg{buf.data(), buf.size()};
+    const size_t msg_hash = std::hash< std::string_view >{}(msg);
+
+    // Milliseconds since last cleanup (max ~49 days with uint32_t)
+    const uint32_t now_ms =
+        std::chrono::duration_cast< std::chrono::milliseconds >(now - last_cleanup).count();
+
+    auto [it, happened] = log_map.emplace(msg_hash, std::make_pair(now_ms, 1));
+    uint32_t elapsed_ms = 0;
+    uint64_t count = 1;
+
+    if (!happened) {
+        // Entry exists - increment count and calculate elapsed time
+        elapsed_ms = now_ms - it->second.first; // Time since last log emission
+        it->second.second++;                    // Increment count
+        count = it->second.second;
+    }
+
+    // Decide if we should log
+    bool should_log = false;
+    if (count == 1) {
+        // Always log first occurrence
+        should_log = true;
+    } else if (freq > 0 && count % freq == 0) {
+        // Count-based: log every Nth occurrence
+        should_log = true;
+    } else if (interval_sec > 0 && elapsed_ms >= static_cast< uint32_t >(interval_sec) * 1000) {
+        // Time-based: log if enough time has passed since last emission
+        should_log = true;
+    }
+
+    // If logging, update timestamp and append suffix
+    if (should_log) {
+        // Append formatted suffix if not first occurrence
+        if (count > 1) {
+            // Always show elapsed time and count since last log
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" ...Last logged {:.1f}s ago, {} occurrences"},
+                            fmt::make_format_args(elapsed_ms / 1000.0, count));
+        }
+
+        // Update state after logging (so next log shows "since this log")
+        if (!happened) {
+            it->second.first = now_ms;  // Update timestamp
+            it->second.second = 1;      // Reset count (next occurrence will be "1 since this log")
+        }
+    }
+
+    return should_log;
 }

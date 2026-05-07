@@ -111,3 +111,6 @@ CMakeUserPresets.json
 
 # claude
 .claude/**
+
+# worktrees
+.worktrees/
