@@ -402,8 +402,8 @@
         // Append formatted suffix if not first occurrence
         if (count > 1) {
             // Always show elapsed time and count since last log
-            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" ...Last logged {:.1f}s ago, {} occurrences"},
-                            fmt::make_format_args(elapsed_ms / 1000.0, count));
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" ...Last logged {}ms ago, {} occurrences"},
+                            fmt::make_format_args(elapsed_ms, count));
         }
 
         // Update state after logging (so next log shows "since this log")
