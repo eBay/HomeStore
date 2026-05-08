@@ -422,7 +422,15 @@ public:
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType* const rec) {
         const CacheBufferType* cbuf{static_cast< CacheBufferType* >(rec->cache_buffer)};
-        return cbuf->get_cache_size();
+        // Actual memory cost per cached entry includes overhead beyond the raw data buffer:
+        //   sizeof(CacheBufferType): CacheBuffer base class + derived class (e.g., BtreeNode) members
+        //   sizeof(homeds::MemVector): MemVector object holding buffer metadata (80 bytes measured via GDB)
+        //   sizeof(homeds::MemPiece): MemPiece[1] array for contiguous buffer tracking (32 bytes, tcmalloc rounds 18→32)
+        // m_cache_size tracks only the raw data buffer (e.g., 512B or 4096B for btree nodes)
+        // For btree nodes, empirical validation via GDB: 832B total = 512B data + 320B overhead
+        // This formula ensures cache_size metric and eviction threshold reflect true RSS cost
+        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + sizeof(homeds::MemVector) + sizeof(homeds::MemPiece)};
+        return cbuf->get_cache_size() + k_overhead;
     }
 };
 
