@@ -353,12 +353,29 @@
 #define HS_REL_ASSERT_NULL(val, ...) HS_ASSERT_NULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 #define HS_REL_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 
+/**
+ * Rate-limited logging helper with count-based and time-based controls.
+ *
+ * State is cleaned up every 300 seconds to prevent unbounded memory growth.
+ * This means time-based rate limiting works correctly only when interval_sec < 300.
+ * If interval_sec >= 300, the behavior effectively becomes "log first occurrence after each 5min reset."
+ */
 [[maybe_unused]] static bool check_and_format_log(fmt::memory_buffer& buf, uint64_t freq = 0,
                                                     uint64_t interval_sec = 0) {
     static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
     static thread_local Clock::time_point last_cleanup{Clock::now()};
     static thread_local std::unordered_map< size_t, std::pair< uint32_t, uint64_t > > log_map{};
     // hash -> (last_log_ms, count)
+
+    // Warn once if interval_sec exceeds cleanup period
+    if (interval_sec > COUNTER_RESET_SEC) {
+        static thread_local bool warned = false;
+        if (!warned) {
+            LOGWARN("interval_sec={} exceeds cleanup period ({}s) - time-based rate limiting may not work as expected",
+                    interval_sec, COUNTER_RESET_SEC);
+            warned = true;
+        }
+    }
 
     const auto now = Clock::now();
     if (get_elapsed_time_sec(last_cleanup) > COUNTER_RESET_SEC) {
