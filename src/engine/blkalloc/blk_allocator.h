@@ -135,7 +135,7 @@ struct blk_alloc_hints {
             is_contiguous{false},
             multiplier{1},
             max_blks_per_entry{BlkId::max_blks_in_op()},
-            stream_info{(uintptr_t) nullptr} {}
+            stream_info{(uintptr_t)nullptr} {}
 
     blk_temp_t desired_temp;       // Temperature hint for the device
     uint32_t dev_id_hint;          // which physical device to pick (hint if any) -1 for don't care

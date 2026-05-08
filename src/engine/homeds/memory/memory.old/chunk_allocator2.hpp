@@ -78,9 +78,7 @@ public:
     }
 
     virtual ~ChunkMemAllocator() {
-        if (m_base_ptr) {
-            delete[](m_base_ptr);
-        }
+        if (m_base_ptr) { delete[] (m_base_ptr); }
     }
 
     // Provides the metadata blk size. This metadata blk can be used by the caller to put anything it wants after
@@ -96,24 +94,18 @@ public:
     uint8_t* allocate(uint32_t size_needed, uint8_t** meta_blk = nullptr) {
         MemBlk blk;
 
-        if (size_needed > ChunkSize) {
-            return nullptr;
-        }
+        if (size_needed > ChunkSize) { return nullptr; }
 
         chunk_pool_header* hdr = nullptr;
         hdr = alloc_header();
-        if (hdr == nullptr) {
-            return hdr;
-        }
+        if (hdr == nullptr) { return hdr; }
 
 #ifdef CHUNK_MEMPOOL_DEBUG
         printf("%p: ChunkMemAllocator: %p Alloc id=0x%x refcnt=%d size=%u top=0x%llx\n", pthread_self(), this, hdr->id,
                hdr->refcnt.load(), m_entrySize, m_top.load());
 #endif
 
-        if (meta_blk) {
-            *meta_blk = (uint8_t*)hdr;
-        }
+        if (meta_blk) { *meta_blk = (uint8_t*)hdr; }
         return hdr_to_mem(hdr);
     }
 
@@ -148,9 +140,7 @@ private:
             top_id = m_top.load(std::memory_order_release);
             uint32_t id = get_id_from_top_id(top_id);
 
-            if (id == CHUNKID_INVALID) {
-                return nullptr;
-            }
+            if (id == CHUNKID_INVALID) { return nullptr; }
 
             hdr = id_to_hdr(id);
             uint32_t gen = m_gen.fetch_add(1, std::memory_order_acq_rel);

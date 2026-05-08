@@ -38,7 +38,7 @@ public:
     BlkBuffer& operator=(BlkBuffer&&) noexcept = delete;
     virtual ~BlkBuffer() override = default;
 
-    virtual void init() override{};
+    virtual void init() override {};
 
     template < typename... Args >
     static BlkBuffer* make_object(Args&&... args) {

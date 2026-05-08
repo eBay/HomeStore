@@ -133,16 +133,12 @@ public:
     //// Fast_Mempool related methods. These are unsafe methods /////
     void free(mempool_header* hdr) {
         fast_mempool* pool = get_owner_pool(hdr);
-        if (pool) {
-            return pool->free(hdr);
-        }
+        if (pool) { return pool->free(hdr); }
     }
 
     mem_id_t to_id(uint8_t* mem) {
         fast_mempool* pool = get_owner_pool(mem);
-        if (pool) {
-            return pool->to_mem_id(mem);
-        }
+        if (pool) { return pool->to_mem_id(mem); }
         return mem_id_t::form(INVALID_MEM_ID);
     }
 
@@ -198,9 +194,7 @@ private:
 
     mempool* get_owner_pool(uint8_t* mem) {
         for (auto i = 0; i < m_pools.size(); i++) {
-            if (m_pools[i].pool->owns(mem)) {
-                return (m_pools[i].pool);
-            }
+            if (m_pools[i].pool->owns(mem)) { return (m_pools[i].pool); }
         }
         return nullptr;
     }
@@ -213,9 +207,7 @@ private:
      */
     fast_mempool* get_owner_pool(mempool_header* hdr) {
         for (auto i = 0; i < m_pools.size(); i++) {
-            if (m_pools[i].pool->owns(hdr)) {
-                return (m_pools[i].pool);
-            }
+            if (m_pools[i].pool->owns(hdr)) { return (m_pools[i].pool); }
         }
         return nullptr;
     }

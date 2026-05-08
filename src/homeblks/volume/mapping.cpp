@@ -272,7 +272,9 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
 
 uint64_t mapping::get_btree_node_cnt() { return m_bt->get_btree_node_cnt(); }
 void mapping::print_tree() { m_bt->print_tree(); }
-bool mapping::verify_tree(bool update_debug_bm, bool recursive) { return m_bt->verify_tree(update_debug_bm, recursive); }
+bool mapping::verify_tree(bool update_debug_bm, bool recursive) {
+    return m_bt->verify_tree(update_debug_bm, recursive);
+}
 
 sisl::status_response mapping::get_status(const sisl::status_request& request) { return m_bt->get_status(request); }
 

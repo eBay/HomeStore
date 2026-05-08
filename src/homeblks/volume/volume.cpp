@@ -921,7 +921,9 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
 }
 
 void Volume::print_tree() { get_active_indx()->print_tree(); }
-bool Volume::verify_tree(bool update_debug_bm, bool recursive) { return (get_active_indx()->verify_tree(update_debug_bm, recursive)); }
+bool Volume::verify_tree(bool update_debug_bm, bool recursive) {
+    return (get_active_indx()->verify_tree(update_debug_bm, recursive));
+}
 
 sisl::status_response Volume::get_status(const sisl::status_request& request) {
     sisl::status_response response;

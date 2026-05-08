@@ -11,29 +11,23 @@
 #include "common.h"
 #include "stat.h"
 
-std::atomic<StatMgr*> StatMgr::instance(nullptr);
+std::atomic< StatMgr* > StatMgr::instance(nullptr);
 std::mutex StatMgr::instanceLock;
 
-StatElem::StatElem(Type _type, const std::string& _name)
-    : statType(_type)
-    , statName(_name)
-    , counter(0)
-    , gauge(0)
-    , hist( (_type == HISTOGRAM)
-            ?(new Histogram())
-            :(nullptr) ) {}
+StatElem::StatElem(Type _type, const std::string& _name) :
+        statType(_type),
+        statName(_name),
+        counter(0),
+        gauge(0),
+        hist((_type == HISTOGRAM) ? (new Histogram()) : (nullptr)) {}
 
-StatElem::~StatElem() {
-    delete hist;
-}
+StatElem::~StatElem() { delete hist; }
 
-
-StatMgr::StatMgr() {
-}
+StatMgr::StatMgr() {}
 
 StatMgr::~StatMgr() {
-    std::unique_lock<std::mutex> l(statMapLock);
-    for (auto& entry: statMap) {
+    std::unique_lock< std::mutex > l(statMapLock);
+    for (auto& entry : statMap) {
         delete entry.second;
     }
 }
@@ -41,7 +35,7 @@ StatMgr::~StatMgr() {
 StatMgr* StatMgr::init() {
     StatMgr* mgr = instance.load();
     if (!mgr) {
-        std::lock_guard<std::mutex> l(instanceLock);
+        std::lock_guard< std::mutex > l(instanceLock);
         mgr = instance.load();
         if (!mgr) {
             mgr = new StatMgr();
@@ -58,7 +52,7 @@ StatMgr* StatMgr::getInstance() {
 }
 
 void StatMgr::destroy() {
-    std::lock_guard<std::mutex> l(instanceLock);
+    std::lock_guard< std::mutex > l(instanceLock);
     StatMgr* mgr = instance.load();
     if (mgr) {
         delete mgr;
@@ -138,24 +132,21 @@ StatMgr::CpuStat StatMgr::getCpuStat() {
     // TODO: other platforms
 
     {
-        std::lock_guard<std::mutex> l(last_numbers_lock);
+        std::lock_guard< std::mutex > l(last_numbers_lock);
         static uint64_t last_user_time = 0;
         static uint64_t last_kernel_time = 0;
         static uint64_t last_user_millicores = 0;
         static uint64_t last_kernel_millicores = 0;
 
-        if ( last_user_time && last_kernel_time &&
-                last_user_time <= ret.userTimeMs &&
-                last_kernel_time <= ret.kernelTimeMs ) {
+        if (last_user_time && last_kernel_time && last_user_time <= ret.userTimeMs &&
+            last_kernel_time <= ret.kernelTimeMs) {
             uint64_t time_gap_us = timer.getElapsedUs();
             // Minimum gap should be bigger than 1 second.
             if (time_gap_us >= 1000000) {
                 uint64_t user_time_gap = ret.userTimeMs - last_user_time;
                 uint64_t kernel_time_gap = ret.kernelTimeMs - last_kernel_time;
-                ret.userMilliCores =
-                    1000 * (user_time_gap * 1000) / time_gap_us;
-                ret.kernelMilliCores =
-                    1000 * (kernel_time_gap * 1000) / time_gap_us;
+                ret.userMilliCores = 1000 * (user_time_gap * 1000) / time_gap_us;
+                ret.kernelMilliCores = 1000 * (kernel_time_gap * 1000) / time_gap_us;
 
                 timer.reset();
                 last_user_time = ret.userTimeMs;
@@ -225,9 +216,8 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
     do {
         size_t dev_major = 0, dev_minor = 0;
         fs >> dev_major >> dev_minor;
-        if ( dev_major != major(ss.st_dev) ||
-                dev_minor != minor(ss.st_dev) ) {
-            fs.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        if (dev_major != major(ss.st_dev) || dev_minor != minor(ss.st_dev)) {
+            fs.ignore(std::numeric_limits< std::streamsize >::max(), '\n');
             continue;
         }
 
@@ -240,9 +230,7 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
 
     // Get device name from partition name.
     std::string dev_name;
-    if (!partition_name.empty()) {
-        dev_name = partition_name.substr(0, partition_name.size() - 1);
-    }
+    if (!partition_name.empty()) { dev_name = partition_name.substr(0, partition_name.size() - 1); }
 
     // Rewind.
     fs.seekg(0, fs.beg);
@@ -253,7 +241,7 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
         std::string dummy_str;
         fs >> dummy_str;
         if (dummy_str != dev_name) {
-            fs.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            fs.ignore(std::numeric_limits< std::streamsize >::max(), '\n');
             continue;
         }
 
@@ -264,8 +252,8 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
     } while (!fs.eof());
     fs.close();
 
-    FILE *fp = fopen("/proc/self/io", "r");
-    while(!feof(fp)) {
+    FILE* fp = fopen("/proc/self/io", "r");
+    while (!feof(fp)) {
         char str[64];
         unsigned long temp;
         int rr = fscanf(fp, "%s %lu", str, &temp);
@@ -279,7 +267,7 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
 
     // Calculate time-based metrics.
     {
-        std::lock_guard<std::mutex> l(last_numbers_lock);
+        std::lock_guard< std::mutex > l(last_numbers_lock);
         static uint64_t last_time_io_p = 0;
         static uint64_t last_time_io_d = 0;
         static uint64_t last_time_r = 0;
@@ -297,20 +285,14 @@ StatMgr::IoStat StatMgr::getIoStat(const std::string& path) {
         // Minimum gap should be bigger than 0.5 second.
         uint64_t gap_ms = timer.getElapsedMs();
         if (gap_ms >= 500) {
-            last_util_p = (time_io_p >= last_time_io_p)
-                          ? (time_io_p - last_time_io_p) * 1000 / gap_ms
-                          : 0;
-            last_util_d = (time_io_d >= last_time_io_d)
-                          ? (time_io_d - last_time_io_d) * 1000 / gap_ms
-                          : 0;
+            last_util_p = (time_io_p >= last_time_io_p) ? (time_io_p - last_time_io_p) * 1000 / gap_ms : 0;
+            last_util_d = (time_io_d >= last_time_io_d) ? (time_io_d - last_time_io_d) * 1000 / gap_ms : 0;
             last_avg_r = (time_r >= last_time_r && ret.numReads > last_num_r)
-                         ? ( (time_r - last_time_r) * 1000 /
-                             (ret.numReads - last_num_r) )
-                         : 0;
+                ? ((time_r - last_time_r) * 1000 / (ret.numReads - last_num_r))
+                : 0;
             last_avg_w = (time_w >= last_time_w && ret.numWrites > last_num_w)
-                         ? ( (time_w - last_time_w) * 1000 /
-                             (ret.numWrites - last_num_w) )
-                         : 0;
+                ? ((time_w - last_time_w) * 1000 / (ret.numWrites - last_num_w))
+                : 0;
 
             update_prev_stats = true;
 
@@ -355,7 +337,7 @@ uint64_t StatMgr::getDiskUsage(const std::string& path) {
 }
 
 StatElem* StatMgr::getStat(const std::string& stat_name) {
-    std::unique_lock<std::mutex> l(statMapLock);
+    std::unique_lock< std::mutex > l(statMapLock);
     auto entry = statMap.find(stat_name);
     if (entry == statMap.end()) {
         // Not exist.
@@ -367,26 +349,22 @@ StatElem* StatMgr::getStat(const std::string& stat_name) {
 StatElem* StatMgr::createStat(StatElem::Type type, const std::string& stat_name) {
     StatElem* elem = new StatElem(type, stat_name);
 
-    std::unique_lock<std::mutex> l(statMapLock);
+    std::unique_lock< std::mutex > l(statMapLock);
     auto entry = statMap.find(stat_name);
     if (entry != statMap.end()) {
         // Alraedy exist.
         delete elem;
         return entry->second;
     }
-    statMap.insert( std::make_pair(stat_name, elem) );
+    statMap.insert(std::make_pair(stat_name, elem));
     return elem;
 }
 
-void StatMgr::getAllStats(std::vector<StatElem*>& stats_out) {
-    std::unique_lock<std::mutex> l(statMapLock);
+void StatMgr::getAllStats(std::vector< StatElem* >& stats_out) {
+    std::unique_lock< std::mutex > l(statMapLock);
     stats_out.resize(statMap.size());
     size_t idx = 0;
-    for (auto& entry: statMap) {
+    for (auto& entry : statMap) {
         stats_out[idx++] = entry.second;
     }
 }
-
-
-
-

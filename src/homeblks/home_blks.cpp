@@ -635,11 +635,11 @@ bool HomeBlks::verify_index_bm() {
     return true;
 }
 
-std::map<boost::uuids::uuid, uint64_t> HomeBlks::get_used_size(const VolumePtr& vol) {
+std::map< boost::uuids::uuid, uint64_t > HomeBlks::get_used_size(const VolumePtr& vol) {
     /* Update per volume status */
-    std::map<boost::uuids::uuid, uint64_t> utils_map;
+    std::map< boost::uuids::uuid, uint64_t > utils_map;
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
-    if (vol == nullptr){
+    if (vol == nullptr) {
         auto it{m_volume_map.begin()};
         while (it != m_volume_map.end()) {
             const VolumePtr& vol{it->second};
@@ -649,7 +649,7 @@ std::map<boost::uuids::uuid, uint64_t> HomeBlks::get_used_size(const VolumePtr& 
     } else {
         utils_map[vol->get_uuid()] = vol->get_used_size().used_total_size;
     }
-   return  utils_map;
+    return utils_map;
 }
 
 sisl::status_response HomeBlks::get_status(const sisl::status_request& request) {
@@ -1131,12 +1131,8 @@ void HomeBlks::vol_recovery_start_phase2() {
             total_cache_release_time_ms += cache_release_time_ms;
             LOGINFO("RELEASE_CACHE: Eviction stats for volume: {} - "
                     "total_checked={} evicted={} with_refs={} not_in_cache={} time_ms={}",
-                    it->second->get_name(),
-                    eviction_stats.total_nodes_checked,
-                    eviction_stats.nodes_evicted,
-                    eviction_stats.nodes_with_refs,
-                    eviction_stats.nodes_not_in_cache,
-                    cache_release_time_ms);
+                    it->second->get_name(), eviction_stats.total_nodes_checked, eviction_stats.nodes_evicted,
+                    eviction_stats.nodes_with_refs, eviction_stats.nodes_not_in_cache, cache_release_time_ms);
         }
     }
 

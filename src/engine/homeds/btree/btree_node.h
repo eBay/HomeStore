@@ -45,7 +45,7 @@ struct transient_hdr_t {
             ,
             is_lock(-1)
 #endif
-                {};
+    {};
 };
 
 template < btree_node_type NodeType, typename K, typename V >

@@ -37,8 +37,8 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_utils.hpp"
-//#include "engine/homestore_base.hpp"
-//#include "tagged_ptr.hpp"
+// #include "engine/homestore_base.hpp"
+// #include "tagged_ptr.hpp"
 #include <sisl/metrics/metrics.hpp>
 
 namespace homeds {
@@ -47,7 +47,7 @@ using namespace homestore; // NOTE: This needs to be removed as it pollutes name
 
 #if 0
 // Tagged pointer implementation of MemPiece
-#define round_off(val, rnd) ((((val)-1) / (rnd)) + 1)
+#define round_off(val, rnd) ((((val) - 1) / (rnd)) + 1)
 
 #pragma pack(1)
 struct mempiece_tag {

@@ -67,7 +67,7 @@ public:
 
 /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
  * speed of read/writes, but at the cost of increased memory */
-//#define ENTRIES_PER_BUCKET 2
+// #define ENTRIES_PER_BUCKET 2
 
 /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
  * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
@@ -425,11 +425,13 @@ public:
         // Actual memory cost per cached entry includes overhead beyond the raw data buffer:
         //   sizeof(CacheBufferType): CacheBuffer base class + derived class (e.g., BtreeNode) members
         //   sizeof(homeds::MemVector): MemVector object holding buffer metadata (80 bytes measured via GDB)
-        //   sizeof(homeds::MemPiece): MemPiece[1] array for contiguous buffer tracking (32 bytes, tcmalloc rounds 18→32)
+        //   sizeof(homeds::MemPiece): MemPiece[1] array for contiguous buffer tracking (32 bytes, tcmalloc rounds
+        //   18→32)
         // m_cache_size tracks only the raw data buffer (e.g., 512B or 4096B for btree nodes)
         // For btree nodes, empirical validation via GDB: 832B total = 512B data + 320B overhead
         // This formula ensures cache_size metric and eviction threshold reflect true RSS cost
-        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + sizeof(homeds::MemVector) + sizeof(homeds::MemPiece)};
+        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + sizeof(homeds::MemVector) +
+                                             sizeof(homeds::MemPiece)};
         return cbuf->get_cache_size() + k_overhead;
     }
 };

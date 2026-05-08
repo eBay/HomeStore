@@ -378,7 +378,7 @@ class MappingValue : public homeds::btree::BtreeValue, public sisl::ObjLifeCount
 
 public:
     // creates empty array
-    MappingValue() : ObjLifeCounter(){};
+    MappingValue() : ObjLifeCounter() {};
 
     // creates array with one value entry - on heap, does copy. Initializes the value entry with all these params
     MappingValue(const seq_id_t seqid, const BlkId& blkid, const lba_count_t lba_offset, const lba_count_t nlbas,

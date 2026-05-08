@@ -48,7 +48,7 @@ public:
     CacheValueBuffer& operator=(CacheValueBuffer&&) noexcept = delete;
     virtual ~CacheValueBuffer() override = default;
 
-    virtual void init() override{};
+    virtual void init() override {};
 
     template < typename... Args >
     static CacheValueBuffer* make_object(Args... args) {

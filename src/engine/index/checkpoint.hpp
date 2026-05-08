@@ -76,7 +76,7 @@ struct cp_base {
     /* callback when cp is done */
     std::vector< cp_done_cb > cb_list;
 
-    cp_base() : enter_cnt(0), cb_list(0){};
+    cp_base() : enter_cnt(0), cb_list(0) {};
     std::string to_string() {
         return fmt::format("[cp_status={}, enter_cnt={}]", enum_name(cp_status.load()), enter_cnt.load());
     }

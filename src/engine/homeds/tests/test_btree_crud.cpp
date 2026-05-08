@@ -278,7 +278,7 @@ struct SimpleKeyComparator {
 
 #define TOTAL_ENTRIES 100000
 #define TOTAL_OPERS_PER_TEST 500
-//#define NTHREADS 4
+// #define NTHREADS 4
 #define NTHREADS 1
 
 struct BtreeCrudTest : public ::testing::Test {

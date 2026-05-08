@@ -90,15 +90,12 @@ std::string hs_utils::encodeBase64(const uint8_t* first, std::size_t size) {
     return encoded.append(bytes_to_pad, '=');
 }
 
-std::string hs_utils::encodeBase64(const sisl::byte_view& b){
-    return encodeBase64(b.bytes(), b.size());
-}
+std::string hs_utils::encodeBase64(const sisl::byte_view& b) { return encodeBase64(b.bytes(), b.size()); }
 
-template <typename T>
-void hs_utils::decodeBase64(const std::string &encoded_data, T out)
-{
+template < typename T >
+void hs_utils::decodeBase64(const std::string& encoded_data, T out) {
     using BinaryFromBase64 = boost::archive::iterators::transform_width<
-        boost::archive::iterators::binary_from_base64<std::string::const_iterator>,
+        boost::archive::iterators::binary_from_base64< std::string::const_iterator >,
         8, // get a view of 8 bit
         6  // from a sequence of 6 bit
         >;
@@ -107,14 +104,13 @@ void hs_utils::decodeBase64(const std::string &encoded_data, T out)
     std::replace(begin(unpadded_data), end(unpadded_data), '=', 'A'); // A_64 == \0
 
     std::string decoded_data{BinaryFromBase64{begin(unpadded_data)},
-                        BinaryFromBase64{begin(unpadded_data) + unpadded_data.length()}};
+                             BinaryFromBase64{begin(unpadded_data) + unpadded_data.length()}};
 
     decoded_data.erase(end(decoded_data) - bytes_to_pad, end(decoded_data));
     std::copy(begin(decoded_data), end(decoded_data), out);
 }
 
-std::string hs_utils::decodeBase64(const std::string &encoded_data)
-{
+std::string hs_utils::decodeBase64(const std::string& encoded_data) {
     std::string rv;
     decodeBase64(encoded_data, std::back_inserter(rv));
     return rv;

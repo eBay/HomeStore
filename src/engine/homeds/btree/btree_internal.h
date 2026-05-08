@@ -108,7 +108,7 @@ struct blkalloc_cp_id;
 #define BT_DBG_ASSERT_CMP(...) BT_ASSERT_CMP(DEBUG_ASSERT_CMP, ##__VA_ARGS__)
 #define BT_REL_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE_ASSERT_CMP, ##__VA_ARGS__)
 #define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE_ASSERT_CMP, ##__VA_ARGS__)
-//#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
+// #define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 #define MAX_ADJANCENT_INDEX 3
 
@@ -152,7 +152,7 @@ struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
     seq_id_t end_seqid = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
-    btree_cp() : ref_cnt(1), btree_size(0){};
+    btree_cp() : ref_cnt(1), btree_size(0) {};
     ~btree_cp() {}
 
     std::string to_string() const {
@@ -453,7 +453,7 @@ struct BtreeQueryCursor {
         return b;
     };
 
-    BtreeQueryCursor(){};
+    BtreeQueryCursor() {};
     std::string to_string() const {
         if (m_last_key) {
             return (m_last_key->to_string());

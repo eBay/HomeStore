@@ -314,8 +314,8 @@ SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< b
 }
 
 std::optional< blk_temp_t > SlabCacheQueue::push(const blk_cache_entry& entry, const bool only_this_level) {
-    const blk_temp_t start_level{
-        static_cast< blk_temp_t >((entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
+    const blk_temp_t start_level{static_cast< blk_temp_t >(
+        (entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
     blk_temp_t level{start_level};
     bool pushed{m_level_queues[start_level]->write(entry)};
 
@@ -378,7 +378,8 @@ void SlabCacheQueue::close_session(const uint64_t session_id) {
     m_refill_session.compare_exchange_strong(expected_session_id, 0, std::memory_order_acq_rel);
 }
 
-SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, VarsizeBlkAllocMetrics* const parent) :
+SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue,
+                         VarsizeBlkAllocMetrics* const parent) :
         sisl::MetricsGroup{"SlabMetrics", fmt::format("{}_slab_{:03d}", parent->instance_name(), slab_size)},
         m_slab_queue{slab_queue} {
     REGISTER_COUNTER(num_slab_alloc, "Number of alloc attempts in this slab");

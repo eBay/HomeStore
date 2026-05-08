@@ -633,8 +633,8 @@ public:
     VolTest& operator=(const VolTest&) = delete;
     VolTest& operator=(VolTest&&) noexcept = delete;
 
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     void remove_files() {
         /* no need to delete the user created file/disk */

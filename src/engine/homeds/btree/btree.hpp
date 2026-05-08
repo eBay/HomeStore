@@ -742,12 +742,12 @@ public:
      * @return : true if btree is not corrupted.
      *           false if btree is corrupted;
      */
-    bool verify_tree(bool update_debug_bm, bool recursive=false) {
+    bool verify_tree(bool update_debug_bm, bool recursive = false) {
         m_btree_lock.read_lock();
-		LOGINFO("Starting btree verification for: {}", m_btree_cfg.get_name());
+        LOGINFO("Starting btree verification for: {}", m_btree_cfg.get_name());
         bool ret = verify_node(m_root_node, nullptr, -1, update_debug_bm, recursive);
         m_btree_lock.unlock();
-		LOGINFO("Completed btree verification for: {}, result={}", m_btree_cfg.get_name(), ret);
+        LOGINFO("Completed btree verification for: {}, result={}", m_btree_cfg.get_name(), ret);
         return ret;
     }
 
@@ -763,12 +763,12 @@ public:
         uint64_t nodes_not_in_cache;
 
         EvictionStats() :
-            total_nodes_checked(0),
-            nodes_evicted(0),
-            nodes_with_refs(0),
-            nodes_dirty(0),
-            nodes_locked(0),
-            nodes_not_in_cache(0) {}
+                total_nodes_checked(0),
+                nodes_evicted(0),
+                nodes_with_refs(0),
+                nodes_dirty(0),
+                nodes_locked(0),
+                nodes_not_in_cache(0) {}
     };
 
     EvictionStats release_cached_tree() {
@@ -781,8 +781,8 @@ public:
         m_btree_lock.unlock();
 
         LOGINFO("RELEASE_CACHE: Completed for btree: {} - total={} evicted={} with_refs={} not_in_cache={}",
-                m_btree_cfg.get_name(), stats.total_nodes_checked, stats.nodes_evicted,
-                stats.nodes_with_refs, stats.nodes_not_in_cache);
+                m_btree_cfg.get_name(), stats.total_nodes_checked, stats.nodes_evicted, stats.nodes_with_refs,
+                stats.nodes_not_in_cache);
 
         return stats;
     }
@@ -1186,13 +1186,14 @@ public:
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
 
 private:
-	bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, bool update_debug_bm, bool recursive=false) {
-		if (recursive) {
+    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, bool update_debug_bm,
+                     bool recursive = false) {
+        if (recursive) {
             return verify_node_recursive(bnodeid, parent_node, indx, update_debug_bm);
         } else {
             return verify_node_fowarding(bnodeid, parent_node, indx, update_debug_bm);
         }
-	}
+    }
     /**
      * @brief : verify the btree node is corrupted or not;
      *
@@ -1305,7 +1306,8 @@ private:
         }
 
         if (my_node->has_valid_edge()) {
-            success = verify_node_recursive(my_node->get_edge_id(), my_node, my_node->get_total_entries(), update_debug_bm);
+            success =
+                verify_node_recursive(my_node->get_edge_id(), my_node, my_node->get_total_entries(), update_debug_bm);
             if (!success) { goto exit_on_error; }
         }
 
@@ -1343,16 +1345,19 @@ private:
             uint32_t parent_total_entries;
             bool validate_with_parent;
 
-            NodeToVerify(bnodeid_t nid, uint32_t idx, bool hp, const K* pkey, const K* pprev,
-                        uint32_t ptotal, bool validate)
-                : node_id(nid), parent_index(idx), has_parent(hp),
-                  parent_total_entries(ptotal), validate_with_parent(validate) {
+            NodeToVerify(bnodeid_t nid, uint32_t idx, bool hp, const K* pkey, const K* pprev, uint32_t ptotal,
+                         bool validate) :
+                    node_id(nid),
+                    parent_index(idx),
+                    has_parent(hp),
+                    parent_total_entries(ptotal),
+                    validate_with_parent(validate) {
                 if (pkey) parent_key = *pkey;
                 if (pprev) parent_prev_key = *pprev;
             }
         };
 
-        std::queue<NodeToVerify> work_queue;
+        std::queue< NodeToVerify > work_queue;
         work_queue.push(NodeToVerify(bnodeid, indx, false, nullptr, nullptr, 0, false));
 
         while (!work_queue.empty()) {
@@ -1387,13 +1392,15 @@ private:
                     K* pprev = (i > 0) ? &prev_key : nullptr;
                     bool validate = (my_node->get_total_entries() != i);
 
-                    work_queue.push(NodeToVerify(child.bnode_id(), i, true, &key, pprev,
-                                                 my_node->get_total_entries(), validate));
+                    work_queue.push(
+                        NodeToVerify(child.bnode_id(), i, true, &key, pprev, my_node->get_total_entries(), validate));
 
                     if (i > 0) {
                         BT_LOG_ASSERT_CMP(prev_key.compare(&key), <, 0, my_node);
                         if (prev_key.compare(&key) >= 0) {
-                            LOGERROR("VERIFY_NODE_FAIL: Interior node key ordering violation at index {}: prev_key >= key", i);
+                            LOGERROR(
+                                "VERIFY_NODE_FAIL: Interior node key ordering violation at index {}: prev_key >= key",
+                                i);
                             unlock_node(my_node, acq_lock);
                             return false;
                         }
@@ -1403,7 +1410,9 @@ private:
                 if (my_node->is_leaf() && i > 0) {
                     BT_LOG_ASSERT_CMP(prev_key.compare_start(&key), <, 0, my_node);
                     if (prev_key.compare_start(&key) >= 0) {
-                        LOGERROR("VERIFY_NODE_FAIL: Leaf node key ordering violation at index {}: prev_key.compare_start(key) >= 0", i);
+                        LOGERROR("VERIFY_NODE_FAIL: Leaf node key ordering violation at index {}: "
+                                 "prev_key.compare_start(key) >= 0",
+                                 i);
                         unlock_node(my_node, acq_lock);
                         return false;
                     }
@@ -1417,15 +1426,15 @@ private:
 
                 if (!my_node->is_leaf()) {
                     if (last_key.compare(&current.parent_key) != 0) {
-                        LOGERROR("Interior node last key {} != parent key {}",
-                                last_key.to_string(), current.parent_key.to_string());
+                        LOGERROR("Interior node last key {} != parent key {}", last_key.to_string(),
+                                 current.parent_key.to_string());
                         unlock_node(my_node, acq_lock);
                         return false;
                     }
                 } else {
                     if (last_key.compare(&current.parent_key) > 0) {
-                        LOGERROR("Leaf node last key {} > parent key {}",
-                                last_key.to_string(), current.parent_key.to_string());
+                        LOGERROR("Leaf node last key {} > parent key {}", last_key.to_string(),
+                                 current.parent_key.to_string());
                         unlock_node(my_node, acq_lock);
                         return false;
                     }
@@ -1442,8 +1451,8 @@ private:
                 my_node->get_nth_key(0, &first_key, false);
 
                 if (first_key.compare(&current.parent_prev_key) <= 0) {
-                    LOGERROR("First key {} <= parent prev key {}",
-                            first_key.to_string(), current.parent_prev_key.to_string());
+                    LOGERROR("First key {} <= parent prev key {}", first_key.to_string(),
+                             current.parent_prev_key.to_string());
                     unlock_node(my_node, acq_lock);
                     return false;
                 }
@@ -1458,8 +1467,8 @@ private:
             if (my_node->has_valid_edge()) {
                 K last_key;
                 my_node->get_nth_key(my_node->get_total_entries() - 1, &last_key, false);
-                work_queue.push(NodeToVerify(my_node->get_edge_id(), my_node->get_total_entries(),
-                                             true, &last_key, &last_key, my_node->get_total_entries(), false));
+                work_queue.push(NodeToVerify(my_node->get_edge_id(), my_node->get_total_entries(), true, &last_key,
+                                             &last_key, my_node->get_total_entries(), false));
             }
 
             unlock_node(my_node, acq_lock);
@@ -1469,7 +1478,7 @@ private:
     }
 
     void release_cached_nodes_recursive(bnodeid_t root_bnodeid, EvictionStats& stats) {
-        std::queue<bnodeid_t> work_queue;
+        std::queue< bnodeid_t > work_queue;
         work_queue.push(root_bnodeid);
 
         while (!work_queue.empty()) {
@@ -1486,16 +1495,14 @@ private:
                 continue;
             }
 
-            std::vector<bnodeid_t> child_ids;
+            std::vector< bnodeid_t > child_ids;
             if (!my_node->is_leaf()) {
                 for (uint32_t i = 0; i < my_node->get_total_entries(); ++i) {
                     BtreeNodeInfo child;
                     my_node->get(i, &child, false);
                     child_ids.push_back(child.bnode_id());
                 }
-                if (my_node->has_valid_edge()) {
-                    child_ids.push_back(my_node->get_edge_id());
-                }
+                if (my_node->has_valid_edge()) { child_ids.push_back(my_node->get_edge_id()); }
             }
 
             for (const auto& child_id : child_ids) {

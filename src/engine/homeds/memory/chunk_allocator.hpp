@@ -93,7 +93,7 @@ public:
     }
 
     virtual ~ChunkMemAllocator() {
-        if (m_base_ptr) { delete[](m_base_ptr); }
+        if (m_base_ptr) { delete[] (m_base_ptr); }
     }
 
     // Provides the metadata blk size. This metadata blk can be used by the caller to put anything it wants after
