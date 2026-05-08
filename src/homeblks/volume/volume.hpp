@@ -502,6 +502,9 @@ public:
     /* verify active indx */
     bool verify_tree(bool update_debug_bm = false, bool recursive = false);
 
+    /* release cached tree nodes */
+    auto release_cached_tree() { return get_active_indx()->release_cached_tree(); }
+
     /* get status */
     sisl::status_response get_status(const sisl::status_request& request);
 

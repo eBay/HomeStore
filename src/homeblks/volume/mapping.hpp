@@ -687,6 +687,7 @@ public:
 
     void print_tree();
     bool verify_tree(bool update_debug_bm, bool recursive = false);
+    auto release_cached_tree() { return m_bt->release_cached_tree(); }
     sisl::sobject_ptr sobject() { return m_sobject; }
     sisl::status_response get_status(const sisl::status_request& request);
 

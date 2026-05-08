@@ -752,6 +752,42 @@ public:
     }
 
     /**
+     * @brief Statistics from release_cached_tree()
+     */
+    struct EvictionStats {
+        uint64_t total_nodes_checked;
+        uint64_t nodes_evicted;
+        uint64_t nodes_with_refs;
+        uint64_t nodes_dirty;
+        uint64_t nodes_locked;
+        uint64_t nodes_not_in_cache;
+
+        EvictionStats() :
+            total_nodes_checked(0),
+            nodes_evicted(0),
+            nodes_with_refs(0),
+            nodes_dirty(0),
+            nodes_locked(0),
+            nodes_not_in_cache(0) {}
+    };
+
+    EvictionStats release_cached_tree() {
+        EvictionStats stats;
+
+        LOGINFO("RELEASE_CACHE: Starting safe cache release for btree: {}", m_btree_cfg.get_name());
+
+        m_btree_lock.read_lock();
+        release_cached_nodes_recursive(m_root_node, stats);
+        m_btree_lock.unlock();
+
+        LOGINFO("RELEASE_CACHE: Completed for btree: {} - total={} evicted={} with_refs={} not_in_cache={}",
+                m_btree_cfg.get_name(), stats.total_nodes_checked, stats.nodes_evicted,
+                stats.nodes_with_refs, stats.nodes_not_in_cache);
+
+        return stats;
+    }
+
+    /**
      * @brief : get the status of this btree;
      *
      * @param log_level : verbosity level;
@@ -1430,6 +1466,67 @@ private:
         }
 
         return true;
+    }
+
+    void release_cached_nodes_recursive(bnodeid_t root_bnodeid, EvictionStats& stats) {
+        std::queue<bnodeid_t> work_queue;
+        work_queue.push(root_bnodeid);
+
+        while (!work_queue.empty()) {
+            bnodeid_t current_id = work_queue.front();
+            work_queue.pop();
+
+            stats.total_nodes_checked++;
+
+            BtreeNodePtr my_node;
+            homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
+
+            if (read_and_lock_node(current_id, my_node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
+                stats.nodes_not_in_cache++;
+                continue;
+            }
+
+            std::vector<bnodeid_t> child_ids;
+            if (!my_node->is_leaf()) {
+                for (uint32_t i = 0; i < my_node->get_total_entries(); ++i) {
+                    BtreeNodeInfo child;
+                    my_node->get(i, &child, false);
+                    child_ids.push_back(child.bnode_id());
+                }
+                if (my_node->has_valid_edge()) {
+                    child_ids.push_back(my_node->get_edge_id());
+                }
+            }
+
+            for (const auto& child_id : child_ids) {
+                work_queue.push(child_id);
+            }
+
+            unlock_node(my_node, acq_lock);
+            my_node.reset();
+
+            BtreeNodePtr check_node;
+            if (read_and_lock_node(current_id, check_node, acq_lock, acq_lock, nullptr) == btree_status_t::success) {
+                if constexpr (BtreeStoreType == btree_store_type::SSD_BTREE) {
+                    unlock_node(check_node, acq_lock);
+                    check_node.reset();
+
+                    const uint32_t node_size = m_btree_store->get_node_size();
+                    bool evicted = btree_store_t::free_node_from_cache(current_id, node_size);
+
+                    if (evicted) {
+                        stats.nodes_evicted++;
+                    } else {
+                        stats.nodes_with_refs++;
+                    }
+                } else {
+                    stats.nodes_with_refs++;
+                    unlock_node(check_node, acq_lock);
+                }
+            } else {
+                stats.nodes_evicted++;
+            }
+        }
     }
 
     void to_string(bnodeid_t bnodeid, std::string& buf) {
