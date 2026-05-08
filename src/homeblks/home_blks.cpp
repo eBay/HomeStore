@@ -526,6 +526,7 @@ void HomeBlks::init_done() {
     GAUGE_UPDATE(*m_metrics, recovery_phase1_latency, m_recovery_stats->m_phase1_ms);
     GAUGE_UPDATE(*m_metrics, recovery_phase2_latency, m_recovery_stats->m_phase2_ms);
     GAUGE_UPDATE(*m_metrics, recovery_log_store_latency, m_recovery_stats->m_log_store_ms);
+    GAUGE_UPDATE(*m_metrics, recovery_cache_release_latency, m_recovery_stats->m_cache_release_ms);
     GAUGE_UPDATE(*m_metrics, recovery_total_latency, m_recovery_stats->m_total_ms);
 
     // start the io watchdog;
@@ -1114,24 +1115,32 @@ void HomeBlks::vol_recovery_start_phase1() {
 
 void HomeBlks::vol_recovery_start_phase2() {
     auto phase2_start = Clock::now();
+    auto cache_release_start = Clock::now();
+    uint64_t total_cache_release_time_ms = 0;
+
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         HS_REL_ASSERT((it->second->verify_tree() == true), "true");
 
         it->second->recovery_start_phase2();
 
         if (HB_DYNAMIC_CONFIG(general_config->release_cache_after_recovery)) {
+            cache_release_start = Clock::now();
             LOGINFO("RELEASE_CACHE: Starting cache release after recovery for volume: {}", it->second->get_name());
             auto eviction_stats = it->second->release_cached_tree();
+            auto cache_release_time_ms = get_elapsed_time_ms(cache_release_start);
+            total_cache_release_time_ms += cache_release_time_ms;
             LOGINFO("RELEASE_CACHE: Eviction stats for volume: {} - "
-                    "total_checked={} evicted={} with_refs={} not_in_cache={}",
+                    "total_checked={} evicted={} with_refs={} not_in_cache={} time_ms={}",
                     it->second->get_name(),
                     eviction_stats.total_nodes_checked,
                     eviction_stats.nodes_evicted,
                     eviction_stats.nodes_with_refs,
-                    eviction_stats.nodes_not_in_cache);
+                    eviction_stats.nodes_not_in_cache,
+                    cache_release_time_ms);
         }
     }
 
+    m_recovery_stats->m_cache_release_ms = total_cache_release_time_ms;
     m_recovery_stats->m_phase2_ms = get_elapsed_time_ms(phase2_start);
 }
 

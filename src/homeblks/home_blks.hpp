@@ -111,6 +111,7 @@ public:
         REGISTER_GAUGE(recovery_phase2_latency, "recovery phase2 latency");
         REGISTER_GAUGE(recovery_log_store_latency, "recovery logstore latency");
         REGISTER_GAUGE(recovery_total_latency, "recovery total latency");
+        REGISTER_GAUGE(recovery_cache_release_latency, "recovery cache release latency");
         REGISTER_GAUGE(unclean_shutdown, "unclean shutdown");
         register_me_to_farm();
     }
@@ -127,12 +128,13 @@ typedef WriteBackCacheBuffer< MappingKey, MappingValue, btree_node_type::VAR_VAL
     BLKSTORE_BUFFER_TYPE;
 
 struct HomeBlksRecoveryStats {
-    Clock::time_point m_start;  // recovery start time
-    uint64_t m_phase0_ms{0};    // time spent in phase0: from init to receipt of meta_blk_recovery_comp_cb;
-    uint64_t m_phase1_ms{0};    // time spent in phase1: volume Phase 1
-    uint64_t m_phase2_ms{0};    // time spent in phase2: volume Phase 2
-    uint64_t m_log_store_ms{0}; // time spent in logstore recovery
-    uint64_t m_total_ms{0};     // total: from metablk notify homeblks of comp_cb to init_done;
+    Clock::time_point m_start;        // recovery start time
+    uint64_t m_phase0_ms{0};          // time spent in phase0: from init to receipt of meta_blk_recovery_comp_cb;
+    uint64_t m_phase1_ms{0};          // time spent in phase1: volume Phase 1
+    uint64_t m_phase2_ms{0};          // time spent in phase2: volume Phase 2
+    uint64_t m_log_store_ms{0};       // time spent in logstore recovery
+    uint64_t m_cache_release_ms{0};   // time spent releasing cached nodes after recovery
+    uint64_t m_total_ms{0};           // total: from metablk notify homeblks of comp_cb to init_done;
 
     void phase0_done() { m_phase0_ms = get_elapsed_time_ms(m_start); }
 
@@ -145,8 +147,8 @@ struct HomeBlksRecoveryStats {
 
     std::string to_string() {
         return fmt::format("Recovery Total (ms): {}, Volume Phase-0 (ms): {},  Volume Phase-1 (ms): {}, Log Store "
-                           "Recovery (ms): {}, Volume Phase-2 (ms): {}",
-                           m_total_ms, m_phase0_ms, m_phase1_ms, m_log_store_ms, m_phase2_ms);
+                           "Recovery (ms): {}, Volume Phase-2 (ms): {}, Cache Release (ms): {}",
+                           m_total_ms, m_phase0_ms, m_phase1_ms, m_log_store_ms, m_phase2_ms, m_cache_release_ms);
     }
 };
 
