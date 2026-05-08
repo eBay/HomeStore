@@ -188,9 +188,9 @@ public:
     [[nodiscard]] seg_num_t get_seg_num() const { return m_seg_num; }
 };
 
-class BlkAllocMetrics : public sisl::MetricsGroup {
+class VarsizeBlkAllocMetrics : public sisl::MetricsGroup {
 public:
-    explicit BlkAllocMetrics(const char* const inst_name) : sisl::MetricsGroup("BlkAlloc", inst_name) {
+    explicit VarsizeBlkAllocMetrics(const char* const inst_name) : sisl::MetricsGroup("VarsizeBlkAlloc", inst_name) {
         REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
         REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
         REGISTER_COUNTER(num_alloc_partial, "Number of blk alloc partial allocations");
@@ -203,11 +203,11 @@ public:
         register_me_to_farm();
     }
 
-    BlkAllocMetrics(const BlkAllocMetrics&) = delete;
-    BlkAllocMetrics(BlkAllocMetrics&&) noexcept = delete;
-    BlkAllocMetrics& operator=(const BlkAllocMetrics&) = delete;
-    BlkAllocMetrics& operator=(BlkAllocMetrics&&) noexcept = delete;
-    ~BlkAllocMetrics() { deregister_me_from_farm(); }
+    VarsizeBlkAllocMetrics(const VarsizeBlkAllocMetrics&) = delete;
+    VarsizeBlkAllocMetrics(VarsizeBlkAllocMetrics&&) noexcept = delete;
+    VarsizeBlkAllocMetrics& operator=(const VarsizeBlkAllocMetrics&) = delete;
+    VarsizeBlkAllocMetrics& operator=(VarsizeBlkAllocMetrics&&) noexcept = delete;
+    ~VarsizeBlkAllocMetrics() { deregister_me_from_farm(); }
 };
 
 /* VarsizeBlkAllocator provides a flexibility in allocation. It provides following features:
@@ -270,7 +270,7 @@ private:
     std::shared_ptr< blk_cache_fill_session > m_cur_fill_session; // Cache fill requirements while sweeping
 
     std::uniform_int_distribution< blk_num_t > m_rand_portion_num_generator;
-    BlkAllocMetrics m_metrics;
+    VarsizeBlkAllocMetrics m_metrics;
 
     // TODO: this fields needs to be passed in from hints and persisted in volume's sb;
     blk_num_t m_start_portion_num{INVALID_PORTION_NUM};

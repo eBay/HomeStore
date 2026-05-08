@@ -19,7 +19,7 @@
 #include "blk_cache_queue.h"
 
 namespace homestore {
-FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics* const metrics) :
+FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, VarsizeBlkAllocMetrics* const metrics) :
         m_cfg{cfg}, m_metrics{metrics} {
 #ifndef NDEBUG
     blk_count_t slab_size{1};
@@ -294,7 +294,7 @@ std::optional< blk_temp_t > FreeBlkCacheQueue::pop_slab(const slab_idx_t slab_id
 }
 
 SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_cap_t >& level_limits,
-                               const float refill_pct, BlkAllocMetrics* parent_metrics) :
+                               const float refill_pct, VarsizeBlkAllocMetrics* parent_metrics) :
         m_slab_size{slab_size}, m_metrics{m_slab_size, this, parent_metrics} {
     for (auto& limit : level_limits) {
         auto ptr{std::make_unique< folly::MPMCQueue< blk_cache_entry > >(limit)};
@@ -370,7 +370,7 @@ void SlabCacheQueue::close_session(const uint64_t session_id) {
     m_refill_session.compare_exchange_strong(expected_session_id, 0, std::memory_order_acq_rel);
 }
 
-SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, BlkAllocMetrics* const parent) :
+SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, VarsizeBlkAllocMetrics* const parent) :
         sisl::MetricsGroup{"SlabMetrics", fmt::format("{}_slab_{:03d}", parent->instance_name(), slab_size)},
         m_slab_queue{slab_queue} {
     REGISTER_COUNTER(num_slab_alloc, "Number of alloc attempts in this slab");
