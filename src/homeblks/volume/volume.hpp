@@ -500,7 +500,7 @@ public:
     void print_tree();
 
     /* verify active indx */
-    bool verify_tree(bool update_debug_bm = false);
+    bool verify_tree(bool update_debug_bm = false, bool recursive = false);
 
     /* get status */
     sisl::status_response get_status(const sisl::status_request& request);

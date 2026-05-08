@@ -686,7 +686,7 @@ public:
     virtual uint64_t get_btree_node_cnt();
 
     void print_tree();
-    bool verify_tree(bool update_debug_bm);
+    bool verify_tree(bool update_debug_bm, bool recursive = false);
     sisl::sobject_ptr sobject() { return m_sobject; }
     sisl::status_response get_status(const sisl::status_request& request);
 
