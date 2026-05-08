@@ -22,7 +22,10 @@
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
+        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()}, m_metrics{cfg.get_name().c_str()} {
+    // folly::MPMCQueue slot for BlkId: 6B item + 6B MPMC sequence field = 12B (confirmed via GDB)
+    static constexpr uint64_t k_mpmc_slot_bytes{12};
+    GAUGE_UPDATE(m_metrics, blk_alloc_memory_size, m_blk_q.capacity() * k_mpmc_slot_bytes);
     LOGINFO("total blks: {}", cfg.get_total_blks());
     if (init) { inited(); }
 }
@@ -72,8 +75,12 @@ BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
+    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) {
+        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
+        return BlkAllocStatus::SPACE_FULL;
+    }
 #endif
     const auto ret{m_blk_q.read(out_blkid)};
     if (ret) {
@@ -81,6 +88,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
         alloc_on_realtime(out_blkid);
         return BlkAllocStatus::SUCCESS;
     } else {
+        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         return BlkAllocStatus::SPACE_FULL;
     }
 }

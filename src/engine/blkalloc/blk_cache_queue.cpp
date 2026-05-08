@@ -176,6 +176,14 @@ blk_cap_t FreeBlkCacheQueue::total_free_blks() const {
     return count;
 }
 
+blk_cap_t FreeBlkCacheQueue::total_slab_capacity() const {
+    blk_cap_t count{0};
+    for (const auto& sq : m_slab_queues) {
+        count += sq->entry_capacity();
+    }
+    return count;
+}
+
 BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, const blk_cache_alloc_req& req,
                                                     blk_cache_alloc_resp& resp) {
     if (resp.nblks_alloced >= req.nblks) { return BlkAllocStatus::SUCCESS; }

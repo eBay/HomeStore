@@ -27,6 +27,7 @@
 
 #include <sisl/fds/bitset.hpp>
 #include <folly/MPMCQueue.h>
+#include <sisl/metrics/metrics.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/urcu_helper.hpp>
 #include <sisl/sobject/sobject.hpp>
@@ -342,6 +343,21 @@ private:
     std::atomic< bool > is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
 };
 
+class FixedBlkAllocMetrics : public sisl::MetricsGroup {
+public:
+    explicit FixedBlkAllocMetrics(const char* const inst_name) : sisl::MetricsGroup("FixedBlkAlloc", inst_name) {
+        REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
+        REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
+        REGISTER_GAUGE(blk_alloc_memory_size, "Memory used by block allocator internal structures in bytes");
+        register_me_to_farm();
+    }
+    FixedBlkAllocMetrics(const FixedBlkAllocMetrics&) = delete;
+    FixedBlkAllocMetrics(FixedBlkAllocMetrics&&) noexcept = delete;
+    FixedBlkAllocMetrics& operator=(const FixedBlkAllocMetrics&) = delete;
+    FixedBlkAllocMetrics& operator=(FixedBlkAllocMetrics&&) noexcept = delete;
+    ~FixedBlkAllocMetrics() { deregister_me_from_farm(); }
+};
+
 /* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead
  * of selectively caching few blks which are free. Thus there is no sweeping of bitmap or other to refill the cache.
  * It does not support temperature of blocks and allocates simply on first come first serve basis
@@ -372,6 +388,7 @@ private:
 
 private:
     folly::MPMCQueue< BlkId > m_blk_q;
+    FixedBlkAllocMetrics m_metrics;
 };
 
 } // namespace homestore

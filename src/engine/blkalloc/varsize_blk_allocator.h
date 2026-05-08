@@ -196,6 +196,7 @@ public:
         REGISTER_COUNTER(num_alloc_partial, "Number of blk alloc partial allocations");
         REGISTER_COUNTER(num_retries, "Number of times it retried because of empty cache");
         REGISTER_COUNTER(num_blks_alloc_direct, "Number of blks alloc attempt directly because of empty cache");
+        REGISTER_GAUGE(blk_alloc_memory_size, "Memory used by block allocator internal structures in bytes");
 #ifndef NDEBUG
         REGISTER_HISTOGRAM(frag_pct_distribution, "Distribution of fragmentation percentage",
                            HistogramBucketsType(LinearUpto64Buckets));

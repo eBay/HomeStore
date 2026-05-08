@@ -97,6 +97,7 @@ public:
                                            blk_cache_fill_session& fill_session) override;
 
     [[nodiscard]] blk_cap_t total_free_blks() const override;
+    [[nodiscard]] blk_cap_t total_slab_capacity() const;
 
     [[nodiscard]] std::shared_ptr< blk_cache_fill_session > create_cache_fill_session(const bool fill_entire_cache);
     void close_cache_fill_session(blk_cache_fill_session& fill_session);
