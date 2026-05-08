@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -388,6 +389,9 @@
     bool should_log = false;
     if (happened) {
         // Always log first occurrence (new entry)
+        should_log = true;
+    } else if (freq == 0 && interval_sec == 0) {
+        // Both rate limiters disabled: always log (fallback behavior)
         should_log = true;
     } else if (freq > 0 && count % freq == 0) {
         // Count-based: log every Nth occurrence
