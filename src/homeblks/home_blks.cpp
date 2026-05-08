@@ -1116,7 +1116,18 @@ void HomeBlks::vol_recovery_start_phase2() {
     auto phase2_start = Clock::now();
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         HS_REL_ASSERT((it->second->verify_tree() == true), "true");
+
         it->second->recovery_start_phase2();
+
+        LOGINFO("RELEASE_CACHE: Starting cache release after recovery for volume: {}", it->second->get_name());
+        auto eviction_stats = it->second->release_cached_tree();
+        LOGINFO("RELEASE_CACHE: Eviction stats for volume: {} - "
+                "total_checked={} evicted={} with_refs={} not_in_cache={}",
+                it->second->get_name(),
+                eviction_stats.total_nodes_checked,
+                eviction_stats.nodes_evicted,
+                eviction_stats.nodes_with_refs,
+                eviction_stats.nodes_not_in_cache);
     }
 
     m_recovery_stats->m_phase2_ms = get_elapsed_time_ms(phase2_start);
