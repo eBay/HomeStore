@@ -377,6 +377,18 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("destroy btree - erase shadow map {}", m_shadow_filename);
     }
 
+    // Install a brand-new empty btree (without destroying the old one first).
+    // Used after recovery to replace a stale/destroyed m_bt so TearDown() is safe.
+    void install_fresh_btree(uint32_t erase_up_to_key = 0) {
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+        this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
+        hs()->index_service().add_index_table(this->m_bt);
+        if (erase_up_to_key > 0) { this->m_shadow_map.range_erase(0, erase_up_to_key - 1); }
+        this->m_shadow_map.save(m_shadow_filename);
+        LOGINFO("Installed fresh btree with uuid {}", boost::uuids::to_string(uuid));
+    }
+
     void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
         this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
         LOGINFO("\n\n\n\n\n\n shutdown homestore for index service Test\n\n\n\n\n");
@@ -999,6 +1011,82 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
         test_common::HSTestHelper::trigger_cp(true);
         this->get_all();
     }
+}
+
+// Regression test for the bug: when an index table is destroyed concurrently with a CP flush,
+// the txn_journal (written at the START of the flush) can contain entries for the destroyed
+// table's ordinal while the table's meta superblock is already gone.  On recovery the journal
+// is replayed but the table cannot be found in m_ordinal_index_map, causing
+// repair_index_node / sanity_check to assert.
+//
+// Sequence that triggers the bug:
+//  1. Build a multi-level tree and flush a baseline CP.
+//  2. Set a crash flip so the next CP crashes mid-flush (after writing the journal).
+//  3. Insert more keys → splits happen → transact_bufs is called → txn_journal entry added
+//     for this table's ordinal AND m_crash_flag_on is set on the split parent buf.
+//  4. Destroy the table: meta superblock removed from disk, but the dirty split bufs
+//     (with m_crash_flag_on) remain in the CP dirty list.
+//  5. Trigger CP → journal written to disk → do_flush_one_buf hits the flagged buf → crash.
+//  6. Recovery: journal has entries for the destroyed table → without fix: assert/abort.
+//              With fix: skip gracefully.
+TYPED_TEST(IndexCrashTest, DestroyTableWithPendingCpCrash) {
+    // Use a small fixed preload to avoid triggering unrelated block-allocator issues
+    // that surface when inserting hundreds of consecutive right-edge keys into a
+    // fully-flushed large tree.  With max_keys_in_node=20 and 100 preloaded keys
+    // we get 5 full leaf nodes; inserting 20 more triggers 1-2 leaf splits which is
+    // enough to (a) populate a txn_journal entry and (b) mark a parent buffer for crash.
+    static constexpr uint32_t preload_size = 100;
+    static constexpr uint32_t extra_keys = 20;
+
+    // Step 1: Build a small tree and flush a clean baseline CP.
+    LOGINFO("Step 1: Preload {} keys and flush baseline CP", preload_size);
+    for (auto k = 0u; k < preload_size; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+
+    // Step 2: Set the crash flip BEFORE the operations that will cause splits.
+    // When a split occurs, transact_bufs checks this flip and sets m_crash_flag_on on
+    // the parent buf.  The actual crash fires later when the CP flushes that buf.
+    LOGINFO("Step 2: Set crash flip on split-at-parent");
+    this->set_basic_flip("crash_flush_on_split_at_parent");
+
+    // Step 3: Insert extra keys to cause splits and populate the txn_journal.
+    // The rightmost leaf is full after the preload, so the first new key triggers a
+    // split → transact_bufs is called → crash flip fires once → m_crash_flag_on set
+    // on the parent buf; subsequent splits (if any) accumulate more journal entries
+    // but no additional crash flags (flip fires only once, count=1).
+    LOGINFO("Step 3: Insert {} extra keys to cause splits (txn_journal populated)", extra_keys);
+    for (auto k = preload_size; k < preload_size + extra_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+
+    // Step 4: Destroy the table.  m_sb.destroy() removes the meta superblock from disk.
+    // The dirty split bufs (including the one with m_crash_flag_on) remain in the CP
+    // dirty list because free_buf only marks m_node_freed — it does not touch the list.
+    LOGINFO("Step 4: Destroy index table — meta superblock removed from disk");
+    hs()->index_service().remove_index_table(this->m_bt);
+    this->m_bt->destroy();
+
+    // Step 5: Trigger the CP (do not wait).  async_cp_flush will:
+    //   (a) write the txn_journal to disk (entries include the destroyed table's ordinal),
+    //   (b) start flushing nodes, hit the buf with m_crash_flag_on → simulated crash.
+    LOGINFO("Step 5: Trigger CP (crash expected after journal is written)");
+    test_common::HSTestHelper::trigger_cp(false /* no wait */);
+
+    // Step 6: Wait for the simulated crash and homestore recovery.
+    //   Without fix : repair_index_node / sanity_check asserts → process aborts (SIGABRT).
+    //   With fix    : missing table is skipped gracefully and recovery completes normally.
+    LOGINFO("Step 6: Waiting for crash-recovery");
+    this->wait_for_crash_recovery(true /* check_will_crash */);
+    LOGINFO("Step 6: Recovery succeeded without aborting — destroyed table was handled gracefully");
+
+    // Step 7: Install a fresh empty btree so that the shared TearDown() can safely call
+    // root_node_id() and tree_key_count() without hitting the stale destroyed btree.
+    LOGINFO("Step 7: Installing a fresh empty btree for teardown");
+    this->install_fresh_btree(preload_size + extra_keys);
+    test_common::HSTestHelper::trigger_cp(true);
 }
 
 TYPED_TEST(IndexCrashTest, MetricsTest) {

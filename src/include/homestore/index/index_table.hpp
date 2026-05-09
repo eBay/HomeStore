@@ -140,6 +140,13 @@ public:
             auto cpg = cp_mgr().cp_guard();
             Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
         }
+        // Flush the current CP to completion before removing the superblock.
+        // This closes the journal–table mismatch window: any txn_journal entries
+        // for this table's ordinal are written and the CP is marked done on disk.
+        // If the process crashes after this point, recovery will not replay the
+        // old journal (CP is complete), so repair_index_node will never be called
+        // for an ordinal whose superblock no longer exists.
+        cp_mgr().trigger_cp_flush(true /* force */).get();
         m_sb.destroy();
         m_sb_buffer->m_valid = false;
         decr_pending_request_num();
