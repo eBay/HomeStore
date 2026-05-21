@@ -422,16 +422,30 @@ public:
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType* const rec) {
         const CacheBufferType* cbuf{static_cast< CacheBufferType* >(rec->cache_buffer)};
-        // Actual memory cost per cached entry includes overhead beyond the raw data buffer:
-        //   sizeof(CacheBufferType): CacheBuffer base class + derived class (e.g., BtreeNode) members
-        //   sizeof(homeds::MemVector): MemVector object holding buffer metadata (80 bytes measured via GDB)
-        //   sizeof(homeds::MemPiece): MemPiece[1] array for contiguous buffer tracking (32 bytes, tcmalloc rounds
-        //   18→32)
-        // m_cache_size tracks only the raw data buffer (e.g., 512B or 4096B for btree nodes)
-        // For btree nodes, empirical validation via GDB: 832B total = 512B data + 320B overhead
-        // This formula ensures cache_size metric and eviction threshold reflect true RSS cost
-        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + sizeof(homeds::MemVector) +
-                                             sizeof(homeds::MemPiece)};
+        // Actual memory cost per cached entry includes overhead beyond the raw data buffer.
+        // The complete allocation chain per btree node (confirmed via GDB):
+        //   1. Derived buffer class (e.g., BtreeNode): includes CacheBuffer base + WriteBackCacheBuffer
+        //      intermediate + BtreeNode members (transient_hdr_t with folly::SharedMutexReadPriority)
+        //   2. MemVector object: buffer metadata
+        //   3. MemPiece[] array: contiguous buffer tracking (tcmalloc rounds actual size)
+        //
+        // GDB measurements on production system:
+        //   - BtreeNode: 208 bytes (sizeof base = 176B + transient_hdr_t = 32B)
+        //   - MemVector: 80 bytes (sizeof = 80B)
+        //   - MemPiece[1]: 32 bytes (sizeof = 18B, tcmalloc rounds to 32B)
+        //   - Total overhead: 208 + 80 + 32 = 320 bytes
+        //   - Per-node total: 512B data + 320B overhead = 832 bytes
+        //
+        // Note: sizeof(CacheBufferType) returns base class size only (176B for CacheBuffer<BlkId>),
+        // missing the WriteBackCacheBuffer and BtreeNode derived portions (+32B from transient_hdr_t).
+        // Also, sizeof(MemPiece) = 18B but tcmalloc allocates 32B due to size class rounding.
+        //
+        // m_cache_size tracks only raw data buffer size (e.g., 512B or 4096B for btree nodes).
+        // This overhead calculation ensures cache metrics and eviction thresholds reflect true RSS cost.
+        static constexpr uint32_t k_derived_class_overhead{32};     // transient_hdr_t in BtreeNode
+        static constexpr uint32_t k_mempiece_tcmalloc_size{32};     // tcmalloc rounds 18B to 32B
+        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + k_derived_class_overhead +
+                                             sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size};
         return cbuf->get_cache_size() + k_overhead;
     }
 };
