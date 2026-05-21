@@ -35,20 +35,16 @@ constexpr size_t align_up(size_t value, size_t alignment) {
 }
 
 // Field offset calculations with alignment:
-// - sisl::atomic_counter<uint16_t>: 2 bytes
-// - folly::SharedMutexReadPriority: 16 bytes, 8-byte aligned
-// - bool: 1 byte, 1-byte aligned
-// - int: 4 bytes, 4-byte aligned
+// - sisl::atomic_counter<uint16_t>: 2 bytes, offset 0
+// - folly::SharedMutexReadPriority: 16 bytes, 8-byte aligned, offset 8
+// - bool is_leaf: 1 byte, 1-byte aligned, offset 24
+// - int is_lock (DEBUG only): 4 bytes, 4-byte aligned, offset 28
 // - struct alignment: 8 bytes
-constexpr size_t transient_hdr_expected_upgraders_offset = 0;  // offset 0
-constexpr size_t transient_hdr_expected_lock_offset =          // align_up(0+2, 8) = 8
-    align_up(transient_hdr_expected_upgraders_offset + sizeof(sisl::atomic_counter< uint16_t >),
-             alignof(folly::SharedMutexReadPriority));
-constexpr size_t transient_hdr_expected_is_leaf_offset =       // align_up(8+16, 1) = 24
-    align_up(transient_hdr_expected_lock_offset + sizeof(folly::SharedMutexReadPriority), alignof(bool));
+constexpr size_t transient_hdr_expected_upgraders_offset = 0;
+constexpr size_t transient_hdr_expected_lock_offset = 8;       // align_up(0+2, 8) = 8
+constexpr size_t transient_hdr_expected_is_leaf_offset = 24;   // align_up(8+16, 1) = 24
 #ifndef NDEBUG
-constexpr size_t transient_hdr_expected_is_lock_offset =       // align_up(24+1, 4) = 28
-    align_up(transient_hdr_expected_is_leaf_offset + sizeof(bool), alignof(int));
+constexpr size_t transient_hdr_expected_is_lock_offset = 28;   // align_up(24+1, 4) = 28
 #endif
 
 // using namespace sisl;
