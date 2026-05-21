@@ -25,9 +25,31 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 #include <cstdint>
+#include <cstddef>
 
 namespace homeds {
 namespace btree {
+
+constexpr size_t align_up(size_t value, size_t alignment) {
+    return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+// Field offset calculations with alignment:
+// - sisl::atomic_counter<uint16_t>: 2 bytes
+// - folly::SharedMutexReadPriority: 16 bytes, 8-byte aligned
+// - bool: 1 byte, 1-byte aligned
+// - int: 4 bytes, 4-byte aligned
+// - struct alignment: 8 bytes
+constexpr size_t transient_hdr_expected_upgraders_offset = 0;  // offset 0
+constexpr size_t transient_hdr_expected_lock_offset =          // align_up(0+2, 8) = 8
+    align_up(transient_hdr_expected_upgraders_offset + sizeof(sisl::atomic_counter< uint16_t >),
+             alignof(folly::SharedMutexReadPriority));
+constexpr size_t transient_hdr_expected_is_leaf_offset =       // align_up(8+16, 1) = 24
+    align_up(transient_hdr_expected_lock_offset + sizeof(folly::SharedMutexReadPriority), alignof(bool));
+#ifndef NDEBUG
+constexpr size_t transient_hdr_expected_is_lock_offset =       // align_up(24+1, 4) = 28
+    align_up(transient_hdr_expected_is_leaf_offset + sizeof(bool), alignof(int));
+#endif
 
 // using namespace sisl;
 struct transient_hdr_t {
@@ -38,6 +60,9 @@ struct transient_hdr_t {
 #ifndef NDEBUG
     int is_lock;
 #endif
+
+    static size_t size() { return sizeof(transient_hdr_t); }
+
     transient_hdr_t() :
             upgraders(0),
             is_leaf(false)
@@ -47,6 +72,40 @@ struct transient_hdr_t {
 #endif
     {};
 };
+
+static_assert(offsetof(transient_hdr_t, upgraders) == transient_hdr_expected_upgraders_offset,
+              "transient_hdr_t::upgraders offset mismatch");
+static_assert(offsetof(transient_hdr_t, lock) == transient_hdr_expected_lock_offset,
+              "transient_hdr_t::lock offset mismatch");
+static_assert(offsetof(transient_hdr_t, is_leaf) == transient_hdr_expected_is_leaf_offset,
+              "transient_hdr_t::is_leaf offset mismatch");
+#ifndef NDEBUG
+static_assert(offsetof(transient_hdr_t, is_lock) == transient_hdr_expected_is_lock_offset,
+              "transient_hdr_t::is_lock offset mismatch");
+#endif
+static_assert(sizeof(transient_hdr_t) == align_up(
+
+#ifndef NDEBUG
+                                          transient_hdr_expected_is_lock_offset + sizeof(int),
+#else
+                                          transient_hdr_expected_is_leaf_offset + sizeof(bool),
+#endif
+                                          alignof(transient_hdr_t)),
+              "transient_hdr_t size mismatch");
+
+// Expected size for cache.h overhead calculation.
+// This is used in cache.h as k_derived_class_overhead to account for BtreeNode members
+// beyond the base CacheBuffer class.
+// Computed values:
+//   RELEASE: align_up(24+1, 8) = align_up(25, 8) = 32 bytes
+//   DEBUG:   align_up(28+4, 8) = align_up(32, 8) = 32 bytes
+constexpr size_t transient_hdr_expected_size = align_up(
+#ifndef NDEBUG
+    transient_hdr_expected_is_lock_offset + sizeof(int),    // 28 + 4 = 32
+#else
+    transient_hdr_expected_is_leaf_offset + sizeof(bool),   // 24 + 1 = 25
+#endif
+    alignof(transient_hdr_t));  // align to 8 bytes = 32
 
 template < btree_node_type NodeType, typename K, typename V >
 class VariantNode {

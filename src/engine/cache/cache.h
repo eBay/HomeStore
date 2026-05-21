@@ -442,7 +442,13 @@ public:
         //
         // m_cache_size tracks only raw data buffer size (e.g., 512B or 4096B for btree nodes).
         // This overhead calculation ensures cache metrics and eviction thresholds reflect true RSS cost.
-        static constexpr uint32_t k_derived_class_overhead{32};     // transient_hdr_t in BtreeNode
+        //
+        // k_derived_class_overhead represents sizeof(transient_hdr_t) which is BtreeNode's additional
+        // member beyond the base classes. This value is validated by static_assert in btree_node.h.
+        // Computed as 32 bytes for both DEBUG and RELEASE builds:
+        //   RELEASE: align_up(24+1, 8) = 32 (upgraders:2B + lock:16B + is_leaf:1B, 8B-aligned)
+        //   DEBUG:   align_up(28+4, 8) = 32 (adds is_lock:4B)
+        static constexpr uint32_t k_derived_class_overhead{32};     // transient_hdr_t::size()
         static constexpr uint32_t k_mempiece_tcmalloc_size{32};     // tcmalloc rounds 18B to 32B
         static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + k_derived_class_overhead +
                                              sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size};
