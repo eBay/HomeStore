@@ -34,17 +34,18 @@ constexpr size_t align_up(size_t value, size_t alignment) {
     return (value + alignment - 1u) & ~(alignment - 1u);
 }
 
-// Field offset calculations with alignment:
-// - sisl::atomic_counter<uint16_t>: 2 bytes, offset 0
-// - folly::SharedMutexReadPriority: 16 bytes, 8-byte aligned, offset 8
-// - bool is_leaf: 1 byte, 1-byte aligned, offset 24
-// - int is_lock (DEBUG only): 4 bytes, 4-byte aligned, offset 28
-// - struct alignment: 8 bytes
+// Field offset calculations with alignment - computed at compile time using actual type sizes/alignments
 constexpr size_t transient_hdr_expected_upgraders_offset = 0;
-constexpr size_t transient_hdr_expected_lock_offset = 8;       // align_up(0+2, 8) = 8
-constexpr size_t transient_hdr_expected_is_leaf_offset = 24;   // align_up(8+16, 1) = 24
+constexpr size_t transient_hdr_expected_lock_offset =
+    align_up(transient_hdr_expected_upgraders_offset + sizeof(sisl::atomic_counter<uint16_t>),
+             alignof(folly::SharedMutexReadPriority));
+constexpr size_t transient_hdr_expected_is_leaf_offset =
+    align_up(transient_hdr_expected_lock_offset + sizeof(folly::SharedMutexReadPriority),
+             alignof(bool));
 #ifndef NDEBUG
-constexpr size_t transient_hdr_expected_is_lock_offset = 28;   // align_up(24+1, 4) = 28
+constexpr size_t transient_hdr_expected_is_lock_offset =
+    align_up(transient_hdr_expected_is_leaf_offset + sizeof(bool),
+             alignof(int));
 #endif
 
 // using namespace sisl;
@@ -92,16 +93,14 @@ static_assert(sizeof(transient_hdr_t) == align_up(
 // Expected size for cache.h overhead calculation.
 // This is used in cache.h as k_derived_class_overhead to account for BtreeNode members
 // beyond the base CacheBuffer class.
-// Computed values:
-//   RELEASE: align_up(24+1, 8) = align_up(25, 8) = 32 bytes
-//   DEBUG:   align_up(28+4, 8) = align_up(32, 8) = 32 bytes
+// Computed at compile time based on actual field offsets and struct alignment.
 constexpr size_t transient_hdr_expected_size = align_up(
 #ifndef NDEBUG
-    transient_hdr_expected_is_lock_offset + sizeof(int),    // 28 + 4 = 32
+    transient_hdr_expected_is_lock_offset + sizeof(int),
 #else
-    transient_hdr_expected_is_leaf_offset + sizeof(bool),   // 24 + 1 = 25
+    transient_hdr_expected_is_leaf_offset + sizeof(bool),
 #endif
-    alignof(transient_hdr_t));  // align to 8 bytes = 32
+    alignof(transient_hdr_t));
 
 template < btree_node_type NodeType, typename K, typename V >
 class VariantNode {
