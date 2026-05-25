@@ -1097,11 +1097,21 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list const& data) {
     auto& builder = rreq->create_fb_builder();
 
+    // Compute CRC32 over the data payload before serialising so the follower can detect corruption in transit.
+    uint32_t checksum = 0;
+    if (HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled)) {
+        checksum = init_crc32;
+        for (auto const& iov : data.iovs) {
+            checksum = crc32_ieee(checksum, r_cast< const unsigned char* >(iov.iov_base), iov.iov_len);
+        }
+    }
+
     // Prepare the rpc request packet with all repl_reqs details
     builder.FinishSizePrefixed(CreatePushDataRequest(
         builder, rreq->traceID(), server_id(), rreq->term(), rreq->dsn(),
         builder.CreateVector(rreq->header().cbytes(), rreq->header().size()),
-        builder.CreateVector(rreq->key().cbytes(), rreq->key().size()), data.size, get_time_since_epoch_ms()));
+        builder.CreateVector(rreq->key().cbytes(), rreq->key().size()), data.size, get_time_since_epoch_ms(),
+        checksum));
 
     rreq->m_pkts = sisl::io_blob::sg_list_to_ioblob_list(data);
     rreq->m_pkts.insert(rreq->m_pkts.begin(), sisl::io_blob{builder.GetBufferPointer(), builder.GetSize(), false});
@@ -1164,6 +1174,18 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     auto const req_orig_time_ms = push_req->time_ms();
 
     RD_LOGD(rkey.traceID, "Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
+
+    if (HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled) && push_req->checksum() != 0) {
+        auto const data_ptr = r_cast< const unsigned char* >(incoming_buf.cbytes() + fb_size);
+        auto const computed = crc32_ieee(init_crc32, data_ptr, push_req->data_size());
+        if (computed != push_req->checksum()) {
+            RD_LOGE(NO_TRACE_ID,
+                    "Data Channel: PushData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, dropping",
+                    push_req->dsn(), push_req->checksum(), computed);
+            rpc_data->send_response();
+            return;
+        }
+    }
 
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("drop_push_data_request")) {
@@ -1582,20 +1604,48 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
             RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData data read completed for {} buffers", sgs_vec.size());
 
+            // When checksums are enabled, prepend a size-prefixed FetchDataResponse FlatBuffer header that carries
+            // a per-entry CRC32.  The header is omitted entirely when checksums are disabled so that nodes
+            // running old code (which have no notion of this header) can safely receive the response.
+            bool const compute_checksum = HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled);
+            uint8_t* hdr_buf = nullptr;
+            uint32_t hdr_size = 0;
+
+            if (compute_checksum) {
+                flatbuffers::FlatBufferBuilder resp_builder;
+                std::vector< flatbuffers::Offset< ResponseEntry > > resp_entries;
+                for (auto const& sgs : sgs_vec) {
+                    uint32_t checksum = init_crc32;
+                    for (auto const& iov : sgs.iovs) {
+                        checksum = crc32_ieee(checksum, r_cast< const unsigned char* >(iov.iov_base), iov.iov_len);
+                    }
+                    resp_entries.push_back(
+                        CreateResponseEntry(resp_builder, 0, 0, 0, static_cast< uint32_t >(sgs.size), checksum));
+                }
+                resp_builder.FinishSizePrefixed(
+                    CreateFetchDataResponse(resp_builder, server_id(), resp_builder.CreateVector(resp_entries)));
+                hdr_size = resp_builder.GetSize();
+                hdr_buf = iomanager.iobuf_alloc(512, hdr_size);
+                std::memcpy(hdr_buf, resp_builder.GetBufferPointer(), hdr_size);
+            }
+
             // now prepare the io_blob_list to response back to requester;
             nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
+            if (hdr_buf) { pkts.emplace_back(sisl::io_blob{hdr_buf, hdr_size, true}); }
             for (auto const& sgs : sgs_vec) {
                 auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
             }
 
-            rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
-                for (auto const& sgs : sgs_vec) {
-                    for (auto const& iov : sgs.iovs) {
-                        iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+            rpc_data->set_comp_cb(
+                [sgs_vec = std::move(sgs_vec), hdr_buf](boost::intrusive_ptr< sisl::GenericRpcData >&) {
+                    if (hdr_buf) { iomanager.iobuf_free(hdr_buf); }
+                    for (auto const& sgs : sgs_vec) {
+                        for (auto const& iov : sgs.iovs) {
+                            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+                        }
                     }
-                }
-            });
+                });
 
             rpc_data->send_response(pkts);
         });
@@ -1614,10 +1664,56 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 
     COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
 
+    // When checksums are enabled, the sender prepends a size-prefixed FetchDataResponse FlatBuffer header.
+    // Gate all header parsing on the same config flag so nodes with checksums disabled (including old nodes
+    // that predate this feature) are fully compatible — they neither send nor expect the header.
+    bool const verify_checksum = HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled);
+    const flatbuffers::Vector< flatbuffers::Offset< ResponseEntry > >* resp_entries = nullptr;
+
+    if (verify_checksum) {
+        auto const fb_hdr_size =
+            flatbuffers::ReadScalar< flatbuffers::uoffset_t >(raw_data) + sizeof(flatbuffers::uoffset_t);
+        if (fb_hdr_size > total_size) {
+            RD_LOGE(NO_TRACE_ID,
+                    "Data Channel: FetchData response header size {} exceeds blob size {}, ignoring response",
+                    fb_hdr_size, total_size);
+            return;
+        }
+        auto const fetch_resp = flatbuffers::GetSizePrefixedRoot< FetchDataResponse >(raw_data);
+        raw_data += fb_hdr_size;
+        total_size -= fb_hdr_size;
+        if (!fetch_resp || !fetch_resp->entries()) {
+            RD_LOGW(NO_TRACE_ID,
+                    "Data Channel: FetchData response header is malformed, skipping checksum verification");
+        } else {
+            resp_entries = fetch_resp->entries();
+            if (resp_entries->size() != rreqs.size()) {
+                RD_LOGW(NO_TRACE_ID,
+                        "Data Channel: FetchData response entry count {} != request count {}, "
+                        "some entries will not be checksum-verified",
+                        resp_entries->size(), rreqs.size());
+            }
+        }
+    }
+
     RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData completed for {} requests", rreqs.size());
 
-    for (auto const& rreq : rreqs) {
+    for (size_t i = 0; i < rreqs.size(); ++i) {
+        auto const& rreq = rreqs[i];
         auto const data_size = rreq->remote_blkid().blkid.blk_count() * get_blk_size();
+
+        if (resp_entries && i < resp_entries->size() && (*resp_entries)[i]->checksum() != 0) {
+            auto const computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
+            if (computed != (*resp_entries)[i]->checksum()) {
+                RD_LOGE(rreq->traceID(),
+                        "Data Channel: FetchData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, "
+                        "skipping write to avoid corrupting storage",
+                        rreq->dsn(), (*resp_entries)[i]->checksum(), computed);
+                raw_data += data_size;
+                total_size -= data_size;
+                continue;
+            }
+        }
 
         if (!rreq->save_fetched_data(response, raw_data, data_size)) {
             RD_DBG_ASSERT(rreq->local_blkid().is_valid(), "Invalid blkid for rreq={}", rreq->to_string());

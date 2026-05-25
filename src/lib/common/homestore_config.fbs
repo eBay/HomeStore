@@ -324,6 +324,10 @@ table Consensus {
     // Log frequency for gc_repl_reqs messages (log every N times)
     // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
     gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
+
+    // Enable CRC32 checksum verification on pushdata/fetchdata payloads.
+    // Disable only for performance benchmarking; leaving it off in production risks silent data corruption.
+    data_checksum_enabled: bool = true (hotswap);
 }
 
 table HomeStoreSettings {

@@ -10,6 +10,7 @@ table PushDataRequest {
     user_key : [ubyte];          // User key data
     data_size : uint32;          // Data size, actual data is sent as separate blob not by flatbuffer
     time_ms: uint64;             // time point when originator pushed this request;
+    checksum: uint32;            // CRC32 over the data payload; 0 when checksum is disabled
 }
 
 root_type PushDataRequest;
