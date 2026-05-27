@@ -111,6 +111,57 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
     if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
 }
 
+// Verifies the happy path with checksums explicitly enabled: writes should commit correctly
+// and all replicas should hold the same data.
+TEST_F(RaftReplDevTest, Checksum_Enabled_PushData_Path) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    LOGINFO("Enabling data_checksum_enabled");
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = true; });
+    HS_SETTINGS_FACTORY().save();
+
+    this->write_on_leader(20, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = false; });
+    HS_SETTINGS_FACTORY().save();
+    g_helper->sync_for_cleanup_start();
+}
+
+#ifdef _PRERELEASE
+// Verifies that the fetch path works correctly with checksums enabled.
+// Drops all push-data on non-leader replicas so they are forced to fetch, then checks that
+// the framing header is correctly parsed and data arrives intact.
+TEST_F(RaftReplDevTest, Checksum_Enabled_FetchData_Path) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    LOGINFO("Enabling data_checksum_enabled");
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = true; });
+    HS_SETTINGS_FACTORY().save();
+
+    if (g_helper->replica_num() != 0) {
+        LOGINFO("Drop all push-data so follower {} must fetch with checksum header", g_helper->replica_num());
+        g_helper->set_basic_flip("drop_push_data_request");
+    }
+
+    this->write_on_leader(20, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = false; });
+    HS_SETTINGS_FACTORY().save();
+    g_helper->sync_for_cleanup_start();
+    if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
+}
+#endif
+
 TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
     g_helper->set_basic_flip("disable_leader_push_data", std::numeric_limits< int >::max(), 100);
     LOGINFO("Homestore replica={} setup completed, all the push_data from leader are disabled",

@@ -325,9 +325,12 @@ table Consensus {
     // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
     gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
 
-    // Enable CRC32 checksum verification on pushdata/fetchdata payloads.
-    // Disable only for performance benchmarking; leaving it off in production risks silent data corruption.
-    data_checksum_enabled: bool = true (hotswap);
+    // CRC32 checksum verification on pushdata/fetchdata data payloads.
+    // Safe upgrade path: leave false (the default) until every node in the cluster is running the new
+    // binary, then enable via hotswap. Enabling while any node still runs pre-checksum code causes the
+    // FetchData framing header emitted by upgraded senders to be misinterpreted as block data by old
+    // receivers, silently writing corrupted bytes to disk.
+    data_checksum_enabled: bool = false (hotswap);
 }
 
 table HomeStoreSettings {

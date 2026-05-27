@@ -18,6 +18,12 @@ namespace homestore {
 
 static constexpr uint64_t max_replace_member_task_id_len = 64;
 
+// Magic prefix for the FetchData response framing header (first 8 bytes of
+// echo 'homestore_fetch_response' | md5sum).  Receivers detect the magic
+// independently of their own data_checksum_enabled setting, making framing
+// self-describing and safe under hotswap config asymmetry between nodes.
+static constexpr uint64_t FETCH_DATA_RESPONSE_MAGIC = 0x9E3A7F2C4B8D1065ULL;
+
 struct replace_member_task_superblk {
     char task_id[max_replace_member_task_id_len];
     replica_id_t replica_out;
@@ -71,6 +77,8 @@ public:
         REGISTER_COUNTER(read_err_cnt, "total read error count", "read_err_cnt", {"op", "read"});
         REGISTER_COUNTER(write_err_cnt, "total write error count", "write_err_cnt", {"op", "write"});
         REGISTER_COUNTER(fetch_err_cnt, "total fetch data error count", "fetch_err_cnt", {"op", "fetch"});
+        REGISTER_COUNTER(data_checksum_mismatch_cnt, "CRC32 mismatches on push/fetch data channels",
+                         "data_checksum_mismatch_cnt", {"op", "checksum"});
 
         REGISTER_COUNTER(fetch_rreq_cnt, "total fetch data count", "fetch_data_req_cnt", {"op", "fetch"});
         REGISTER_COUNTER(fetch_total_blk_size, "total fetch data blocks size", "fetch_total_blk_size", {"op", "fetch"});

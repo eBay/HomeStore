@@ -1179,8 +1179,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         auto const data_ptr = r_cast< const unsigned char* >(incoming_buf.cbytes() + fb_size);
         auto const computed = crc32_ieee(init_crc32, data_ptr, push_req->data_size());
         if (computed != push_req->checksum()) {
-            RD_LOGE(NO_TRACE_ID,
-                    "Data Channel: PushData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, dropping",
+            COUNTER_INCREMENT(m_metrics, data_checksum_mismatch_cnt, 1);
+            RD_LOGE(rkey.traceID,
+                    "Data Channel: PushData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, dropping "
+                    "(follower will fetch from remote on next Raft retry)",
                     push_req->dsn(), push_req->checksum(), computed);
             rpc_data->send_response();
             return;
@@ -1547,9 +1549,16 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData received: fetch_req.size={}",
             fetch_req->request()->entries()->size());
 
+    struct FetchEntryMeta {
+        int64_t lsn;
+        uint64_t dsn;
+        uint64_t raft_term;
+    };
     std::vector< sisl::sg_list > sgs_vec;
+    std::vector< FetchEntryMeta > entry_metas;
     std::vector< folly::Future< std::error_code > > futs;
     sgs_vec.reserve(fetch_req->request()->entries()->size());
+    entry_metas.reserve(fetch_req->request()->entries()->size());
     futs.reserve(fetch_req->request()->entries()->size());
 
     for (auto const& req : *(fetch_req->request()->entries())) {
@@ -1565,8 +1574,9 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         sgs.iovs.emplace_back(
             iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
 
-        // accumulate the sgs for later use (send back to the requester));
+        // accumulate the sgs and per-entry metadata for later use (send back to the requester);
         sgs_vec.push_back(sgs);
+        entry_metas.push_back({req->lsn(), req->dsn(), req->raft_term()});
 
         if (originator != server_id()) {
             RD_LOGD(NO_TRACE_ID, "non-originator FetchData received:  dsn={} lsn={} originator={}, my_server_id={}",
@@ -1582,7 +1592,8 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     }
 
     folly::collectAllUnsafe(futs).thenValue(
-        [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec)](auto&& vf) {
+        [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec),
+         entry_metas = std::move(entry_metas)](auto&& vf) {
             for (auto const& err_c : vf) {
                 const auto& err = err_c.value();
                 if (err) {
@@ -1604,34 +1615,44 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
             RD_LOGT(NO_TRACE_ID, "Data Channel: FetchData data read completed for {} buffers", sgs_vec.size());
 
-            // When checksums are enabled, prepend a size-prefixed FetchDataResponse FlatBuffer header that carries
-            // a per-entry CRC32.  The header is omitted entirely when checksums are disabled so that nodes
-            // running old code (which have no notion of this header) can safely receive the response.
-            bool const compute_checksum = HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled);
+            // When checksums are enabled, prepend a self-describing framing header:
+            //   [8-byte FETCH_DATA_RESPONSE_MAGIC][size-prefixed FetchDataResponse FlatBuffer]
+            // The magic makes the header detectable by the receiver without consulting any per-node
+            // config, so it is safe under hotswap config asymmetry.  When disabled, no header is
+            // written and the response is raw block data, identical to pre-checksum wire format.
             uint8_t* hdr_buf = nullptr;
             uint32_t hdr_size = 0;
 
-            if (compute_checksum) {
+            if (HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled)) {
                 flatbuffers::FlatBufferBuilder resp_builder;
                 std::vector< flatbuffers::Offset< ResponseEntry > > resp_entries;
-                for (auto const& sgs : sgs_vec) {
+                for (size_t i = 0; i < sgs_vec.size(); ++i) {
+                    auto const& sgs = sgs_vec[i];
                     uint32_t checksum = init_crc32;
                     for (auto const& iov : sgs.iovs) {
                         checksum = crc32_ieee(checksum, r_cast< const unsigned char* >(iov.iov_base), iov.iov_len);
                     }
+                    int64_t const lsn = (i < entry_metas.size()) ? entry_metas[i].lsn : 0;
+                    uint64_t const dsn = (i < entry_metas.size()) ? entry_metas[i].dsn : 0;
+                    uint64_t const raft_term = (i < entry_metas.size()) ? entry_metas[i].raft_term : 0;
                     resp_entries.push_back(
-                        CreateResponseEntry(resp_builder, 0, 0, 0, static_cast< uint32_t >(sgs.size), checksum));
+                        CreateResponseEntry(resp_builder, lsn, dsn, raft_term,
+                                            static_cast< uint32_t >(sgs.size), checksum));
                 }
                 resp_builder.FinishSizePrefixed(
                     CreateFetchDataResponse(resp_builder, server_id(), resp_builder.CreateVector(resp_entries)));
-                hdr_size = resp_builder.GetSize();
-                hdr_buf = iomanager.iobuf_alloc(512, hdr_size);
-                std::memcpy(hdr_buf, resp_builder.GetBufferPointer(), hdr_size);
+
+                // Allocate: [magic (8 bytes)] + [size-prefixed FetchDataResponse FlatBuffer]
+                auto const fb_size = resp_builder.GetSize();
+                hdr_size = static_cast< uint32_t >(sizeof(FETCH_DATA_RESPONSE_MAGIC)) + fb_size;
+                hdr_buf = new uint8_t[hdr_size];
+                std::memcpy(hdr_buf, &FETCH_DATA_RESPONSE_MAGIC, sizeof(FETCH_DATA_RESPONSE_MAGIC));
+                std::memcpy(hdr_buf + sizeof(FETCH_DATA_RESPONSE_MAGIC), resp_builder.GetBufferPointer(), fb_size);
             }
 
             // now prepare the io_blob_list to response back to requester;
             nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
-            if (hdr_buf) { pkts.emplace_back(sisl::io_blob{hdr_buf, hdr_size, true}); }
+            if (hdr_buf) { pkts.emplace_back(sisl::io_blob{hdr_buf, hdr_size, false}); }
             for (auto const& sgs : sgs_vec) {
                 auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
@@ -1639,7 +1660,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
             rpc_data->set_comp_cb(
                 [sgs_vec = std::move(sgs_vec), hdr_buf](boost::intrusive_ptr< sisl::GenericRpcData >&) {
-                    if (hdr_buf) { iomanager.iobuf_free(hdr_buf); }
+                    delete[] hdr_buf; // header is heap-allocated (not iobuf); delete[] nullptr is a no-op
                     for (auto const& sgs : sgs_vec) {
                         for (auto const& iov : sgs.iovs) {
                             iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
@@ -1662,30 +1683,44 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         return;
     }
 
-    COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
-
-    // When checksums are enabled, the sender prepends a size-prefixed FetchDataResponse FlatBuffer header.
-    // Gate all header parsing on the same config flag so nodes with checksums disabled (including old nodes
-    // that predate this feature) are fully compatible — they neither send nor expect the header.
-    bool const verify_checksum = HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled);
+    // Detect whether the sender included a checksum framing header by checking for FETCH_DATA_RESPONSE_MAGIC.
+    // This is self-describing: receivers check for the magic regardless of their own data_checksum_enabled
+    // setting, making the check safe under hotswap config asymmetry between nodes.
     const flatbuffers::Vector< flatbuffers::Offset< ResponseEntry > >* resp_entries = nullptr;
 
-    if (verify_checksum) {
+    if (total_size >= sizeof(FETCH_DATA_RESPONSE_MAGIC) &&
+        std::memcmp(raw_data, &FETCH_DATA_RESPONSE_MAGIC, sizeof(FETCH_DATA_RESPONSE_MAGIC)) == 0) {
+
+        raw_data += sizeof(FETCH_DATA_RESPONSE_MAGIC);
+        total_size -= sizeof(FETCH_DATA_RESPONSE_MAGIC);
+
+        if (total_size < sizeof(flatbuffers::uoffset_t)) {
+            RD_LOGE(NO_TRACE_ID,
+                    "Data Channel: FetchData response framing header too short ({} bytes), ignoring response",
+                    total_size);
+            return;
+        }
         auto const fb_hdr_size =
             flatbuffers::ReadScalar< flatbuffers::uoffset_t >(raw_data) + sizeof(flatbuffers::uoffset_t);
         if (fb_hdr_size > total_size) {
             RD_LOGE(NO_TRACE_ID,
-                    "Data Channel: FetchData response header size {} exceeds blob size {}, ignoring response",
+                    "Data Channel: FetchData response FlatBuffer size {} exceeds remaining blob size {}, "
+                    "ignoring response",
                     fb_hdr_size, total_size);
+            return;
+        }
+
+        flatbuffers::Verifier verifier{raw_data, fb_hdr_size};
+        if (!verifier.VerifySizePrefixedBuffer< FetchDataResponse >(nullptr)) {
+            RD_LOGE(NO_TRACE_ID,
+                    "Data Channel: FetchData response FlatBuffer failed verification, ignoring response");
             return;
         }
         auto const fetch_resp = flatbuffers::GetSizePrefixedRoot< FetchDataResponse >(raw_data);
         raw_data += fb_hdr_size;
         total_size -= fb_hdr_size;
-        if (!fetch_resp || !fetch_resp->entries()) {
-            RD_LOGW(NO_TRACE_ID,
-                    "Data Channel: FetchData response header is malformed, skipping checksum verification");
-        } else {
+
+        if (fetch_resp->entries()) {
             resp_entries = fetch_resp->entries();
             if (resp_entries->size() != rreqs.size()) {
                 RD_LOGW(NO_TRACE_ID,
@@ -1696,6 +1731,9 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         }
     }
 
+    // Count only actual block data bytes (framing header excluded).
+    COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
+
     RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData completed for {} requests", rreqs.size());
 
     for (size_t i = 0; i < rreqs.size(); ++i) {
@@ -1705,9 +1743,10 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         if (resp_entries && i < resp_entries->size() && (*resp_entries)[i]->checksum() != 0) {
             auto const computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
             if (computed != (*resp_entries)[i]->checksum()) {
+                COUNTER_INCREMENT(m_metrics, data_checksum_mismatch_cnt, 1);
                 RD_LOGE(rreq->traceID(),
-                        "Data Channel: FetchData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, "
-                        "skipping write to avoid corrupting storage",
+                        "Data Channel: FetchData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}; "
+                        "skipping write. Raft will retry after data_receive_timeout_ms.",
                         rreq->dsn(), (*resp_entries)[i]->checksum(), computed);
                 raw_data += data_size;
                 total_size -= data_size;
