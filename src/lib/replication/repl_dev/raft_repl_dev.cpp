@@ -1158,6 +1158,12 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
+    flatbuffers::Verifier push_verifier{incoming_buf.cbytes(), fb_size};
+    if (!push_verifier.VerifySizePrefixedBuffer< PushDataRequest >(nullptr)) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: PushData FlatBuffer verification failed, ignoring");
+        rpc_data->send_response();
+        return;
+    }
     if (fb_size + push_req->data_size() != incoming_buf.size()) {
         RD_LOGW(NO_TRACE_ID,
                 "Data Channel: PushData received with size mismatch, header size {}, data size {}, received size {}",
@@ -1736,9 +1742,18 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 
     RD_LOGD(NO_TRACE_ID, "Data Channel: FetchData completed for {} requests", rreqs.size());
 
+    std::vector< repl_req_ptr_t > checksum_mismatch_rreqs;
     for (size_t i = 0; i < rreqs.size(); ++i) {
         auto const& rreq = rreqs[i];
         auto const data_size = rreq->remote_blkid().blkid.blk_count() * get_blk_size();
+
+        if (data_size > total_size) {
+            RD_LOGE(NO_TRACE_ID,
+                    "Data Channel: FetchData response truncated: need {} bytes for dsn={} but only {} bytes remain, "
+                    "aborting response processing",
+                    data_size, rreq->dsn(), total_size);
+            return;
+        }
 
         if (resp_entries && i < resp_entries->size() && (*resp_entries)[i]->checksum() != 0) {
             auto const computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
@@ -1746,10 +1761,11 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
                 COUNTER_INCREMENT(m_metrics, data_checksum_mismatch_cnt, 1);
                 RD_LOGE(rreq->traceID(),
                         "Data Channel: FetchData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}; "
-                        "skipping write. Raft will retry after data_receive_timeout_ms.",
+                        "re-fetching immediately.",
                         rreq->dsn(), (*resp_entries)[i]->checksum(), computed);
                 raw_data += data_size;
                 total_size -= data_size;
+                checksum_mismatch_rreqs.emplace_back(rreq);
                 continue;
             }
         }
@@ -1799,6 +1815,12 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         }
         raw_data += data_size;
         total_size -= data_size;
+    }
+
+    if (!checksum_mismatch_rreqs.empty()) {
+        RD_LOGD(NO_TRACE_ID, "Data Channel: Re-fetching {} rreqs that had checksum mismatches",
+                checksum_mismatch_rreqs.size());
+        check_and_fetch_remote_data(std::move(checksum_mismatch_rreqs));
     }
 
     RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
