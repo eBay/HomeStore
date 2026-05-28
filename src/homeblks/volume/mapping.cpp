@@ -23,6 +23,22 @@
 
 using namespace homestore;
 
+// Compile-time verification of cache overhead calculation
+// This validates the k_writeback_buffer_overhead constant (36 bytes) in cache.h
+// At this point, all types (WriteBackCacheBuffer, MappingKey, MappingValue) are fully defined.
+namespace {
+using MappingBtreeBufferType = homeds::btree::WriteBackCacheBuffer<
+    MappingKey, MappingValue,
+    homeds::btree::btree_node_type::VAR_VALUE, homeds::btree::btree_node_type::VAR_VALUE>;
+using BaseBufferType = CacheBuffer<BlkId>;
+
+// Verify the hardcoded constant matches actual sizeof calculation
+static_assert(sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType) == 36,
+              "k_writeback_buffer_overhead constant (36) in cache.h must equal "
+              "sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>). "
+              "Update cache.h if this assertion fails.");
+} // namespace
+
 lba_t mapping::get_end_lba(const lba_t start_lba, const lba_count_t nlba) { return (start_lba + nlba - 1); }
 
 lba_count_t mapping::get_nlbas(const lba_t end_lba, const lba_t start_lba) {

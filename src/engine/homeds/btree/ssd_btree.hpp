@@ -45,23 +45,6 @@
 namespace homeds {
 namespace btree {
 
-// Compile-time verification of cache overhead calculation
-// This static_assert validates the k_writeback_buffer_overhead constant in cache.h
-// At this point, all types (WriteBackCacheBuffer, MappingKey, MappingValue) are fully defined.
-namespace {
-// Helper to verify WriteBackCacheBuffer overhead for the mapping btree instantiation
-using MappingBtreeBufferType = WriteBackCacheBuffer<
-    homestore::MappingKey, homestore::MappingValue,
-    btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE>;
-using BaseBufferType = homestore::CacheBuffer<homestore::BlkId>;
-
-// Verify that our hardcoded constant matches the actual sizeof calculation
-static_assert(sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType) == 36,
-              "k_writeback_buffer_overhead constant (36) in cache.h must match "
-              "sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>). "
-              "If this fails, update the constant in cache.h to reflect the actual size.");
-} // namespace
-
 #define SSDBtreeStore BtreeStore< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
 #define ssd_btree_t Btree< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
 
