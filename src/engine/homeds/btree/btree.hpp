@@ -1191,7 +1191,7 @@ private:
         if (recursive) {
             return verify_node_recursive(bnodeid, parent_node, indx, update_debug_bm);
         } else {
-            return verify_node_fowarding(bnodeid, parent_node, indx, update_debug_bm);
+            return verify_node_iterative(bnodeid, parent_node, indx, update_debug_bm);
         }
     }
     /**
@@ -1335,7 +1335,7 @@ private:
      *
      * @return : true if this node including all its children are not corrupted; false if not
      */
-    bool verify_node_fowarding(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, bool update_debug_bm) {
+    bool verify_node_iterative(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, bool update_debug_bm) {
         struct NodeToVerify {
             bnodeid_t node_id;
             uint32_t parent_index;
