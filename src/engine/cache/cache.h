@@ -453,6 +453,9 @@ public:
         static constexpr uint32_t k_mempiece_tcmalloc_size{32};     // tcmalloc rounds 18B to 32B
         static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + k_derived_class_overhead +
                                              sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size};
+		LOGINFO("CacheBufferType size: {}, Derived class overhead: {}, MemVector size: {}, MemPiece tcmalloc size: {}, Total overhead: {}",
+                sizeof(CacheBufferType), k_derived_class_overhead, sizeof(homeds::MemVector), k_mempiece_tcmalloc_size,
+                k_overhead);
         return cbuf->get_cache_size() + k_overhead;
     }
 };

@@ -93,14 +93,8 @@ static_assert(sizeof(transient_hdr_t) == align_up(
 // Expected size for cache.h overhead calculation.
 // This is used in cache.h as k_derived_class_overhead to account for BtreeNode members
 // beyond the base CacheBuffer class.
-// Computed at compile time based on actual field offsets and struct alignment.
-constexpr size_t transient_hdr_expected_size = align_up(
-#ifndef NDEBUG
-    transient_hdr_expected_is_lock_offset + sizeof(int),
-#else
-    transient_hdr_expected_is_leaf_offset + sizeof(bool),
-#endif
-    alignof(transient_hdr_t));
+// Use sizeof directly instead of calculating - the struct is fully defined here.
+constexpr size_t transient_hdr_expected_size = sizeof(transient_hdr_t);
 
 template < btree_node_type NodeType, typename K, typename V >
 class VariantNode {
