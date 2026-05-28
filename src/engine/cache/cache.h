@@ -432,11 +432,6 @@ public:
         static constexpr uint32_t k_overhead = static_cast<uint32_t>(
             sizeof(CacheBufferType) + k_derived_class_overhead +
             sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size);
-		LOGINFO("Per-node overhead breakdown: CacheBuffer<BlkId>={}, WriteBackCacheBuffer_extra={}, transient_hdr={}, "
-                "MemVector={}, MemPiece_tcmalloc={}, Total_overhead={} (CacheBuffer+derived: {})",
-                sizeof(CacheBufferType), k_writeback_buffer_overhead, k_btreenode_transient_hdr,
-                sizeof(homeds::MemVector), k_mempiece_tcmalloc_size, k_overhead,
-                sizeof(CacheBufferType) + k_derived_class_overhead);
         return cbuf->get_cache_size() + k_overhead;
     }
 };
