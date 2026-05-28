@@ -450,21 +450,22 @@ public:
         //      - writeback_req_ptr req[2] (intrusive_ptr array): 16B
         //      - padding/alignment: 4B
         //      Total: sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>) = 196 - 160 = 36B
-        //   2. BtreeNode::m_common_header (transient_hdr_t): 32 bytes
+        //   2. BtreeNode::m_common_header (transient_hdr_t): platform-specific size
         //      - sisl::atomic_counter<uint16_t> upgraders: 2B
-        //      - folly::SharedMutexReadPriority lock: 16B (accounts for most of the size)
+        //      - folly::SharedMutexReadPriority lock: variable (platform/config dependent)
         //      - bool is_leaf: 1B
         //      - DEBUG only: int is_lock: 4B
-        //      - Aligned to 8B: align_up(24+1, 8) = 32B (RELEASE), align_up(28+4, 8) = 32B (DEBUG)
-        //   Total derived overhead: 36 + 32 = 68 bytes
+        //      - Size varies: 12B observed on x86_64, may differ on other platforms
+        //   Total derived overhead: 36 + sizeof(transient_hdr_t) bytes (48B in current build)
         //
-        // Validated via GDB on actual binary:
+        // Validated via GDB on x86_64 binary:
         //   sizeof(CacheBuffer<BlkId>) = 160
         //   sizeof(WriteBackCacheBuffer) = 196
-        //   sizeof(transient_hdr_t) = 32
+        //   sizeof(transient_hdr_t) = 12
+        //   Total overhead per node = 320 bytes
         static constexpr uint32_t k_writeback_buffer_overhead{36};  // WriteBackCacheBuffer beyond CacheBuffer<BlkId>
-        static constexpr uint32_t k_btreenode_transient_hdr{homeds::btree::transient_hdr_expected_size}; // 32B
-        static constexpr uint32_t k_derived_class_overhead{k_writeback_buffer_overhead + k_btreenode_transient_hdr}; // 68B total
+        static constexpr uint32_t k_btreenode_transient_hdr{homeds::btree::transient_hdr_expected_size}; // platform-dependent (12B on x86_64)
+        static constexpr uint32_t k_derived_class_overhead{k_writeback_buffer_overhead + k_btreenode_transient_hdr}; // 48B total (36+12)
         static constexpr uint32_t k_mempiece_tcmalloc_size{32};     // tcmalloc rounds 18B to 32B
         static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + k_derived_class_overhead +
                                              sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size};
