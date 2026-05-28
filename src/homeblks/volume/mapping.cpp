@@ -23,30 +23,15 @@
 
 using namespace homestore;
 
-// Compile-time verification of cache overhead calculation
-// This validates the k_writeback_buffer_overhead constant (36 bytes) in cache.h
-// At this point, all types (WriteBackCacheBuffer, MappingKey, MappingValue) are fully defined.
+// Compile-time verification of k_writeback_buffer_overhead constant in cache.h
 namespace {
 using MappingBtreeBufferType = homeds::btree::WriteBackCacheBuffer<
     MappingKey, MappingValue,
     homeds::btree::btree_node_type::VAR_VALUE, homeds::btree::btree_node_type::VAR_VALUE>;
 using BaseBufferType = CacheBuffer<BlkId>;
 
-// Diagnostic: Print the actual sizes to find the correct overhead value
-template <size_t N> struct ShowSize;
-// This will cause a compile error showing the actual value
-ShowSize<sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType)> show_overhead;
-ShowSize<sizeof(MappingBtreeBufferType)> show_wb_size;
-ShowSize<sizeof(BaseBufferType)> show_base_size;
-
-// Verify the hardcoded constant matches actual sizeof calculation
-// Note: Value determined from GDB was 36 on x86_64, but may differ on this platform
-// TEMPORARILY DISABLED to see actual sizes
-// static_assert(sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType) == 36,
-//              "k_writeback_buffer_overhead in cache.h incorrect. "
-//              "Actual: sizeof(WriteBackCacheBuffer)="
-//              "- sizeof(CacheBuffer<BlkId>)=. "
-//              "Uncomment ShowSize above to see actual values, then update cache.h");
+static_assert(sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType) == 24,
+             "k_writeback_buffer_overhead must equal sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>)");
 } // namespace
 
 lba_t mapping::get_end_lba(const lba_t start_lba, const lba_count_t nlba) { return (start_lba + nlba - 1); }
