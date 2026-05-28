@@ -445,30 +445,24 @@ public:
         // This overhead calculation ensures cache metrics and eviction thresholds reflect true RSS cost.
         //
         // k_derived_class_overhead accounts for ALL bytes in BtreeNode beyond CacheBuffer<BlkId>:
-        //   1. WriteBackCacheBuffer extra members (bcp + req[2] + padding)
-        //   2. BtreeNode::m_common_header (transient_hdr_t)
+        //   1. WriteBackCacheBuffer extra members: 36 bytes
+        //      - btree_cp_ptr bcp (shared_ptr): ~16B
+        //      - writeback_req_ptr req[2] (intrusive_ptr array): ~16B
+        //      - padding/alignment: ~4B
+        //      Calculated as: sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>) = 196 - 160 = 36
+        //   2. BtreeNode::m_common_header (transient_hdr_t): platform-dependent
+        //      - Validated via static_assert in btree_node.h
+        //      - Size varies by platform (12B on x86_64, may differ elsewhere)
         //
-        // Calculate at compile time using actual types from the btree instantiation.
-        // For the mapping btree (MappingKey/MappingValue), we use the concrete type:
-        using MappingBtreeBufferType = homeds::btree::WriteBackCacheBuffer<
-            homeds::btree::MappingKey, homeds::btree::MappingValue,
-            homeds::btree::btree_node_type::VAR_VALUE, homeds::btree::btree_node_type::VAR_VALUE>;
-        using BaseBufferType = CacheBuffer<homestore::BlkId>;
-
-        // WriteBackCacheBuffer overhead = sizeof(derived) - sizeof(base)
-        // This captures: bcp (shared_ptr), req[2] (intrusive_ptr array), and any padding
-        static constexpr uint32_t k_writeback_buffer_overhead =
-            sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType);
-
-        // BtreeNode adds transient_hdr_t on top of WriteBackCacheBuffer
+        // Note: This constant is verified at compile-time via static_assert in ssd_btree.hpp
+        // where all types are fully defined. See BTREE_CACHE_OVERHEAD_VERIFICATION macro.
+        static constexpr uint32_t k_writeback_buffer_overhead = 36;  // WriteBackCacheBuffer beyond CacheBuffer<BlkId>
         static constexpr uint32_t k_btreenode_transient_hdr = homeds::btree::transient_hdr_expected_size;
-
-        // Total derived overhead
-        static constexpr uint32_t k_derived_class_overhead =
-            k_writeback_buffer_overhead + k_btreenode_transient_hdr;
-        static constexpr uint32_t k_mempiece_tcmalloc_size{32};     // tcmalloc rounds 18B to 32B
-        static constexpr uint32_t k_overhead{sizeof(CacheBufferType) + k_derived_class_overhead +
-                                             sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size};
+        static constexpr uint32_t k_derived_class_overhead = k_writeback_buffer_overhead + k_btreenode_transient_hdr;
+        static constexpr uint32_t k_mempiece_tcmalloc_size = 32;     // tcmalloc rounds 18B to 32B
+        static constexpr uint32_t k_overhead = static_cast<uint32_t>(
+            sizeof(CacheBufferType) + k_derived_class_overhead +
+            sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size);
 		LOGINFO("Per-node overhead breakdown: CacheBuffer<BlkId>={}, WriteBackCacheBuffer_extra={}, transient_hdr={}, "
                 "MemVector={}, MemPiece_tcmalloc={}, Total_overhead={} (CacheBuffer+derived: {})",
                 sizeof(CacheBufferType), k_writeback_buffer_overhead, k_btreenode_transient_hdr,
