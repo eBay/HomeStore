@@ -777,7 +777,7 @@ public:
         LOGINFO("RELEASE_CACHE: Starting safe cache release for btree: {}", m_btree_cfg.get_name());
 
         m_btree_lock.read_lock();
-        release_cached_nodes_recursive(m_root_node, stats);
+        release_cached_nodes(m_root_node, stats);
         m_btree_lock.unlock();
 
         LOGINFO("RELEASE_CACHE: Completed for btree: {} - total={} evicted={} with_refs={} not_in_cache={}",
@@ -1477,7 +1477,7 @@ private:
         return true;
     }
 
-    void release_cached_nodes_recursive(bnodeid_t root_bnodeid, EvictionStats& stats) {
+    void release_cached_nodes(bnodeid_t root_bnodeid, EvictionStats& stats) {
         std::queue< bnodeid_t > work_queue;
         work_queue.push(root_bnodeid);
 
