@@ -18,12 +18,6 @@ namespace homestore {
 
 static constexpr uint64_t max_replace_member_task_id_len = 64;
 
-// Magic prefix for the FetchData response framing header (first 8 bytes of
-// echo 'homestore_fetch_response' | md5sum).  Receivers detect the magic
-// independently of their own data_checksum_enabled setting, making framing
-// self-describing and safe under hotswap config asymmetry between nodes.
-static constexpr uint64_t FETCH_DATA_RESPONSE_MAGIC = 0x9E3A7F2C4B8D1065ULL;
-
 struct replace_member_task_superblk {
     char task_id[max_replace_member_task_id_len];
     replica_id_t replica_out;

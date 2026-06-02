@@ -325,11 +325,13 @@ table Consensus {
     // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
     gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
 
-    // CRC32 checksum verification on pushdata/fetchdata data payloads.
-    // Safe upgrade path: leave false (the default) until every node in the cluster is running the new
-    // binary, then enable via hotswap. Enabling while any node still runs pre-checksum code causes the
-    // FetchData framing header emitted by upgraded senders to be misinterpreted as block data by old
-    // receivers, silently writing corrupted bytes to disk.
+    // Controls whether senders compute and attach a CRC32 checksum to pushdata/fetchdata payloads.
+    // The receiver always skips CRC verification when the checksum field is zero, so this flag only
+    // affects the send side. Safe to enable via hotswap once all nodes in the cluster are running a
+    // version that emits the FetchDataResponse FlatBuffer header; old nodes that still send raw block
+    // data will simply have checksum=0 and receivers fall back gracefully.
+    // Not enabled by default: TCP already detects partial-transfer corruption; CRC is opt-in for
+    // environments requiring additional durability guarantees.
     data_checksum_enabled: bool = false (hotswap);
 }
 
