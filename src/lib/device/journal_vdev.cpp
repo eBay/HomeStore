@@ -316,7 +316,7 @@ auto JournalVirtualDev::Descriptor::process_pwrite_offset(size_t len, off_t offs
     auto const [chunk, _, offset_in_chunk] = chunk_details;
 
     LOGTRACEMOD(journalvdev, "writing in chunk: {}, offset: 0x{} len: {} offset_in_chunk: 0x{} chunk_sz: {} desc {}",
-                chunk->chunk_id(), to_hex(offset), len, to_hex(offset_in_chunk), chunk->size(), to_string());
+                chunk->chunk_id(), to_hex(offset), len, to_hex(offset_in_chunk), chunk->size(), to_string_nolock());
 
     // this assert only valid for pwrite/pwritev, which calls alloc_next_append_blk to get the offset to do the
     // write, which guarantees write will with the returned offset will not accross chunk boundary.
