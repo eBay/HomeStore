@@ -116,7 +116,7 @@ public:
     void restore() {
         auto vdev = hs()->logstore_service().get_vdev();
         m_vdev_jd = vdev->open(m_logdev_id);
-        m_vdev_jd->update_data_start_offset(last_start_offset);
+        m_vdev_jd->init_data_start_offset(last_start_offset);
         m_vdev_jd->update_tail_offset(last_tail_offset);
     }
 

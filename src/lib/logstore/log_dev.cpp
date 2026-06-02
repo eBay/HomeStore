@@ -68,7 +68,7 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
     if (format) {
         HS_LOG_ASSERT(m_logdev_meta.is_empty(), "Expected meta to be not present");
         m_logdev_meta.create(m_logdev_id, m_flush_mode, m_parent_id);
-        m_vdev_jd->update_data_start_offset(0);
+        m_vdev_jd->init_data_start_offset(0);
     } else {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(),
                       "Expected meta data to be read already before loading this log dev id: {}", m_logdev_id);
@@ -82,7 +82,7 @@ void LogDev::start(bool format, std::shared_ptr< JournalVirtualDev > vdev) {
         THIS_LOGDEV_LOG(INFO, "get start vdev offset during recovery {} log indx {} ",
                         m_logdev_meta.get_start_dev_offset(), m_logdev_meta.get_start_log_idx());
 
-        m_vdev_jd->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
+        m_vdev_jd->init_data_start_offset(m_logdev_meta.get_start_dev_offset());
         m_log_idx = m_logdev_meta.get_start_log_idx();
         do_load(m_logdev_meta.get_start_dev_offset());
         m_log_records->reinit(m_log_idx);

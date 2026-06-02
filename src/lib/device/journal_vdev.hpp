@@ -19,6 +19,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <shared_mutex>
 #include <vector>
 #include <condition_variable>
 
@@ -61,7 +62,7 @@ public:
         // off_t is long. make it uint64_t ?
         off_t m_seek_cursor{0}; // the seek cursor
 
-        off_t m_data_start_offset{0};                   // Start offset of where actual data begin for this vdev
+        std::atomic< off_t > m_data_start_offset{0};    // Start offset of where actual data begin for this vdev
         std::atomic< uint64_t > m_write_sz_in_total{0}; //  Size will be decreased by truncate and increased by append;
         bool m_truncate_done{false};
         uint64_t m_reserved_sz{0};                       // write size within chunk, used to check chunk boundary;
@@ -69,6 +70,7 @@ public:
         uint64_t m_total_size{0};                        // Total size of all chunks.
         off_t m_end_offset{0};        // Offset right to window. Never reduced. Increased in multiple of chunk size.
         bool m_end_offset_set{false}; // Adjust the m_end_offset only once during init.
+        mutable std::shared_mutex m_chunk_mutex; // Protects m_journal_chunks and m_data_start_offset.
         friend class JournalVirtualDev;
 
     public:
@@ -233,25 +235,23 @@ public:
          *
          * @return : the start logical offset where data starts;
          */
-        off_t data_start_offset() const { return m_data_start_offset; }
+        off_t data_start_offset() const { return m_data_start_offset.load(std::memory_order_acquire); }
+
+        /**
+         * @brief : Set the data start offset during init/recovery, before concurrent I/O begins.
+         * Acquires unique_lock on m_chunk_mutex defensively.
+         */
+        void init_data_start_offset(off_t offset);
 
         off_t end_offset() const { return m_end_offset; }
 
         uint64_t write_sz_in_total() const { return m_write_sz_in_total.load(); }
 
-        uint32_t num_chunks_used() const { return m_journal_chunks.size(); }
+        uint32_t num_chunks_used() const;
 
         bool truncate_done() const { return m_truncate_done; }
 
         uint64_t reserved_size() const { return m_reserved_sz; }
-
-        /**
-         * @brief : persist start logical offset to vdev's super block
-         * Supposed to be called when truncate happens;
-         *
-         * @param offset : the start logical offset to be persisted
-         */
-        void update_data_start_offset(off_t offset);
 
         /**
          * @brief : get the logical tail offset;
@@ -393,6 +393,16 @@ public:
         bool is_alloc_accross_chunk(size_t size) const;
 
         auto get_dev_details(size_t len, off_t offset);
+
+        // Unlocked read implementation — must be called with m_chunk_mutex held (shared or unique).
+        std::error_code pread_impl(uint8_t* buf, size_t count_in, off_t offset);
+
+        // Unlocked body of to_string/get_status — must be called with m_chunk_mutex held.
+        std::string to_string_nolock() const;
+        nlohmann::json get_status_nolock(int log_level) const;
+
+        // Must only be called from truncate() while m_chunk_mutex unique_lock is held.
+        void update_data_start_offset(off_t offset);
     };
 
     /* Create a new virtual dev for these parameters */
