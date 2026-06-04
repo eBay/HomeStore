@@ -188,7 +188,10 @@ void LogDev::start_timer() {
         iomanager.run_on_wait(logstore_service().flush_thread(), [this]() {
             m_flush_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000, true /* recurring */, nullptr /* cookie */,
-                [this](void*) { flush_if_necessary(); });
+                [this](void*, uint64_t exp_count) {
+                    if (exp_count > 1) { LOGINFO("log flush timer expired {} times, running once", exp_count); }
+                    flush_if_necessary();
+                });
         });
 }
 

@@ -636,7 +636,10 @@ void RaftReplService::start_repl_service_timers() {
                        HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) {
+                nullptr, [this](void*, uint64_t exp_count) {
+                    if (exp_count > 1) {
+                        LOGINFOMOD(replication, "Reaper Thread: GC timer expired {} times, running once", exp_count);
+                    }
                     LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
                     gc_repl_reqs();
                     gc_repl_devs();
@@ -646,17 +649,33 @@ void RaftReplService::start_repl_service_timers() {
             uint64_t interval_ns = std::min(
                 HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
             m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
-                                                                     [this](void *) { fetch_pending_data(); });
+                                                                     [this](void*, uint64_t exp_count) {
+                                                                         if (exp_count > 1) {
+                                                                             LOGINFOMOD(replication,
+                                                                                        "fetch pending data timer expired {} times, running once",
+                                                                                        exp_count);
+                                                                         }
+                                                                         fetch_pending_data();
+                                                                     });
 
             // Flush durable commit lsns to superblock
             // FIXUP: what is the best value for flush_durable_commit_interval_ms?
             m_flush_durable_commit_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) { flush_durable_commit_lsn(); });
+                nullptr, [this](void*, uint64_t exp_count) {
+                    if (exp_count > 1) {
+                        LOGINFOMOD(replication, "flush durable commit timer expired {} times, running once", exp_count);
+                    }
+                    flush_durable_commit_lsn();
+                });
 
             m_replace_member_sync_check_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void *) {
+                nullptr, [this](void*, uint64_t exp_count) {
+                    if (exp_count > 1) {
+                        LOGINFOMOD(replication,
+                                   "replace member sync check timer expired {} times, running once", exp_count);
+                    }
                     monitor_replace_member_replication_status();
                 });
             latch.count_down();

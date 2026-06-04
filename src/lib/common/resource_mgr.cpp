@@ -87,7 +87,8 @@ void ResourceMgr::start_timer() {
 
     m_res_audit_timer_hdl = iomanager.schedule_global_timer(
         res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
-        [this](void*) {
+        [this](void*, uint64_t exp_count) {
+            if (exp_count > 1) { LOGINFO("resource audit timer expired {} times, running once", exp_count); }
             // all resource timely audit routine should arrive here;
             this->trigger_truncate();
         },

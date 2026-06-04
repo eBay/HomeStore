@@ -98,7 +98,12 @@ void CPManager::start_timer() {
     LOGINFO("cp timer is set to {} usec", usecs);
     iomanager.run_on_wait(m_timer_fiber, [this, usecs]() {
         m_cp_timer_hdl = iomanager.schedule_thread_timer(usecs * 1000, true /* recurring */, nullptr /* cookie */,
-                                                         [this](void*) { trigger_cp_flush(false /* false */); });
+                                                         [this](void*, uint64_t exp_count) {
+                                                             if (exp_count > 1) {
+                                                                 LOGINFO("cp timer expired {} times, running once", exp_count);
+                                                             }
+                                                             trigger_cp_flush(false /* false */);
+                                                         });
     });
 }
 
@@ -433,7 +438,12 @@ CPWatchdog::CPWatchdog(CPManager* cp_mgr) :
     LOGINFO("CP watchdog timer setting to : {} seconds", m_timer_sec);
     m_timer_hdl =
         iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::reactor_regex::all_user,
-                                        [this](void* cookie) { cp_watchdog_timer(); });
+                                        [this](void*, uint64_t exp_count) {
+                                            if (exp_count > 1) {
+                                                LOGINFO("cp watchdog timer expired {} times, running once", exp_count);
+                                            }
+                                            cp_watchdog_timer();
+                                        });
 }
 
 void CPWatchdog::reset_cp() {
