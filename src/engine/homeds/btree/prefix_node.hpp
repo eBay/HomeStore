@@ -45,9 +45,7 @@ public:
         for (uint16_t i = ind; i < getTotalEntries(); i++) {
             BtreePrefixRecord* rec = getRecordPtr(ind);
             uint16_t prefixInd = rec->getPrefixRecordIndex();
-            if (prefixInd >= ind) {
-                rec->setPrefixRecordIndex(prefixInd + 1);
-            }
+            if (prefixInd >= ind) { rec->setPrefixRecordIndex(prefixInd + 1); }
 
             rec->getDataOffset()
         }

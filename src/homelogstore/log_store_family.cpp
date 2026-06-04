@@ -31,10 +31,7 @@ namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
 LogStoreFamily::LogStoreFamily(const logstore_family_id_t f_id) :
-        m_family_id{f_id},
-        m_name{std::string("LogDevFamily") + std::to_string(f_id)},
-        m_log_dev{f_id, m_name} {
-}
+        m_family_id{f_id}, m_name{std::string("LogDevFamily") + std::to_string(f_id)}, m_log_dev{f_id, m_name} {}
 
 void LogStoreFamily::start(const bool format, JournalVirtualDev* blk_store) {
     auto hb = HomeStoreBase::safe_instance();

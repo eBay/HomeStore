@@ -72,9 +72,7 @@ public:
             m_ptr = other.m_ptr;
             oldval = m_ptr.load(std::memory_order_acquire);
             tp = tagged_ptr(oldval);
-            if (tp.get_ptr() == nullptr) {
-                break;
-            }
+            if (tp.get_ptr() == nullptr) { break; }
             tp.inc_tag();
             newval = tp.get_packed();
         } while (!(m_ptr.compare_exchange_weak(oldval, newval, std::memory_order_acq_rel)));
@@ -124,9 +122,7 @@ public:
     /// @brief this reset releases its ownership
     void reset(void) noexcept {
 
-        if (m_ptr->release() == true) {
-            fds::mem_allocator::instance()->free((mempool_header*)m_ptr.load());
-        }
+        if (m_ptr->release() == true) { fds::mem_allocator::instance()->free((mempool_header*)m_ptr.load()); }
     }
 
     // underlying pointer operations :
@@ -144,9 +140,7 @@ public:
     }
 
     inline T* get(void) {
-        if (m_ptr == nullptr) {
-            return nullptr;
-        }
+        if (m_ptr == nullptr) { return nullptr; }
 
         // no assert, can return NULL
         mempool_header* hdr = (mempool_header*)(m_ptr.load());

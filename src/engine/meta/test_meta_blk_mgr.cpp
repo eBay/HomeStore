@@ -156,9 +156,9 @@ public:
     virtual ~VMetaBlkMgrTest() override = default;
 
 protected:
-    void SetUp() override{};
+    void SetUp() override {};
 
-    void TearDown() override{};
+    void TearDown() override {};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
@@ -719,17 +719,15 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
 TEST_F(VMetaBlkMgrTest, get_status_test) {
     start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
                     SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
-    auto validate_status = [this](std::string type, uint64_t size, bool expected_error=false) {
+    auto validate_status = [this](std::string type, uint64_t size, bool expected_error = false) {
         sisl::status_request status_req;
-        status_req.obj_name = "MetaBlk_"+type;
+        status_req.obj_name = "MetaBlk_" + type;
         status_req.verbose_level = 3;
         const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
         const auto status_resp = sobject_mgr->get_status(status_req);
         LOGINFO("get_status returned : {}", status_resp.json.dump());
-        if(status_resp.json.contains("error")) {
-             ASSERT_TRUE(expected_error);
-        }
-        if(status_resp.json.contains("[0] content")){
+        if (status_resp.json.contains("error")) { ASSERT_TRUE(expected_error); }
+        if (status_resp.json.contains("[0] content")) {
             auto encoded_content = status_resp.json["[0] content"];
             const auto decode_content = hs_utils::decodeBase64(encoded_content);
             auto val_content = hs_utils::encodeBase64(reinterpret_cast< const unsigned char* >(decode_content.data()),
@@ -744,7 +742,7 @@ TEST_F(VMetaBlkMgrTest, get_status_test) {
     m_start_time = Clock::now();
     register_client();
     [[maybe_unused]] auto write_result = do_sb_write(false, 500);
-    validate_status(mtype, 500 ); // check the size written is correct as well as encode/decode
+    validate_status(mtype, 500); // check the size written is correct as well as encode/decode
 
     mtype = "Test_Write2";
     reset_counters();
@@ -764,9 +762,8 @@ TEST_F(VMetaBlkMgrTest, get_status_test) {
     reset_counters();
     register_client();
     write_result = do_sb_write(false, 100);
-    validate_status(mtype, 500, true); // Since the size is 100, the former size must be wrong
+    validate_status(mtype, 500, true);        // Since the size is 100, the former size must be wrong
     validate_status("ERROR_TYPE", 500, true); // An error type also must results in error
-
 
     this->shutdown();
 }

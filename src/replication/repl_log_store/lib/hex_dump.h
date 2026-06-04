@@ -104,8 +104,7 @@ struct print_hex_options {
     int align;
 };
 
-#define PRINT_HEX_OPTIONS_INITIALIZER                                                                                  \
-    (struct print_hex_options) { 1, 1, 16 }
+#define PRINT_HEX_OPTIONS_INITIALIZER (struct print_hex_options){1, 1, 16}
 
 static void _print_white_space(FILE* stream, size_t len) {
     for (size_t i = 0; i < len; ++i) {
@@ -113,8 +112,8 @@ static void _print_white_space(FILE* stream, size_t len) {
     }
 }
 
-static void __attribute__((unused))
-print_hex_stream(FILE* stream, const void* buf, size_t buflen, struct print_hex_options options) {
+static void __attribute__((unused)) print_hex_stream(FILE* stream, const void* buf, size_t buflen,
+                                                     struct print_hex_options options) {
     size_t i, j;
     size_t max_addr_len;
     char str_buffer[256];

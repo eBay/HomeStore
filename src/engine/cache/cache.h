@@ -39,6 +39,7 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/hash/intrusive_hashset.hpp"
+#include "engine/homeds/btree/btree_node.h"
 #include "eviction.hpp"
 #include "lru_eviction.hpp"
 
@@ -67,7 +68,7 @@ public:
 
 /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
  * speed of read/writes, but at the cost of increased memory */
-//#define ENTRIES_PER_BUCKET 2
+// #define ENTRIES_PER_BUCKET 2
 
 /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
  * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
@@ -422,7 +423,16 @@ public:
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType* const rec) {
         const CacheBufferType* cbuf{static_cast< CacheBufferType* >(rec->cache_buffer)};
-        return cbuf->get_cache_size();
+        // Per-node overhead: CacheBuffer + WriteBackCacheBuffer + transient_hdr + MemVector + MemPiece (tcmalloc)
+        // Verified at compile-time in mapping.cpp via static_assert on WriteBackCacheBuffer overhead.
+        static constexpr uint32_t k_writeback_buffer_overhead = 24;
+        static constexpr uint32_t k_btreenode_transient_hdr = homeds::btree::transient_hdr_expected_size;
+        static constexpr uint32_t k_derived_class_overhead = k_writeback_buffer_overhead + k_btreenode_transient_hdr;
+        static constexpr uint32_t k_mempiece_tcmalloc_size = 32;
+        static constexpr uint32_t k_overhead = static_cast<uint32_t>(
+            sizeof(CacheBufferType) + k_derived_class_overhead +
+            sizeof(homeds::MemVector) + k_mempiece_tcmalloc_size);
+        return cbuf->get_cache_size() + k_overhead;
     }
 };
 

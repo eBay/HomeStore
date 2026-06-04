@@ -29,10 +29,10 @@
 namespace homestore {
 
 class SlabCacheQueue;
-class BlkAllocMetrics;
+class VarsizeBlkAllocMetrics;
 class SlabMetrics : public sisl::MetricsGroup {
 public:
-    SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, BlkAllocMetrics* const parent);
+    SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, VarsizeBlkAllocMetrics* const parent);
     SlabMetrics(const SlabMetrics&) = delete;
     SlabMetrics(SlabMetrics&&) noexcept = delete;
     SlabMetrics& operator=(const SlabMetrics&) = delete;
@@ -48,7 +48,7 @@ private:
 class SlabCacheQueue {
 public:
     SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_cap_t >& level_limits, const float refill_pct,
-                   BlkAllocMetrics* metrics);
+                   VarsizeBlkAllocMetrics* metrics);
     SlabCacheQueue(const SlabCacheQueue&) = delete;
     SlabCacheQueue(SlabCacheQueue&&) noexcept = delete;
     SlabCacheQueue& operator=(const SlabCacheQueue&) = delete;
@@ -82,7 +82,7 @@ private:
 
 class FreeBlkCacheQueue : public FreeBlkCache {
 public:
-    FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics* metrics);
+    FreeBlkCacheQueue(const SlabCacheConfig& cfg, VarsizeBlkAllocMetrics* metrics);
     virtual ~FreeBlkCacheQueue() override = default;
     FreeBlkCacheQueue(FreeBlkCacheQueue&&) noexcept = delete;
     FreeBlkCacheQueue& operator=(const FreeBlkCacheQueue&) = delete;
@@ -97,6 +97,7 @@ public:
                                            blk_cache_fill_session& fill_session) override;
 
     [[nodiscard]] blk_cap_t total_free_blks() const override;
+    [[nodiscard]] blk_cap_t total_slab_capacity() const;
 
     [[nodiscard]] std::shared_ptr< blk_cache_fill_session > create_cache_fill_session(const bool fill_entire_cache);
     void close_cache_fill_session(blk_cache_fill_session& fill_session);
@@ -121,7 +122,7 @@ private:
 private:
     std::vector< std::unique_ptr< SlabCacheQueue > > m_slab_queues;
     SlabCacheConfig m_cfg;
-    BlkAllocMetrics* m_metrics;
+    VarsizeBlkAllocMetrics* m_metrics;
 };
 
 } // namespace homestore

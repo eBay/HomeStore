@@ -179,8 +179,10 @@ public:
         REGISTER_GAUGE(volume_index_used_size, "Total Volume index used size");
         REGISTER_GAUGE(volume_state, "Volume state");
 
-        REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"}, HistogramBucketsType(OpLatecyBuckets));
-        REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"},
+                           HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"},
+                           HistogramBucketsType(OpLatecyBuckets));
 #ifndef NDEBUG
         REGISTER_HISTOGRAM(volume_unmap_latency, "Volume overall unmap latency", "volume_op_latency", {"op", "unmap"});
 #endif
@@ -192,7 +194,8 @@ public:
                            {"op", "read"}, HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(volume_map_write_latency, "Volume mapping write latency", "volume_map_op_latency",
                            {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
-        REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)", HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)",
+                           HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_COUNTER(volume_read_on_hole, "Number of reads from empty lba");
@@ -324,7 +327,7 @@ private:
     std::atomic< uint64_t > m_err_cnt = 0;
     sisl::atomic_counter< uint64_t > m_vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
-    std::mutex m_sb_lock;                               // lock for updating vol's sb
+    std::mutex m_sb_lock; // lock for updating vol's sb
     sisl::byte_array m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
@@ -500,7 +503,10 @@ public:
     void print_tree();
 
     /* verify active indx */
-    bool verify_tree(bool update_debug_bm = false);
+    bool verify_tree(bool update_debug_bm = false, bool recursive = false);
+
+    /* release cached tree nodes */
+    auto release_cached_tree() { return get_active_indx()->release_cached_tree(); }
 
     /* get status */
     sisl::status_response get_status(const sisl::status_request& request);
@@ -617,7 +623,7 @@ public:
     void migrate_sb();
     void recovery_start_phase1();
     void recovery_start_phase2();
-    static void fake_reboot(){};
+    static void fake_reboot() {};
     std::shared_ptr< SnapMgr > get_indx_mgr_instance() { return m_indx_mgr; }
     bool is_recovery_done() const {
         // if we are here but m_indx_mgr is nullptr, it means volume instance is created but index recovery is not done

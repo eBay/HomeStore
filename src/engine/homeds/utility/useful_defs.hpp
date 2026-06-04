@@ -99,12 +99,12 @@ constexpr std::array< char const, N1 + N2 - 1 > const_concat(char const (&a1)[N1
 #define const_concat_string(s1, s2) (&(const_concat(s1, s2)[0]))
 
 template < class P, class M >
-inline size_t offset_of(const M P::*member) {
-    return (size_t) & (reinterpret_cast< P* >(0)->*member);
+inline size_t offset_of(const M P::* member) {
+    return (size_t)&(reinterpret_cast< P* >(0)->*member);
 }
 
 template < class P, class M >
-inline P* container_of(const M* ptr, const M P::*member) {
+inline P* container_of(const M* ptr, const M P::* member) {
     return (P*)((char*)ptr - offset_of(member));
 }
 

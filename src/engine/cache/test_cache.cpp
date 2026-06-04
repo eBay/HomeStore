@@ -89,9 +89,9 @@ public:
 
     virtual ~CacheTest() override { m_cache.reset(); }
 
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
 
-    virtual void TearDown() override{};
+    virtual void TearDown() override {};
 
     [[nodiscard]] bool insert_one(const uint64_t id, const uint32_t size) {
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;

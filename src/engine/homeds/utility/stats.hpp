@@ -44,7 +44,7 @@ public:
         }
     }
 
-    ~Stats() { delete[](m_values); }
+    ~Stats() { delete[] (m_values); }
 
     void set_count(req_stats_index ind, uint64_t val) {
         assert(m_keys[ind].type == COUNTER);

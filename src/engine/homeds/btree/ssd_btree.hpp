@@ -458,6 +458,30 @@ public:
         store->get_wb_cache()->free_blk(bn->get_node_id(), free_blkid_list, store->get_node_size());
     }
 
+    static bool free_node_from_cache(bnodeid_t node_id, uint32_t node_size) {
+        homestore::BlkId bid(node_id);
+
+        auto req = writeback_req_t::make_request();
+        req->isSyncCall = true;
+        auto buf = m_blkstore->read(bid, 0, node_size, req, true);
+
+        if (!buf) { return true; }
+
+        if (!buf->try_lock()) {
+            buf.reset();
+            return false;
+        }
+        buf->unlock();
+        buf.reset();
+
+        m_blkstore->free_blk(bid, boost::none, boost::none, true);
+
+        auto verify_req = writeback_req_t::make_request();
+        verify_req->isSyncCall = true;
+        auto verify_buf = m_blkstore->read(bid, 0, node_size, verify_req, true);
+        return (verify_buf == nullptr);
+    }
+
     static void ref_node(SSDBtreeNode* const bn) {
         // ref base class
         homestore::CacheBuffer< homestore::BlkId >::ref(

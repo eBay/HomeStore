@@ -26,7 +26,7 @@
 
 namespace omstore {
 
-#define round_off(val, rnd) ((((val)-1) / (rnd)) + 1)
+#define round_off(val, rnd) ((((val) - 1) / (rnd)) + 1)
 
 template < int SizeMultiplier >
 struct MemPiece {

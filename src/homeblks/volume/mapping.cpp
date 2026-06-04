@@ -23,6 +23,17 @@
 
 using namespace homestore;
 
+// Compile-time verification of k_writeback_buffer_overhead constant in cache.h
+namespace {
+using MappingBtreeBufferType = homeds::btree::WriteBackCacheBuffer<
+    MappingKey, MappingValue,
+    homeds::btree::btree_node_type::VAR_VALUE, homeds::btree::btree_node_type::VAR_VALUE>;
+using BaseBufferType = CacheBuffer<BlkId>;
+
+static_assert(sizeof(MappingBtreeBufferType) - sizeof(BaseBufferType) == 24,
+             "k_writeback_buffer_overhead must equal sizeof(WriteBackCacheBuffer) - sizeof(CacheBuffer<BlkId>)");
+} // namespace
+
 lba_t mapping::get_end_lba(const lba_t start_lba, const lba_count_t nlba) { return (start_lba + nlba - 1); }
 
 lba_count_t mapping::get_nlbas(const lba_t end_lba, const lba_t start_lba) {
@@ -272,7 +283,9 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
 
 uint64_t mapping::get_btree_node_cnt() { return m_bt->get_btree_node_cnt(); }
 void mapping::print_tree() { m_bt->print_tree(); }
-bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(update_debug_bm); }
+bool mapping::verify_tree(bool update_debug_bm, bool recursive) {
+    return m_bt->verify_tree(update_debug_bm, recursive);
+}
 
 sisl::status_response mapping::get_status(const sisl::status_request& request) { return m_bt->get_status(request); }
 

@@ -378,7 +378,7 @@ class MappingValue : public homeds::btree::BtreeValue, public sisl::ObjLifeCount
 
 public:
     // creates empty array
-    MappingValue() : ObjLifeCounter(){};
+    MappingValue() : ObjLifeCounter() {};
 
     // creates array with one value entry - on heap, does copy. Initializes the value entry with all these params
     MappingValue(const seq_id_t seqid, const BlkId& blkid, const lba_count_t lba_offset, const lba_count_t nlbas,
@@ -686,7 +686,8 @@ public:
     virtual uint64_t get_btree_node_cnt();
 
     void print_tree();
-    bool verify_tree(bool update_debug_bm);
+    bool verify_tree(bool update_debug_bm, bool recursive = false);
+    auto release_cached_tree() { return m_bt->release_cached_tree(); }
     sisl::sobject_ptr sobject() { return m_sobject; }
     sisl::status_response get_status(const sisl::status_request& request);
 

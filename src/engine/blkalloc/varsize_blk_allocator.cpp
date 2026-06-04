@@ -75,6 +75,11 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
     if (m_cfg.get_use_slabs()) {
         m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics);
 
+        // folly::MPMCQueue slot for blk_cache_entry: 6B item + 6B MPMC sequence field = 12B (confirmed via GDB)
+        static constexpr uint64_t k_mpmc_slot_bytes{12};
+        const auto* q{static_cast< FreeBlkCacheQueue* >(m_fb_cache.get())};
+        GAUGE_UPDATE(m_metrics, blk_alloc_memory_size, q->total_slab_capacity() * k_mpmc_slot_bytes);
+
         LOGINFO("m_fb_cache total free blks: {}", m_fb_cache->total_free_blks());
     }
 

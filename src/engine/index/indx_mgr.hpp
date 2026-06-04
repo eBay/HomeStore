@@ -262,7 +262,7 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
     int state() const { return flags; }
     seq_id_t get_max_seqid() const { return 0; }
-    void set_max_seqid(const seq_id_t seqid){};
+    void set_max_seqid(const seq_id_t seqid) {};
 
     std::string to_string() const {
         return fmt::format(
@@ -328,7 +328,7 @@ struct indx_cp_base_sb {
     btree_cp_sb acp_sb; // active cp superblock
     btree_cp_sb dcp_sb; // diff cp_superblock
     indx_cp_base_sb(const boost::uuids::uuid uuid) : uuid{uuid} {};
-    indx_cp_base_sb(){};
+    indx_cp_base_sb() {};
     std::string to_string() const {
         return fmt::format("active_cp_cnt={} active_data_seqid={} diff_cp_cnt={} diff_data_seqid={} blkalloc_cp_id={} "
                            "indx_size={} btree acp={}",
@@ -438,6 +438,7 @@ ENUM(indx_recovery_state, uint8_t, create_sb_st, create_indx_tbl_st, create_firs
 /* this class defines all the static members of indx_mgr */
 class StaticIndxMgr {
     friend class HomeBlks;
+
 public:
     /*********************** static public functions **********************/
 

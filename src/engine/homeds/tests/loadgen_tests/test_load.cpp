@@ -119,7 +119,7 @@ public:
     virtual ~BtreeTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -148,7 +148,7 @@ public:
     virtual ~SSDBtreeTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -195,7 +195,7 @@ public:
     virtual ~SSDBtreeVarKVTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -242,7 +242,7 @@ public:
     virtual ~MapTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -290,7 +290,7 @@ public:
     virtual ~FileTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -353,7 +353,7 @@ public:
     virtual ~VDevTest_RW() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -402,7 +402,7 @@ public:
     virtual ~VDevTest_PRW() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -451,7 +451,7 @@ public:
     virtual ~CacheTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:
@@ -477,8 +477,8 @@ public:
     virtual ~VolumeLoadTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
 public:
     std::unique_ptr< G_Volume_Test > m_loadgen;
@@ -546,7 +546,7 @@ public:
     virtual ~LogStoreLoadTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override { loadgen.reset(); };
 
 public:

@@ -72,7 +72,7 @@ public:
         return nullptr;
     }
     static void create_done(MemBtreeStore* store, bnodeid_t m_root_node);
-    static void update_sb(MemBtreeStore* store, btree_super_block& sb, btree_cp_sb* cp_sb, bool is_recovery){};
+    static void update_sb(MemBtreeStore* store, btree_super_block& sb, btree_cp_sb* cp_sb, bool is_recovery) {};
 
     static boost::intrusive_ptr< MemBtreeNode >
     alloc_node(MemBtreeStore* store, bool is_leaf,

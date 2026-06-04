@@ -27,9 +27,9 @@ private:
     Volume* m_volume;
 
 public:
-    Snapshot(Volume* vol, uint64_t snapId, uint64_t seqId) : m_snapId(snapId), m_seqId(seqId), m_volume(vol){};
+    Snapshot(Volume* vol, uint64_t snapId, uint64_t seqId) : m_snapId(snapId), m_seqId(seqId), m_volume(vol) {};
 
-    ~Snapshot(){};
+    ~Snapshot() {};
 
     std::string to_string() {
         std::stringstream ss;

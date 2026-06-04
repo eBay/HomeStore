@@ -34,7 +34,7 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using namespace homestore;
 
-std::unique_ptr< BlkAllocMetrics > g_metrics;
+std::unique_ptr< VarsizeBlkAllocMetrics > g_metrics;
 
 struct BlkCacheQueueTest : public ::testing::Test {
 protected:
@@ -52,8 +52,8 @@ public:
     virtual ~BlkCacheQueueTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     void SetUp(const uint32_t nslabs, const uint32_t count_per_slab) {
         m_nslabs = nslabs;
@@ -286,7 +286,7 @@ int main(int argc, char* argv[]) {
     sisl::logging::SetLogger("test_blkalloc");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    g_metrics = std::make_unique< BlkAllocMetrics >("BlkCacheQueueTest");
+    g_metrics = std::make_unique< VarsizeBlkAllocMetrics >("BlkCacheQueueTest");
     const int result{RUN_ALL_TESTS()};
     g_metrics.reset();
     return result;

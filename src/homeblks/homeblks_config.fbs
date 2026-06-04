@@ -28,8 +28,13 @@ table GeneralConfig {
 
     // Frequency with which we need to check the success of shutdown
     shutdown_status_check_freq_ms: uint64 = 2000;
-    // Consistency check on booting 
+    // Consistency check on booting
     boot_consistency_check: bool = false;
+
+    // Enable cache release after volume recovery to limit peak memory usage.
+    // When enabled, cached btree nodes are safely evicted after each volume's
+    // recovery phase 2, freeing cache space for dirty buffers.
+    release_cache_after_recovery: bool = true (hotswap);
 
     // These fields should only be changed by agent through workflow
     boot_restricted_mode: bool = false;

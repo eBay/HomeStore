@@ -19,7 +19,7 @@
 #include "blk_cache_queue.h"
 
 namespace homestore {
-FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics* const metrics) :
+FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, VarsizeBlkAllocMetrics* const metrics) :
         m_cfg{cfg}, m_metrics{metrics} {
 #ifndef NDEBUG
     blk_count_t slab_size{1};
@@ -176,6 +176,14 @@ blk_cap_t FreeBlkCacheQueue::total_free_blks() const {
     return count;
 }
 
+blk_cap_t FreeBlkCacheQueue::total_slab_capacity() const {
+    blk_cap_t count{0};
+    for (const auto& sq : m_slab_queues) {
+        count += sq->entry_capacity();
+    }
+    return count;
+}
+
 BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, const blk_cache_alloc_req& req,
                                                     blk_cache_alloc_resp& resp) {
     if (resp.nblks_alloced >= req.nblks) { return BlkAllocStatus::SUCCESS; }
@@ -294,7 +302,7 @@ std::optional< blk_temp_t > FreeBlkCacheQueue::pop_slab(const slab_idx_t slab_id
 }
 
 SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_cap_t >& level_limits,
-                               const float refill_pct, BlkAllocMetrics* parent_metrics) :
+                               const float refill_pct, VarsizeBlkAllocMetrics* parent_metrics) :
         m_slab_size{slab_size}, m_metrics{m_slab_size, this, parent_metrics} {
     for (auto& limit : level_limits) {
         auto ptr{std::make_unique< folly::MPMCQueue< blk_cache_entry > >(limit)};
@@ -306,8 +314,8 @@ SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< b
 }
 
 std::optional< blk_temp_t > SlabCacheQueue::push(const blk_cache_entry& entry, const bool only_this_level) {
-    const blk_temp_t start_level{
-        static_cast< blk_temp_t >((entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
+    const blk_temp_t start_level{static_cast< blk_temp_t >(
+        (entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
     blk_temp_t level{start_level};
     bool pushed{m_level_queues[start_level]->write(entry)};
 
@@ -370,7 +378,8 @@ void SlabCacheQueue::close_session(const uint64_t session_id) {
     m_refill_session.compare_exchange_strong(expected_session_id, 0, std::memory_order_acq_rel);
 }
 
-SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, BlkAllocMetrics* const parent) :
+SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue,
+                         VarsizeBlkAllocMetrics* const parent) :
         sisl::MetricsGroup{"SlabMetrics", fmt::format("{}_slab_{:03d}", parent->instance_name(), slab_size)},
         m_slab_queue{slab_queue} {
     REGISTER_COUNTER(num_slab_alloc, "Number of alloc attempts in this slab");

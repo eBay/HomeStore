@@ -22,8 +22,7 @@ namespace omstore {
 template < ssize_t MinAllocSize >
 EvictableMemAllocator::EvictableMemAllocator(uint64_t mem_size, CanEvictCallback& can_evict_cb,
                                              AllocEvictCallback& alloc_cb) :
-        m_evict_cb(can_evict_cb),
-        m_alloc_cb(alloc_cb) {
+        m_evict_cb(can_evict_cb), m_alloc_cb(alloc_cb) {
 
     // First add all entries as max alloc cbs
     m_buf = std::make_unique< uint8_t[] >(mem_size);
@@ -61,9 +60,7 @@ bool EvictableMemAllocator::alloc(uint32_t size, uint32_t max_pieces, EvictRecor
         }
     }
 
-    if (!found) {
-        throw std::bad_alloc();
-    }
+    if (!found) { throw std::bad_alloc(); }
     return found;
 }
 

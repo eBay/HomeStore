@@ -40,8 +40,9 @@ public:
     static hs_uuid_t gen_system_uuid();
     static std::string encodeBase64(const uint8_t* first, std::size_t size);
     static std::string encodeBase64(const sisl::byte_view& b);
-    template <typename T> static void decodeBase64(const std::string &encoded_data, T out);
-    static std::string decodeBase64(const std::string &encoded_data);
+    template < typename T >
+    static void decodeBase64(const std::string& encoded_data, T out);
+    static std::string decodeBase64(const std::string& encoded_data);
 };
 static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 

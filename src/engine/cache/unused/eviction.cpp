@@ -26,11 +26,7 @@ namespace homestore {
 template < typename EvictionPolicy >
 Evictor< EvictionPolicy >::Evictor(uint64_t max_size, Evictor< EvictionPolicy >::CanEvictCallback cb,
                                    Evictor< EvictionPolicy >::GetSizeCallback gs_cb) :
-        m_evict_policy(cb, gs_cb),
-        m_can_evict_cb(cb),
-        m_get_size_cb(gs_cb),
-        m_cur_size(0),
-        m_max_size(max_size) {}
+        m_evict_policy(cb, gs_cb), m_can_evict_cb(cb), m_get_size_cb(gs_cb), m_cur_size(0), m_max_size(max_size) {}
 
 template < typename EvictionPolicy >
 EvictRecord* Evictor< EvictionPolicy >::add_record(EvictRecord& r) {

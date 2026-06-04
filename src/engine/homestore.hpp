@@ -292,7 +292,7 @@ protected:
         const PhysicalDevGroup pdev_group{PhysicalDevGroup::DATA};
         if (vb == nullptr) {
             /* change it to context */
-            struct blkstore_blob blob {};
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::DATA_STORE;
             const uint64_t size{
                 pct_to_size((is_data_drive_hdd() ? hdd_data_blkstore_pct : data_blkstore_pct), pdev_group)};
@@ -318,7 +318,7 @@ protected:
         const PhysicalDevGroup pdev_group{PhysicalDevGroup::FAST};
         const auto atomic_phys_page_size{get_indx_mgr_page_size()};
         if (vb == nullptr) {
-            struct blkstore_blob blob {};
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::INDEX_STORE;
             const uint64_t size{
                 pct_to_size((is_data_drive_hdd() ? hdd_indx_blkstore_pct : indx_blkstore_pct), pdev_group)};
@@ -348,7 +348,7 @@ protected:
         const PhysicalDevGroup pdev_group{PhysicalDevGroup::META};
         const auto phys_page_size{m_dev_mgr->get_phys_page_size({PhysicalDevGroup::META})};
         if (vb == nullptr) {
-            struct blkstore_blob blob {};
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::META_STORE;
             const uint64_t size{
                 pct_to_size((is_data_drive_hdd() ? hdd_meta_blkstore_pct : meta_blkstore_pct), pdev_group)};
@@ -379,7 +379,7 @@ protected:
         const PhysicalDevGroup pdev_group{PhysicalDevGroup::FAST};
         const auto atomic_phys_page_size{m_dev_mgr->get_atomic_page_size({PhysicalDevGroup::FAST})};
         if (vb == nullptr) {
-            struct blkstore_blob blob {};
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::DATA_LOGDEV_STORE;
             const uint64_t size{pct_to_size(
                 (is_data_drive_hdd() ? hdd_data_logdev_blkstore_pct : data_logdev_blkstore_pct), pdev_group)};
@@ -410,7 +410,7 @@ protected:
         const auto atomic_phys_page_size{m_dev_mgr->get_atomic_page_size({PhysicalDevGroup::FAST})};
 
         if (vb == nullptr) {
-            struct blkstore_blob blob {};
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::CTRL_LOGDEV_STORE;
             const uint64_t size{pct_to_size(
                 (is_data_drive_hdd() ? hdd_ctrl_logdev_blkstore_pct : ctrl_logdev_blkstore_pct), pdev_group)};

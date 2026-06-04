@@ -380,8 +380,8 @@ struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     FixedBlkAllocatorTest& operator=(FixedBlkAllocatorTest&&) noexcept = delete;
     virtual ~FixedBlkAllocatorTest() override = default;
 
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     [[nodiscard]] bool alloc_blk(const BlkAllocStatus exp_status, BlkId& bid, const bool track_block_group) {
         const auto ret{m_allocator->alloc(bid)};
@@ -425,8 +425,8 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     VarsizeBlkAllocatorTest& operator=(VarsizeBlkAllocatorTest&&) noexcept = delete;
     virtual ~VarsizeBlkAllocatorTest() override = default;
 
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     void create_allocator(const bool use_slabs = true) {
         VarsizeBlkAllocConfig cfg{4096, 4096, 4096u, static_cast< uint64_t >(m_total_count) * 4096, "", false};
