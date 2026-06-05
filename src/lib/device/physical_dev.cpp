@@ -145,40 +145,46 @@ std::error_code PhysicalDev::read_super_block(uint8_t* buf, uint32_t sb_size, ui
 void PhysicalDev::close_device() { close_and_uncache_dev(m_devname, m_iodev); }
 
 void PhysicalDev::sanity_check() {
-    // Only validate footer if mirroring is enabled (HDD devices)
     if (!m_super_blk_in_footer) { return; }
 
     HS_LOG(INFO, device, "Validating footer superblock consistency on device={}", m_devname);
 
-    // Read header first block
     auto header_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
                                             m_pdev_info.dev_attr.align_size);
     auto header_err = read_super_block(header_buf, first_block::s_io_fb_size, hs_super_blk::first_block_offset());
     HS_REL_ASSERT(!header_err,
-                  "IO error reading header first block during sanity check on device={}, error={}, homestore will go down",
-                  m_devname, header_err.message());
+                  "IO error reading header first block on device={}, error={}, homestore will go down", m_devname,
+                  header_err.message());
 
-    // Read footer first block using the same offset calculation as write_super_block()
     auto footer_offset = data_end_offset() + hs_super_blk::first_block_offset();
     auto footer_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
                                             m_pdev_info.dev_attr.align_size);
     auto footer_err = read_super_block(footer_buf, first_block::s_io_fb_size, footer_offset);
-    HS_REL_ASSERT(
-        !footer_err,
-        "IO error reading footer first block during sanity check on device={}, offset={}, error={}, homestore will go down",
-        m_devname, footer_offset, footer_err.message());
+    HS_REL_ASSERT(!footer_err,
+                  "IO error reading footer first block on device={}, offset={}, error={}, homestore will go down",
+                  m_devname, footer_offset, footer_err.message());
 
-    // Compare header and footer
     auto header_blk = r_cast< first_block* >(header_buf);
     auto footer_blk = r_cast< first_block* >(footer_buf);
-    HS_REL_ASSERT(std::memcmp(header_blk, footer_blk, first_block::s_atomic_fb_size) == 0,
-                  "Footer first block mismatch with header on device={}, header=[{}], footer=[{}], this indicates "
-                  "corruption, homestore will go down",
-                  m_devname, header_blk->to_string(), footer_blk->to_string());
+
+    if (header_blk->is_valid()) {
+        HS_REL_ASSERT(std::memcmp(header_blk, footer_blk, first_block::s_atomic_fb_size) == 0,
+                      "Footer mismatch with header on device={}, header=[{}], footer=[{}], corruption detected, "
+                      "homestore will go down",
+                      m_devname, header_blk->to_string(), footer_blk->to_string());
+        HS_LOG(INFO, device, "Footer superblock validated successfully on device={}", m_devname);
+    } else if (footer_blk->is_valid() && footer_blk->this_pdev_hdr.system_uuid == m_pdev_info.system_uuid) {
+        HS_REL_ASSERT(false,
+                      "Header invalid but footer has matching system_uuid on device={}, indicates header superblock "
+                      "corruption, homestore will go down",
+                      m_devname);
+    } else {
+        HS_LOG(INFO, device,
+               "Header invalid and footer has no matching system_uuid on device={}, treating as first boot", m_devname);
+    }
 
     hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
     hs_utils::iobuf_free(footer_buf, sisl::buftag::superblk);
-    HS_LOG(INFO, device, "Footer superblock validated successfully on device={}", m_devname);
 }
 
 folly::Future< std::error_code > PhysicalDev::async_write(const char* data, uint32_t size, uint64_t offset,
