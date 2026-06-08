@@ -16,9 +16,13 @@
 #include <gtest/gtest.h>
 #include <boost/uuid/random_generator.hpp>
 
+#include <set>
+#include <vector>
 #include <sisl/utility/enum.hpp>
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"
+#include "device/chunk.h"
+#include "device/virtual_dev.hpp"
 #include "test_common/homestore_test_common.hpp"
 #include "test_common/range_scheduler.hpp"
 #include "btree_helpers/btree_test_helper.hpp"
@@ -1414,6 +1418,334 @@ TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
 
     LOGINFO("Step 6: Recovery succeeded - bug is fixed (SDSTOR-21880)");
     ASSERT_EQ(hs()->index_service().num_tables(), 2) << "Both tables should be recovered";
+}
+
+// Regression reproducer for the recovery ordering bug where a node that is
+// created and freed in the crashed CP is put into deleted_bufs even though its
+// blkid was never persisted in the allocator bitmap.
+//
+// This test does not add or depend on any new test flip. It uses the existing
+// crash_flush_on_split_at_parent flip only to stop the CP after the index journal
+// is persisted. The first current-CP split is immediately merged away so that
+// its newly allocated blkid is also freed in the same CP; because that allocation
+// is the first one after the clean baseline CP, the blkid is small and appears
+// near the head of fixed_blk_allocator::m_free_blk_q after restart. The later
+// split storm creates enough child links for recovery repair to allocate parent
+// repair nodes normally; when repair reuses that small created+freed blkid,
+// deleted_bufs later frees the live repair node. Subsequent normal inserts then
+// either crash in IndexWBCache::alloc_buf() at the duplicate cache insert assert,
+// or corrupt a shared-blkid btree node and crash during validation/use.
+struct IndexCrashCreatedFreedReuseTest : public test_common::HSTestHelper,
+                                         BtreeTestHelper< FixedLenBtree >,
+                                         public ::testing::Test {
+    using T = FixedLenBtree;
+    using K = T::KeyType;
+    using V = T::ValueType;
+
+    struct InspectableIndexTable : public T::BtreeType {
+        InspectableIndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, BtreeConfig const& cfg,
+                              bool* flush_recovery_free_list, std::set< bnodeid_t >* recovery_freed_node_ids) :
+                T::BtreeType{uuid, parent_uuid, user_sb_size, cfg},
+                m_flush_recovery_free_list{flush_recovery_free_list},
+                m_recovery_freed_node_ids{recovery_freed_node_ids} {}
+
+        InspectableIndexTable(superblk< index_table_sb >&& sb, BtreeConfig const& cfg, bool* flush_recovery_free_list,
+                              std::set< bnodeid_t >* recovery_freed_node_ids) :
+                T::BtreeType{std::move(sb), cfg},
+                m_flush_recovery_free_list{flush_recovery_free_list},
+                m_recovery_freed_node_ids{recovery_freed_node_ids} {}
+
+        void recovery_completed() override {
+            T::BtreeType::recovery_completed();
+            if (m_flush_recovery_free_list && *m_flush_recovery_free_list) {
+                auto cpg = hs()->cp_mgr().cp_guard();
+                auto* cp_ctx = s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+                if (m_recovery_freed_node_ids) {
+                    cp_ctx->m_free_blkid_list.foreach_entry(
+                        [this](BlkId bid) { m_recovery_freed_node_ids->insert(bid.to_integer()); });
+                }
+                auto const root_blk = BlkId{this->root_node_id()};
+                auto* chunk = hs()->device_mgr()->get_chunk_mutable(root_blk.chunk_num());
+                RELEASE_ASSERT(chunk != nullptr, "Index chunk not found for root blkid {}", root_blk.to_string());
+                auto* vdev = hs()->device_mgr()->get_vdev_mutable(chunk->vdev_id());
+                RELEASE_ASSERT(vdev != nullptr, "Index vdev not found for root blkid {}", root_blk.to_string());
+                vdev->cp_flush(cp_ctx);
+                *m_flush_recovery_free_list = false;
+            }
+        }
+
+        std::set< bnodeid_t > collect_node_ids() const {
+            std::set< bnodeid_t > ids;
+            collect_node_ids_recurse(this->root_node_id(), ids);
+            return ids;
+        }
+
+    private:
+        void collect_node_ids_recurse(bnodeid_t node_id, std::set< bnodeid_t >& ids) const {
+            if ((node_id == empty_bnodeid) || ids.contains(node_id)) { return; }
+
+            BtreeNodePtr node;
+            if ((this->read_node_impl(node_id, node) != btree_status_t::success) || node->is_node_deleted()) { return; }
+            ids.insert(node_id);
+
+            if (node->is_leaf()) { return; }
+
+            for (uint32_t i = 0; i < node->total_entries(); ++i) {
+                BtreeLinkInfo child_info;
+                node->get_nth_value(i, &child_info, false /* copy */);
+                collect_node_ids_recurse(child_info.bnode_id(), ids);
+            }
+
+            if (node->has_valid_edge()) { collect_node_ids_recurse(node->get_edge_value().bnode_id(), ids); }
+        }
+
+        bool* m_flush_recovery_free_list{nullptr};
+        std::set< bnodeid_t >* m_recovery_freed_node_ids{nullptr};
+    };
+
+    using BtType = InspectableIndexTable;
+
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(IndexCrashCreatedFreedReuseTest* test) : m_test{test} {}
+
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
+            LOGINFO("Index table recovered, root bnode_id {} uuid {} ordinal {} version {}",
+                    static_cast< uint64_t >(sb->root_node), boost::uuids::to_string(sb->uuid), sb->ordinal,
+                    sb->root_link_version);
+            m_test->init_cfg();
+            m_test->m_bt = std::make_shared< BtType >(std::move(sb), m_test->m_cfg, &m_test->m_flush_recovery_free_list,
+                                                      &m_test->m_recovery_freed_node_ids);
+            return m_test->m_bt;
+        }
+
+    private:
+        IndexCrashCreatedFreedReuseTest* m_test;
+    };
+
+    IndexCrashCreatedFreedReuseTest() : testing::Test() { this->m_is_multi_threaded = false; }
+
+    bool m_flush_recovery_free_list{false};
+    std::set< bnodeid_t > m_recovery_freed_node_ids;
+
+    void init_cfg() {
+        this->m_cfg = BtreeConfig(hs()->index_service().node_size());
+        this->m_cfg.m_leaf_node_type = T::leaf_node_type;
+        this->m_cfg.m_int_node_type = T::interior_node_type;
+        this->m_cfg.m_max_keys_in_node = 20;
+        this->m_cfg.m_min_keys_in_node = 6;
+        this->m_cfg.m_max_merge_level = 1;
+    }
+
+    void SetUp() override {
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            s.generic.cp_timer_us = 0x8000000000000000;
+            s.resource_limits.dirty_buf_percent = 100;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        this->start_homestore(
+            "test_index_crash_recovery",
+            {{HS_SERVICE::META, {.size_pct = 10.0}},
+             {HS_SERVICE::INDEX, {.size_pct = 10.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+            nullptr, {}, true /* init_device */);
+
+        BtreeTestHelper< FixedLenBtree >::SetUp();
+        init_cfg();
+
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+        this->m_bt = std::make_shared< BtType >(uuid, parent_uuid, 0, this->m_cfg, &m_flush_recovery_free_list,
+                                                &m_recovery_freed_node_ids);
+        hs()->index_service().add_index_table(this->m_bt);
+    }
+
+    void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
+        this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        test_common::HSTestHelper::restart_homestore(shutdown_delay_sec);
+    }
+
+    void TearDown() override {
+        BtreeTestHelper< FixedLenBtree >::TearDown();
+        this->shutdown_homestore(false);
+    }
+
+    void insert_key(uint32_t key_num) {
+        K key{key_num};
+        V value{V::generate_rand()};
+        auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::INSERT};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->put(req);
+        ASSERT_EQ(ret, btree_status_t::success) << "insert key=" << key_num << " failed with " << enum_name(ret);
+    }
+
+    void update_key(uint32_t key_num) {
+        K key{key_num};
+        V value{V::generate_rand()};
+        auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::UPDATE};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->put(req);
+        ASSERT_EQ(ret, btree_status_t::success) << "update key=" << key_num << " failed with " << enum_name(ret);
+    }
+
+    bool remove_key(uint32_t key_num) {
+        auto existing_v = std::make_unique< V >();
+        K key{key_num};
+        auto req = BtreeSingleRemoveRequest{&key, existing_v.get()};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->remove(req);
+        if ((ret != btree_status_t::success) && (ret != btree_status_t::not_found)) {
+            ADD_FAILURE() << "remove key=" << key_num << " failed with " << enum_name(ret);
+        }
+        return ret == btree_status_t::success;
+    }
+
+    void insert_sparse_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        for (auto k = begin; k <= end; k += step) {
+            insert_key(k);
+        }
+    }
+
+    void insert_range_skip_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        for (auto k = begin; k < end; ++k) {
+            if ((k % step) == 0) { continue; }
+            insert_key(k);
+        }
+    }
+
+    void remove_range_skip_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        uint32_t removed{0};
+        for (auto k = begin; k < end; ++k) {
+            if ((k % step) == 0) { continue; }
+            if (remove_key(k)) { ++removed; }
+        }
+        ASSERT_GT(removed, 0u) << "expected at least one key to be removed in [" << begin << ", " << end << ")";
+    }
+
+    void verify_existing_range(uint32_t begin, uint32_t end) {
+        for (auto k = begin; k < end; ++k) {
+            auto out_v = std::make_unique< V >();
+            K key{k};
+            auto req = BtreeSingleGetRequest{&key, out_v.get()};
+            req.enable_route_tracing();
+            auto const ret = this->m_bt->get(req);
+            ASSERT_EQ(ret, btree_status_t::success) << "get key=" << k << " failed with " << enum_name(ret);
+        }
+    }
+
+    std::shared_ptr< BtType > inspectable_bt() const { return std::static_pointer_cast< BtType >(this->m_bt); }
+
+    bnodeid_t first_added_node_id(std::set< bnodeid_t > const& before, std::set< bnodeid_t > const& after) const {
+        for (auto const id : after) {
+            if (!before.contains(id)) { return id; }
+        }
+        return empty_bnodeid;
+    }
+
+    std::vector< bnodeid_t > added_then_freed_node_ids(std::set< bnodeid_t > const& before,
+                                                       std::set< bnodeid_t > const& after_add,
+                                                       std::set< bnodeid_t > const& after_free) const {
+        std::vector< bnodeid_t > ids;
+        for (auto const id : after_add) {
+            if (!before.contains(id) && !after_free.contains(id)) { ids.push_back(id); }
+        }
+        return ids;
+    }
+
+    void commit_index_free_queue_until(uint64_t remaining_blks) {
+        auto const root_blk = BlkId{this->m_bt->root_node_id()};
+        auto* chunk = hs()->device_mgr()->get_chunk_mutable(root_blk.chunk_num());
+        RELEASE_ASSERT(chunk != nullptr, "Index chunk not found for root blkid {}", root_blk.to_string());
+        auto* vdev = hs()->device_mgr()->get_vdev_mutable(chunk->vdev_id());
+        RELEASE_ASSERT(vdev != nullptr, "Index vdev not found for root blkid {}", root_blk.to_string());
+
+        blk_alloc_hints hints;
+        hints.application_hint = this->m_bt->ordinal();
+
+        uint64_t consumed{0};
+        while (vdev->available_blks() > remaining_blks) {
+            BlkId blkid;
+            auto status = vdev->alloc_contiguous_blks(1, hints, blkid);
+            ASSERT_EQ(status, BlkAllocStatus::SUCCESS)
+                << "failed to consume index free queue after " << consumed << " allocations";
+            status = vdev->commit_blk(blkid);
+            ASSERT_EQ(status, BlkAllocStatus::SUCCESS) << "failed to commit consumed blk " << blkid.to_string();
+            ++consumed;
+        }
+        LOGINFO("Persistently consumed {} index free blks; remaining free blks={}", consumed, vdev->available_blks());
+    }
+};
+
+TEST_F(IndexCrashCreatedFreedReuseTest, CreatedAndFreedBlkReusedByRecoveryRepair) {
+    constexpr uint32_t sparse_step = 100;
+    constexpr uint32_t preload_last_key = 2000;
+    constexpr uint64_t crash_cp_free_queue_blks = 512;
+
+    LOGINFO("Step 1: preload sparse keys [0, {}] step {} and flush the baseline CP", preload_last_key, sparse_step);
+    insert_sparse_multiples(0, preload_last_key, sparse_step);
+    test_common::HSTestHelper::trigger_cp(true);
+
+    LOGINFO("Step 1b: persistently consume index free queue so crash-CP created nodes are near recovery queue head");
+
+    // simulate a case that a lot of blk is consumed by other btree node allocation. for example, we have 2 btrees. one
+    // is used for reproduce this issue(the current one) , the other is used for consuming blks(receives lots of put
+    // request and lead to a lot of  blk allocation). commit_index_free_queue_until is used to consume free blks , just
+    // like what the second btree does.
+    commit_index_free_queue_until(crash_cp_free_queue_blks);
+    update_key(0);
+    test_common::HSTestHelper::trigger_cp(true);
+
+    LOGINFO("Step 2: set existing crash flip to crash after journal persistence but before parent flush");
+    this->set_basic_flip("crash_flush_on_split_at_parent");
+
+    LOGINFO("Step 3: observe the first current-CP split node, then make that exact blkid created+freed");
+    auto const before_first_split = inspectable_bt()->collect_node_ids();
+    insert_range_skip_multiples(1, 160, sparse_step);
+    auto const after_first_split = inspectable_bt()->collect_node_ids();
+    ASSERT_NE(first_added_node_id(before_first_split, after_first_split), empty_bnodeid)
+        << "expected first current-CP split to add a node";
+
+    remove_range_skip_multiples(1, 160, sparse_step);
+    auto const after_target_merge = inspectable_bt()->collect_node_ids();
+    auto const created_freed_node_ids =
+        added_then_freed_node_ids(before_first_split, after_first_split, after_target_merge);
+    ASSERT_FALSE(created_freed_node_ids.empty()) << "expected a current-CP split node to be freed in the same CP";
+    LOGINFO("Found {} created+freed node candidates in the crash CP", created_freed_node_ids.size());
+
+    LOGINFO("Step 4: create many more split records in the same unflushed CP to force recovery repair allocations");
+    insert_range_skip_multiples(1, preload_last_key, sparse_step);
+
+    LOGINFO("Step 5: crash and recover through the normal recovery/repair path");
+    m_flush_recovery_free_list = true;
+    m_recovery_freed_node_ids.clear();
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    LOGINFO("Step 6: do sanity check");
+    // 1 all the recovered nodes should not exist in m_recovery_freed_node_ids either ( should not be freed during
+    // recovery)
+    auto const recovered_nodes = inspectable_bt()->collect_node_ids();
+    for (const auto id : m_recovery_freed_node_ids) {
+        ASSERT_FALSE(recovered_nodes.contains(id))
+            << "created_freed_node " << id << " was freed and also recovered as a live node";
+    }
+
+    // 2 all the created+freed blkids should not be freed during recovery ( should not appear in
+    // m_recovery_freed_node_ids)
+    for (auto const id : created_freed_node_ids) {
+        ASSERT_FALSE(m_recovery_freed_node_ids.contains(id))
+            << "created_freed_node " << id << " was freed during recovery";
+    }
+
+    LOGINFO("Step 7: fixed recovery detected; no same-CP created+freed blkid was freed, verify writes and reads");
+    for (auto k = 100000u; k < 100300u; ++k) {
+        insert_key(k);
+    }
+
+    for (auto k = 0u; k <= preload_last_key; k += sparse_step) {
+        verify_existing_range(k, k + 1);
+    }
 }
 
 #endif

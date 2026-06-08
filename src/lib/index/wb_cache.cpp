@@ -432,11 +432,13 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     down_buf->m_up_buffer = real_up_buf;
 
     if (down_buf->state() == index_buf_state_t::CLEAN) {
-        //In root collapse case, down_buf is written before up_buf, but in root split case, down_buf is written after up_buf.
+        // In root collapse case, down_buf is written before up_buf, but in root split case, down_buf is written after
+        // up_buf.
         LOGDEBUGMOD(wbcache,
-                   "CLEAN_BUF_DEBUG: Adding CLEAN down_buf {} to up_buf {}, up_buf wait_count before={}, might be dirtied later",
-                   down_buf->blkid().to_integer(), real_up_buf->blkid().to_integer(),
-                   real_up_buf->m_wait_for_down_buffers.get());
+                    "CLEAN_BUF_DEBUG: Adding CLEAN down_buf {} to up_buf {}, up_buf wait_count before={}, might be "
+                    "dirtied later",
+                    down_buf->blkid().to_integer(), real_up_buf->blkid().to_integer(),
+                    real_up_buf->m_wait_for_down_buffers.get());
     }
 
     real_up_buf->add_down_buffer(down_buf);
@@ -609,48 +611,55 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
     std::vector< IndexBufferPtr > pruned_bufs_to_repair;
     std::set< IndexBufferPtr > bufs_to_skip_sanity_check;
+
+    auto prune_from_up_buffer = [&](IndexBufferPtr const& buf) {
+        if (!buf->m_up_buffer) { return; }
+        LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
+                    buf->m_up_buffer->to_string());
+        buf->m_up_buffer->remove_down_buffer(buf);
+        prune_up_buffers(buf, pruned_bufs_to_repair);
+        buf->m_up_buffer = nullptr;
+    };
+
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
     for (auto const& [_, buf] : bufs) {
         load_buf(buf);
 
         if (buf->m_node_freed) {
             LOGTRACEMOD(wbcache, "recovering free buf {}", buf->to_string());
+            if (buf->m_created_cp_id == icp_ctx->id()) {
+                // Created and freed within the same crashed CP: the blkid was only reserve_on_disk'd, never
+                // flushed to the allocator bitmap. After restart the allocator already treats it as free,
+                // so recovery repair may reuse it. Never add to deleted_bufs — free_blk would corrupt a
+                // live repair node that reused the same blkid.
+                LOGINFO("Ignoring same-CP created+freed buf {} for allocator free", buf->to_string());
+                if (was_node_committed(buf)) {
+                    pending_bufs.push_back(buf->m_up_buffer);
+                } else {
+                    prune_from_up_buffer(buf);
+                }
+                continue;
+            }
             if (was_node_committed(buf)) {
-                // Mark this buffer as deleted, so that we can avoid using it anymore when repairing its parent's link
+                // Node data is on disk from a previous CP; mark it deleted so repair skips its stale
+                // parent link, schedule the blkid for release, and queue the parent for repair.
                 r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = true;
-                write_buf(nullptr, buf, icp_ctx); // no need to write it here !!
+                write_buf(nullptr, buf, icp_ctx);
                 deleted_bufs.push_back(buf);
                 pending_bufs.push_back(buf->m_up_buffer);
                 LOGINFOMOD(wbcache, "Freeing deleted buf {} and adding up buffer to pending {}", buf->to_string(),
                            buf->m_up_buffer->to_string());
             } else {
-                // (Up) buffer is not committed, node need to be kept and (potentially) repaired later
-                if (buf->m_created_cp_id != icp_ctx->id()) {
-                    LOGTRACEMOD(wbcache,
-                                "NOT FREE committing buffer {} node deleted is false reason: node committed?= {} "
-                                "up committed? {}",
-                                buf->to_string(), was_node_committed(buf), was_node_committed(buf->m_up_buffer));
-                    buf->m_node_freed = false;
-                    r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = false;
-                    m_vdev->commit_blk(buf->m_blkid);
-                    // it can happen when children moved to one of right parent sibling and then the previous node is
-                    // deleted but not committed during crash (upbuffer is not committed). but its children already
-                    // committed. and freed (or changed)
-                    if (buf->m_node_level) { potential_parent_recovered_bufs.insert(buf); }
-                } else {
-                    LOGINFO("deleting and creating new buf {}", buf->to_string());
-                    deleted_bufs.push_back(buf);
-                }
-                //  1- upbuffer was dirtied by the same cp, so it is not committed, so we don't need to repair it.
-                //  remove it from down_waiting list (probably recursively going up) 2- upbuffer was created and
-                //  freed at the same cp, so it is not committed, so we don't need to repair it.
-                if (buf->m_up_buffer) {
-                    LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
-                                buf->m_up_buffer->to_string());
-                    buf->m_up_buffer->remove_down_buffer(buf);
-                    prune_up_buffers(buf, pruned_bufs_to_repair);
-                    buf->m_up_buffer = nullptr;
-                }
+                // Freed from a previous CP but the free was not committed (crash between journal write
+                // and bitmap flush). Recommit the blkid to keep the bitmap consistent, then prune the
+                // stale child link from the uncommitted parent.
+                LOGTRACEMOD(wbcache, "Recommitting freed-but-uncommitted buf {} (up_committed={})", buf->to_string(),
+                            was_node_committed(buf->m_up_buffer));
+                buf->m_node_freed = false;
+                r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = false;
+                m_vdev->commit_blk(buf->m_blkid);
+                if (buf->m_node_level) { potential_parent_recovered_bufs.insert(buf); }
+                prune_from_up_buffer(buf);
             }
         } else if (buf->m_created_cp_id == icp_ctx->id()) {
             LOGTRACEMOD(wbcache, "recovering new buf {}", buf->to_string());
@@ -828,8 +837,8 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 //////////////////// CP Related API section /////////////////////////////////
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
     LOGINFOMOD(wbcache, "Starting Index CP Flush with cp {}, dirty_buf_count={}, nodes_added={}, nodes_removed={}",
-           cp_ctx->id(), cp_ctx->m_dirty_buf_count.get(), cp_ctx->m_num_nodes_added.load(),
-           cp_ctx->m_num_nodes_removed.load());
+               cp_ctx->id(), cp_ctx->m_dirty_buf_count.get(), cp_ctx->m_num_nodes_added.load(),
+               cp_ctx->m_num_nodes_removed.load());
     LOGTRACEMOD(wbcache, "Index CP Flush with cp {}, \ndag={}", cp_ctx->id(), cp_ctx->to_string_with_dags());
     // #ifdef _PRERELEASE
     //     static int id = 0;
