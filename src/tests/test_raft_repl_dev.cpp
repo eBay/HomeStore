@@ -110,6 +110,11 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
     g_helper->sync_for_cleanup_start();
     if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
 }
+// Also validates the try-and-fallback receive path: with data_checksum_enabled=false (default),
+// no FetchDataResponse FlatBuffer header is emitted by the sender.  The new receiver code must
+// treat the raw block bytes as old-format data — exactly what an old sender would produce during
+// a rolling upgrade.  Passes = old-format fallback is correct.
+#endif
 
 // Verifies the happy path with checksums explicitly enabled: writes should commit correctly
 // and all replicas should hold the same data.
@@ -160,8 +165,72 @@ TEST_F(RaftReplDevTest, Checksum_Enabled_FetchData_Path) {
     g_helper->sync_for_cleanup_start();
     if (g_helper->replica_num() != 0) { g_helper->remove_flip("drop_push_data_request"); }
 }
+
+// Verifies that a PushData checksum mismatch is detected and the follower recovers correctly.
+// The corrupt_push_data_checksum flip causes the receiver to treat a valid CRC as wrong,
+// simulating bit corruption in transit.  Followers drop the packet and fall back to fetch;
+// data must still commit correctly on all replicas.
+TEST_F(RaftReplDevTest, Checksum_Mismatch_PushData_Path) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = true; });
+    HS_SETTINGS_FACTORY().save();
+
+    if (g_helper->replica_num() != 0) {
+        LOGINFO("Enabling corrupt_push_data_checksum on follower {} to simulate CRC mismatch",
+                g_helper->replica_num());
+        g_helper->set_basic_flip("corrupt_push_data_checksum");
+    }
+
+    this->write_on_leader(10, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate data: follower must have recovered via fetch despite push checksum mismatch");
+    this->validate_data();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = false; });
+    HS_SETTINGS_FACTORY().save();
+    g_helper->sync_for_cleanup_start();
+    if (g_helper->replica_num() != 0) { g_helper->remove_flip("corrupt_push_data_checksum"); }
+}
+
+// Verifies that a FetchData checksum mismatch triggers an immediate re-fetch and the follower
+// recovers correctly.  Drops push-data to force the fetch path, then fires
+// corrupt_fetch_data_checksum once per entry so the first fetch response looks corrupted.
+// The immediate re-fetch (check_and_fetch_remote_data) must succeed and data must commit.
+TEST_F(RaftReplDevTest, Checksum_Mismatch_FetchData_Path) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = true; });
+    HS_SETTINGS_FACTORY().save();
+
+    if (g_helper->replica_num() != 0) {
+        LOGINFO("Follower {}: dropping push-data and injecting one-shot fetch checksum corruption",
+                g_helper->replica_num());
+        g_helper->set_basic_flip("drop_push_data_request");
+        // Fire once: first fetch response is checksum-corrupted; the immediate re-fetch succeeds.
+        g_helper->set_basic_flip("corrupt_fetch_data_checksum", 1, 100);
+    }
+
+    this->write_on_leader(10, true /* wait_for_commit */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate data: follower must have recovered via re-fetch after fetch checksum mismatch");
+    this->validate_data();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.data_checksum_enabled = false; });
+    HS_SETTINGS_FACTORY().save();
+    g_helper->sync_for_cleanup_start();
+    if (g_helper->replica_num() != 0) {
+        g_helper->remove_flip("drop_push_data_request");
+        g_helper->remove_flip("corrupt_fetch_data_checksum");
+    }
+}
 #endif
 
+#ifdef _PRERELEASE
 TEST_F(RaftReplDevTest, Write_With_Diabled_Leader_Push_Data) {
     g_helper->set_basic_flip("disable_leader_push_data", std::numeric_limits< int >::max(), 100);
     LOGINFO("Homestore replica={} setup completed, all the push_data from leader are disabled",

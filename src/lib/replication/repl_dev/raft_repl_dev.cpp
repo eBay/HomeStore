@@ -1194,6 +1194,13 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         rpc_data->send_response();
         return;
     }
+    // user_header and user_key are optional FlatBuffer fields; guard against null even though
+    // a well-formed sender always sets them — the Verifier above only checks structural integrity.
+    if (!push_req->user_header() || !push_req->user_key()) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: PushData missing user_header or user_key, ignoring");
+        rpc_data->send_response();
+        return;
+    }
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
     repl_key rkey{.server_id = push_req->issuer_replica_id(),
@@ -1206,7 +1213,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
 
     if (push_req->checksum() != 0) {
         auto const data_ptr = r_cast< const unsigned char* >(incoming_buf.cbytes() + fb_size);
-        auto const computed = crc32_ieee(init_crc32, data_ptr, push_req->data_size());
+        auto computed = crc32_ieee(init_crc32, data_ptr, push_req->data_size());
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("corrupt_push_data_checksum")) { computed ^= 0xdeadbeef; }
+#endif
         if (computed != push_req->checksum()) {
             COUNTER_INCREMENT(m_metrics, push_data_checksum_mismatch_cnt, 1);
             RD_LOGE(rkey.traceID,
@@ -1668,7 +1678,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             // data_checksum_enabled is true.  When disabled, send raw block data (pre-checksum wire
             // format) so old receivers are never surprised by an unexpected header during rolling
             // upgrades.  Receivers use try-and-fallback to detect the FlatBuffer transparently.
-            uint8_t* hdr_buf = nullptr;
+            std::unique_ptr< uint8_t[] > hdr_buf;
             uint32_t hdr_size = 0;
 
             if (HS_DYNAMIC_CONFIG(consensus.data_checksum_enabled)) {
@@ -1693,21 +1703,23 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
                 // Heap-copy the FlatBuffer so it outlives resp_builder until the send completion callback.
                 hdr_size = resp_builder.GetSize();
-                hdr_buf = new uint8_t[hdr_size];
-                std::memcpy(hdr_buf, resp_builder.GetBufferPointer(), hdr_size);
+                hdr_buf = std::make_unique< uint8_t[] >(hdr_size);
+                std::memcpy(hdr_buf.get(), resp_builder.GetBufferPointer(), hdr_size);
             }
 
             // now prepare the io_blob_list to response back to requester;
             nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
-            if (hdr_buf) { pkts.emplace_back(sisl::io_blob{hdr_buf, hdr_size, false}); }
+            if (hdr_buf) { pkts.emplace_back(sisl::io_blob{hdr_buf.get(), hdr_size, false}); }
             for (auto const& sgs : sgs_vec) {
                 auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
             }
+            // All potential throws are past; release ownership of hdr_buf to the completion lambda.
+            auto* raw_hdr = hdr_buf.release();
 
             rpc_data->set_comp_cb(
-                [sgs_vec = std::move(sgs_vec), hdr_buf](boost::intrusive_ptr< sisl::GenericRpcData >&) {
-                    delete[] hdr_buf; // delete[] nullptr is a no-op when checksums are disabled
+                [sgs_vec = std::move(sgs_vec), raw_hdr](boost::intrusive_ptr< sisl::GenericRpcData >&) {
+                    delete[] raw_hdr; // delete[] nullptr is a no-op when checksums are disabled
                     for (auto const& sgs : sgs_vec) {
                         for (auto const& iov : sgs.iovs) {
                             iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
@@ -1758,6 +1770,10 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
                                 resp_entries->size(), rreqs.size());
                     }
                 }
+            } else {
+                RD_LOGD(NO_TRACE_ID,
+                        "Data Channel: FetchData response FlatBuffer verifier failed despite matching identifier, "
+                        "treating as legacy raw-block format");
             }
         }
     }
@@ -1781,7 +1797,10 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         }
 
         if (resp_entries && i < resp_entries->size() && (*resp_entries)[i]->checksum() != 0) {
-            auto const computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
+            auto computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
+#ifdef _PRERELEASE
+            if (iomgr_flip::instance()->test_flip("corrupt_fetch_data_checksum")) { computed ^= 0xdeadbeef; }
+#endif
             if (computed != (*resp_entries)[i]->checksum()) {
                 COUNTER_INCREMENT(m_metrics, fetch_data_checksum_mismatch_cnt, 1);
                 RD_LOGE(rreq->traceID(),
