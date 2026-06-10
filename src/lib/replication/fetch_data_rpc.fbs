@@ -19,6 +19,7 @@ table ResponseEntry {
     dsn : uint64;         // Data Sequence number
     raft_term : uint64;   // Raft term number
     data_size : uint32;   // Size of the data which is sent as separate non flatbuffer
+    checksum: uint32;     // CRC32 over the data for this entry; 0 when checksum is disabled
 }
 
 table FetchDataResponse {

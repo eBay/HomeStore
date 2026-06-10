@@ -324,6 +324,27 @@ table Consensus {
     // Log frequency for gc_repl_reqs messages (log every N times)
     // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
     gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
+
+    // Controls whether senders compute and attach a CRC32 checksum to pushdata/fetchdata payloads.
+    // The receiver always skips CRC verification when the checksum field is zero, so this flag only
+    // affects the send side.
+    //
+    // ROLLING UPGRADE SAFETY — two directions to consider:
+    //   Safe:    old sender  → new receiver.  Old nodes send raw block data with no FlatBuffer header;
+    //            new receivers detect the absence of the "FDRS" identifier and fall back to legacy
+    //            processing.  checksum=0 (FlatBuffer field default) causes CRC verification to be
+    //            skipped automatically.
+    //   UNSAFE:  new sender (data_checksum_enabled=true) → old receiver.  An old follower has no
+    //            try-and-fallback logic; it will treat the prepended FlatBuffer header bytes as raw
+    //            block data and write them to disk — SILENT DATA CORRUPTION with no error logged.
+    //
+    // DEPLOYMENT RULE: do NOT enable this flag via hotswap until every node in the cluster has been
+    // upgraded to a version that contains the try-and-fallback FetchData receiver.  Enable only
+    // after the rolling upgrade is complete.
+    //
+    // Not enabled by default: TCP already detects partial-transfer corruption; CRC is opt-in for
+    // environments requiring additional durability guarantees.
+    data_checksum_enabled: bool = false (hotswap);
 }
 
 table HomeStoreSettings {
