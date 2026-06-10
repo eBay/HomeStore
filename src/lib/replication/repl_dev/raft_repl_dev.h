@@ -71,8 +71,10 @@ public:
         REGISTER_COUNTER(read_err_cnt, "total read error count", "read_err_cnt", {"op", "read"});
         REGISTER_COUNTER(write_err_cnt, "total write error count", "write_err_cnt", {"op", "write"});
         REGISTER_COUNTER(fetch_err_cnt, "total fetch data error count", "fetch_err_cnt", {"op", "fetch"});
-        REGISTER_COUNTER(data_checksum_mismatch_cnt, "CRC32 mismatches on push/fetch data channels",
-                         "data_checksum_mismatch_cnt", {"op", "checksum"});
+        REGISTER_COUNTER(push_data_checksum_mismatch_cnt, "CRC32 mismatches on push data channel",
+                         "push_data_checksum_mismatch_cnt", {"op", "checksum_push"});
+        REGISTER_COUNTER(fetch_data_checksum_mismatch_cnt, "CRC32 mismatches on fetch data channel",
+                         "fetch_data_checksum_mismatch_cnt", {"op", "checksum_fetch"});
 
         REGISTER_COUNTER(fetch_rreq_cnt, "total fetch data count", "fetch_data_req_cnt", {"op", "fetch"});
         REGISTER_COUNTER(fetch_total_blk_size, "total fetch data blocks size", "fetch_total_blk_size", {"op", "fetch"});

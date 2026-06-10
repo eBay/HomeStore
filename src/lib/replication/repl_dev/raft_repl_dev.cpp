@@ -27,6 +27,14 @@
 #include <boost/uuid/string_generator.hpp>
 
 namespace homestore {
+
+// 4-byte FlatBuffer file identifier embedded by new senders in every FetchDataResponse buffer.
+// Not declared in fetch_data_rpc.fbs because FetchDataResponse is a nested table, not the schema
+// root_type.  The identifier is set programmatically on the send side and checked via
+// BufferHasIdentifier on the receive side; Verifier is given nullptr to skip the schema-level
+// identifier check (which would require FetchDataResponse to be the root_type).
+static constexpr char kFetchDataRespIdentifier[flatbuffers::kFileIdentifierLength + 1] = "FDRS";
+
 std::atomic< uint64_t > RaftReplDev::s_next_group_ordinal{1};
 
 RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >&& rd_sb, bool load_existing) :
@@ -1157,10 +1165,21 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         rpc_data->send_response();
         return;
     }
+    if (incoming_buf.size() < sizeof(flatbuffers::uoffset_t)) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: PushData received buffer too small ({}), ignoring", incoming_buf.size());
+        rpc_data->send_response();
+        return;
+    }
 
     auto const fb_size = static_cast< uint64_t >(
                              flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes())) +
                          sizeof(flatbuffers::uoffset_t);
+    if (fb_size > static_cast< uint64_t >(incoming_buf.size())) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: PushData received with oversized FlatBuffer header ({}), ignoring",
+                fb_size);
+        rpc_data->send_response();
+        return;
+    }
     flatbuffers::Verifier push_verifier{incoming_buf.cbytes(), static_cast< size_t >(fb_size)};
     if (!push_verifier.VerifySizePrefixedBuffer< PushDataRequest >(nullptr)) {
         RD_LOGW(NO_TRACE_ID, "Data Channel: PushData FlatBuffer verification failed, ignoring");
@@ -1189,7 +1208,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         auto const data_ptr = r_cast< const unsigned char* >(incoming_buf.cbytes() + fb_size);
         auto const computed = crc32_ieee(init_crc32, data_ptr, push_req->data_size());
         if (computed != push_req->checksum()) {
-            COUNTER_INCREMENT(m_metrics, data_checksum_mismatch_cnt, 1);
+            COUNTER_INCREMENT(m_metrics, push_data_checksum_mismatch_cnt, 1);
             RD_LOGE(rkey.traceID,
                     "Data Channel: PushData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}, dropping "
                     "(follower will fetch from remote on next Raft retry)",
@@ -1550,7 +1569,27 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
 void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
     if (!incoming_buf.cbytes()) {
-        RD_LOGW(NO_TRACE_ID, "Data Channel: PushData received with empty buffer, ignoring this call");
+        RD_LOGW(NO_TRACE_ID, "Data Channel: FetchData received with empty buffer, ignoring this call");
+        rpc_data->send_response();
+        return;
+    }
+    if (incoming_buf.size() < sizeof(flatbuffers::uoffset_t)) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: FetchData received buffer too small ({}), ignoring", incoming_buf.size());
+        rpc_data->send_response();
+        return;
+    }
+    auto const fetch_fb_size = static_cast< uint64_t >(
+                                   flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes())) +
+                               sizeof(flatbuffers::uoffset_t);
+    if (fetch_fb_size > static_cast< uint64_t >(incoming_buf.size())) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: FetchData received with oversized FlatBuffer header ({}), ignoring",
+                fetch_fb_size);
+        rpc_data->send_response();
+        return;
+    }
+    flatbuffers::Verifier fetch_verifier{incoming_buf.cbytes(), static_cast< size_t >(fetch_fb_size)};
+    if (!fetch_verifier.VerifySizePrefixedBuffer< FetchData >(nullptr)) {
+        RD_LOGW(NO_TRACE_ID, "Data Channel: FetchData FlatBuffer verification failed, ignoring");
         rpc_data->send_response();
         return;
     }
@@ -1649,7 +1688,8 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                                             static_cast< uint32_t >(sgs.size), checksum));
                 }
                 resp_builder.FinishSizePrefixed(
-                    CreateFetchDataResponse(resp_builder, server_id(), resp_builder.CreateVector(resp_entries)));
+                    CreateFetchDataResponse(resp_builder, server_id(), resp_builder.CreateVector(resp_entries)),
+                    kFetchDataRespIdentifier);
 
                 // Heap-copy the FlatBuffer so it outlives resp_builder until the send completion callback.
                 hdr_size = resp_builder.GetSize();
@@ -1690,16 +1730,16 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         return;
     }
 
-    // Try-and-fallback: attempt to parse a size-prefixed FetchDataResponse FlatBuffer at the start
-    // of the blob.  New senders (data_checksum_enabled=true) prepend this header; old senders emit
-    // raw block data with no prefix.  In HomeObject (the layer above HomeStore), raw block data
-    // begins with DataHeader magic (0x21fdffdba8d68fc6), whose first 4 bytes as a little-endian
-    // uoffset_t read as ~2.8 GB — far larger than any real response — reliably failing the
-    // fb_hdr_size <= total_size check below.  flatbuffers::Verifier provides a further structural
-    // guard for any other raw data whose size prefix happens to look plausible.
+    // New senders embed a "FDRS" file identifier at bytes 8-11 of the size-prefixed FlatBuffer.
+    // Old senders emit raw block data with no prefix.  A collision (raw data containing "FDRS" at
+    // exactly bytes 8-11) is astronomically unlikely and is ruled out by a further structural check
+    // via flatbuffers::Verifier even if a collision does occur.
     const flatbuffers::Vector< flatbuffers::Offset< ResponseEntry > >* resp_entries = nullptr;
 
-    if (total_size >= sizeof(flatbuffers::uoffset_t)) {
+    static constexpr size_t kMinFetchRespHdrSize =
+        2 * sizeof(flatbuffers::uoffset_t) + flatbuffers::kFileIdentifierLength;
+    if (total_size >= kMinFetchRespHdrSize &&
+        flatbuffers::BufferHasIdentifier(raw_data + sizeof(flatbuffers::uoffset_t), kFetchDataRespIdentifier)) {
         auto const fb_hdr_size = static_cast< uint64_t >(
                                      flatbuffers::ReadScalar< flatbuffers::uoffset_t >(raw_data)) +
                                  sizeof(flatbuffers::uoffset_t);
@@ -1743,7 +1783,7 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
         if (resp_entries && i < resp_entries->size() && (*resp_entries)[i]->checksum() != 0) {
             auto const computed = crc32_ieee(init_crc32, r_cast< const unsigned char* >(raw_data), data_size);
             if (computed != (*resp_entries)[i]->checksum()) {
-                COUNTER_INCREMENT(m_metrics, data_checksum_mismatch_cnt, 1);
+                COUNTER_INCREMENT(m_metrics, fetch_data_checksum_mismatch_cnt, 1);
                 RD_LOGE(rreq->traceID(),
                         "Data Channel: FetchData checksum mismatch dsn={}, expected={:#010x}, computed={:#010x}; "
                         "re-fetching immediately.",
