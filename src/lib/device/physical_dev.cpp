@@ -66,8 +66,11 @@ first_block PhysicalDev::read_first_block(const std::string& devname, int oflags
 
     first_block ret;
     auto buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk, 512);
-    iodev->drive_interface()->sync_read(iodev.get(), r_cast< char* >(buf), first_block::s_io_fb_size,
-                                        hs_super_blk::first_block_offset());
+    auto err = iodev->drive_interface()->sync_read(iodev.get(), r_cast< char* >(buf), first_block::s_io_fb_size,
+                                                   hs_super_blk::first_block_offset());
+
+    HS_REL_ASSERT(!err, "IO error reading first block from device={}, error={}, homestore will go down", devname,
+                  err.message());
 
     ret = *(r_cast< first_block* >(buf));
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
@@ -114,20 +117,25 @@ PhysicalDev::PhysicalDev(const dev_info& dinfo, int oflags, const pdev_info_head
         m_streams.emplace_back(i);
     }
     m_super_blk_in_footer = m_pdev_info.mirror_super_block;
+
+    // Validate footer superblock consistency if mirroring is enabled
+    sanity_check();
 }
 
 PhysicalDev::~PhysicalDev() { close_device(); }
 
 void PhysicalDev::write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset) {
     auto err_c = m_drive_iface->sync_write(m_iodev.get(), c_charptr_cast(buf), sb_size, offset);
+    HS_REL_ASSERT(!err_c, "Super block write to header failed on dev={} at size={} offset={}, homestore will go down",
+                  m_devname, sb_size, offset);
 
     if (m_super_blk_in_footer) {
         auto t_offset = data_end_offset() + offset;
-        err_c = m_drive_iface->sync_write(m_iodev.get(), c_charptr_cast(buf), sb_size, t_offset);
+        auto footer_err_c = m_drive_iface->sync_write(m_iodev.get(), c_charptr_cast(buf), sb_size, t_offset);
+        HS_REL_ASSERT(!footer_err_c,
+                      "Super block write to footer failed on dev={} at size={} offset={}, homestore will go down",
+                      m_devname, sb_size, t_offset);
     }
-
-    HS_REL_ASSERT(!err_c, "Super block write failed on dev={} at size={} offset={}, homestore will go down", m_devname,
-                  sb_size, offset);
 }
 
 std::error_code PhysicalDev::read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset) {
@@ -135,6 +143,49 @@ std::error_code PhysicalDev::read_super_block(uint8_t* buf, uint32_t sb_size, ui
 }
 
 void PhysicalDev::close_device() { close_and_uncache_dev(m_devname, m_iodev); }
+
+void PhysicalDev::sanity_check() {
+    if (!m_super_blk_in_footer) { return; }
+
+    HS_LOG(INFO, device, "Validating footer superblock consistency on device={}", m_devname);
+
+    auto header_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
+                                            m_pdev_info.dev_attr.align_size);
+    auto header_err = read_super_block(header_buf, first_block::s_io_fb_size, hs_super_blk::first_block_offset());
+    HS_REL_ASSERT(!header_err,
+                  "IO error reading header first block on device={}, error={}, homestore will go down", m_devname,
+                  header_err.message());
+
+    auto footer_offset = data_end_offset() + hs_super_blk::first_block_offset();
+    auto footer_buf = hs_utils::iobuf_alloc(first_block::s_io_fb_size, sisl::buftag::superblk,
+                                            m_pdev_info.dev_attr.align_size);
+    auto footer_err = read_super_block(footer_buf, first_block::s_io_fb_size, footer_offset);
+    HS_REL_ASSERT(!footer_err,
+                  "IO error reading footer first block on device={}, offset={}, error={}, homestore will go down",
+                  m_devname, footer_offset, footer_err.message());
+
+    auto header_blk = r_cast< first_block* >(header_buf);
+    auto footer_blk = r_cast< first_block* >(footer_buf);
+
+    if (header_blk->is_valid()) {
+        HS_REL_ASSERT(std::memcmp(header_blk, footer_blk, first_block::s_atomic_fb_size) == 0,
+                      "Footer mismatch with header on device={}, header=[{}], footer=[{}], corruption detected, "
+                      "homestore will go down",
+                      m_devname, header_blk->to_string(), footer_blk->to_string());
+        HS_LOG(INFO, device, "Footer superblock validated successfully on device={}", m_devname);
+    } else if (footer_blk->is_valid() && footer_blk->this_pdev_hdr.system_uuid == m_pdev_info.system_uuid) {
+        HS_REL_ASSERT(false,
+                      "Header invalid but footer has matching system_uuid on device={}, indicates header superblock "
+                      "corruption, homestore will go down",
+                      m_devname);
+    } else {
+        HS_LOG(INFO, device,
+               "Header invalid and footer has no matching system_uuid on device={}, treating as first boot", m_devname);
+    }
+
+    hs_utils::iobuf_free(header_buf, sisl::buftag::superblk);
+    hs_utils::iobuf_free(footer_buf, sisl::buftag::superblk);
+}
 
 folly::Future< std::error_code > PhysicalDev::async_write(const char* data, uint32_t size, uint64_t offset,
                                                           bool part_of_batch) {

@@ -154,6 +154,7 @@ public:
 
     std::error_code read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
     void write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset);
+    void sanity_check();
     void close_device();
 
     //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////
@@ -222,6 +223,7 @@ public:
     uint32_t optimal_page_size() const { return m_pdev_info.dev_attr.phys_page_size; }
     uint32_t align_size() const { return m_pdev_info.dev_attr.align_size; }
     uint32_t atomic_page_size() const { return m_pdev_info.dev_attr.atomic_phys_page_size; }
+    bool has_footer_mirror() const { return m_super_blk_in_footer; }
 
     uint64_t data_start_offset() const { return m_pdev_info.data_offset; }
     uint64_t data_end_offset() const {

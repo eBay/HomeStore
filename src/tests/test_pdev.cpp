@@ -25,8 +25,10 @@
 
 #include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/drive_interface.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
+#include <spdlog/sinks/ostream_sink.h>
 
 #include "device/chunk.h"
 
@@ -262,11 +264,191 @@ TEST_F(PDevTest, RandomChunkOpsWithRestart) {
             num_removed, available_size);
 }
 
+// Test fixture for superblock error handling tests
+class SuperblockErrorTest : public ::testing::Test {
+protected:
+    std::string m_test_file;
+    uint64_t m_dev_size{100 * 1024 * 1024}; // 100MB
+
+    void SetUp() override {
+        m_test_file = "/tmp/test_superblock_error";
+        init_file(m_test_file, m_dev_size);
+
+        auto const is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
+    }
+
+    void TearDown() override {
+        // Reset any drive type emulation so it doesn't bleed into subsequent tests.
+        iomgr::DriveInterface::emulate_drive_type(m_test_file, iomgr::drive_type::file_on_nvme);
+        iomanager.stop();
+        if (std::filesystem::exists(m_test_file)) { std::filesystem::remove(m_test_file); }
+    }
+
+    // Helper to corrupt a file at specific offset
+    void corrupt_file_at_offset(uint64_t offset, uint64_t size) {
+        std::fstream file(m_test_file, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(file.is_open());
+        file.seekp(offset);
+        std::vector<uint8_t> garbage(size, 0xAA); // Fill with garbage
+        file.write(reinterpret_cast<char*>(garbage.data()), size);
+        file.close();
+    }
+
+    // Helper to truncate file to simulate IO errors
+    void truncate_file(uint64_t new_size) {
+        std::filesystem::resize_file(m_test_file, new_size);
+    }
+};
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockIOError) {
+    LOGINFO("Test: read_first_block should crash on IO error (short-read returns ERANGE)");
+
+    // Truncate to less than s_io_fb_size so pread() returns fewer bytes than requested.
+    // iomgr's sync_read retries until max_resubmit_cnt, then returns ERANGE.
+    truncate_file(512);
+
+    ASSERT_DEATH({ PhysicalDev::read_first_block(m_test_file, O_RDWR); }, "IO error reading first block");
+}
+
+TEST_F(SuperblockErrorTest, ReadFirstBlockCorruptedData) {
+    LOGINFO("Test: read_first_block should return invalid first_block on corrupted data");
+
+    corrupt_file_at_offset(0, 4096);
+
+    ASSERT_NO_THROW({
+        auto fblk = PhysicalDev::read_first_block(m_test_file, O_RDWR);
+        ASSERT_FALSE(fblk.is_valid()) << "Corrupted first block should be invalid";
+        LOGINFO("Successfully read corrupted first block, is_valid={}", fblk.is_valid());
+    });
+}
+
+// Emulate the test file as an HDD so that DeviceManager sets mirror_super_block=true.
+// This exercises the footer write/validate code paths on any filesystem.
+static void emulate_as_hdd(const std::string& path) {
+    iomgr::DriveInterface::emulate_drive_type(path, iomgr::drive_type::file_on_hdd);
+}
+static void emulate_as_nvme(const std::string& path) {
+    iomgr::DriveInterface::emulate_drive_type(path, iomgr::drive_type::file_on_nvme);
+}
+
+TEST_F(SuperblockErrorTest, FooterValidationHDDDevice) {
+    LOGINFO("Test: Footer validation should detect header/footer mismatch");
+
+    // Force HDD detection so DeviceManager enables mirror_super_block.
+    emulate_as_hdd(m_test_file);
+
+    std::vector< dev_info > dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+
+    auto dmgr = std::make_unique< DeviceManager >(
+        dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Data);
+    ASSERT_GT(pdevs.size(), 0u);
+    ASSERT_TRUE(pdevs[0]->has_footer_mirror()) << "emulate_as_hdd should have enabled footer mirroring";
+
+    // data_end_offset() = devsize - data_start_offset; footer superblock starts there.
+    // Use the actual aligned data_start_offset from the formatted pdev rather than
+    // recomputing it (populate_pdev_info rounds up to phys_page_size).
+    auto footer_offset = pdevs[0]->data_end_offset();
+    LOGINFO("Corrupting footer at offset={}", footer_offset);
+
+    dmgr.reset();
+    iomanager.stop();
+
+    corrupt_file_at_offset(footer_offset, 512);
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_DEATH(
+        {
+            emulate_as_hdd(dev_infos[0].dev_name);
+            auto dmgr2 = std::make_unique< DeviceManager >(
+                dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+            dmgr2->load_devices();
+        },
+        "Footer mismatch with header");
+}
+
+TEST_F(SuperblockErrorTest, NonHDDDeviceSkipsFooterValidation) {
+    LOGINFO("Test: Non-HDD devices should skip footer validation");
+
+    // Explicitly reset to nvme so HDD emulation from a prior test doesn't leak.
+    emulate_as_nvme(m_test_file);
+
+    std::vector< dev_info > dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Fast);
+
+    auto dmgr = std::make_unique< DeviceManager >(
+        dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    auto pdevs = dmgr->get_pdevs_by_dev_type(HSDevType::Fast);
+    ASSERT_GT(pdevs.size(), 0u);
+    ASSERT_FALSE(pdevs[0]->has_footer_mirror()) << "NVMe/SSD should not have footer mirroring";
+
+    dmgr.reset();
+    iomanager.stop();
+
+    // Corrupt the area that would be the footer on an HDD; should be ignored.
+    auto data_offset = hs_super_blk::first_block_offset() + hs_super_blk::total_size(dev_infos[0]);
+    corrupt_file_at_offset(m_dev_size - data_offset, 4096);
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        auto dmgr2 = std::make_unique< DeviceManager >(
+            dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+        dmgr2->load_devices();
+        LOGINFO("Successfully loaded device without footer validation");
+    });
+}
+
+TEST_F(SuperblockErrorTest, ValidFooterMatchesHeader) {
+    LOGINFO("Test: Valid footer should match header on HDD device");
+
+    emulate_as_hdd(m_test_file);
+
+    std::vector< dev_info > dev_infos;
+    dev_infos.emplace_back(std::filesystem::canonical(m_test_file).string(), HSDevType::Data);
+
+    auto dmgr = std::make_unique< DeviceManager >(
+        dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+    ASSERT_TRUE(dmgr->is_first_time_boot());
+    dmgr->format_devices();
+    dmgr->commit_formatting();
+
+    dmgr.reset();
+    iomanager.stop();
+
+    ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = false});
+    ASSERT_NO_THROW({
+        emulate_as_hdd(dev_infos[0].dev_name);
+        auto dmgr2 = std::make_unique< DeviceManager >(
+            dev_infos, [](const vdev_info&, bool) -> shared< VirtualDev > { return nullptr; });
+        dmgr2->load_devices();
+        LOGINFO("Successfully validated matching header and footer");
+    });
+}
+
 int main(int argc, char* argv[]) {
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_pdev, iomgr);
+    // InitGoogleTest must run first so gtest strips --gtest_internal_run_death_test
+    // from argv before SISL_OPTIONS_LOAD sees it (cxxopts throws on unknown args).
     ::testing::InitGoogleTest(&argc, argv);
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_pdev, iomgr);
     sisl::logging::SetLogger("test_pdev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
+    // HS_REL_ASSERT logs via sisl to stdout; death tests capture stderr.
+    // Add a stderr sink so gtest can match the assertion message regex.
+    // HS_REL_ASSERT logs via sisl to stdout; death tests capture stderr.
+    // Add an ostream stderr sink so gtest can match the assertion message regex.
+    sisl::logging::GetLogger()->sinks().push_back(
+        std::make_shared< spdlog::sinks::ostream_sink_mt >(std::cerr));
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
 
     return RUN_ALL_TESTS();
 }
