@@ -170,11 +170,13 @@ public:
     /// @brief Commits the blkid in on-disk version of the blk allocator. The blkid is assumed to be allocated using
     /// alloc_blk or alloc_contiguous_blk method earlier (either after reboot or prior to reboot). It is not required
     /// to call this method if alloc_blk is called and system is not restarted. Typical use case of this method is
-    /// during recovery where alloc_blk is called but before it was checkpointed, it crashed and we are trying to
-    /// recover Please note that even calling this method is not guaranteed to persisted until checkpoint is taken.
+    /// during recovery where alloc_blk is called, but before it was checkpointed, it crashed, and we are trying to
+    /// recover. Please note that even calling this method is not guaranteed to be persisted until checkpoint is taken.
     /// @param blkid BlkId to commit explicitly.
+    /// @param recommit If true, skip the allocation check and commit unconditionally.
+    ///        See BlkDataService::commit_blk for details.
     /// @return Allocation Status
-    virtual BlkAllocStatus commit_blk(BlkId const& blkid);
+    virtual BlkAllocStatus commit_blk(BlkId const& blkid, bool recommit = false);
 
     virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr, bool free_now = false);
 

@@ -174,7 +174,7 @@ bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
     return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid, true /* lock */);
 }
 
-BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
+BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid, bool recommit) {
     Chunk* chunk = m_dmgr.get_chunk_mutable(blkid.chunk_num());
     // if we start with missing drive, we will have no chunk for this blkid;
     if (!chunk) {
@@ -188,12 +188,14 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
     }
 
     auto const recovering = homestore::hs()->is_initializing();
-    if (!recovering) {
+    if (recovering || recommit) {
+        // Also advance the in-memory watermark so the allocator considers this blk allocated;
+        // required both during normal recovery and on an explicit recommit by the caller.
+        chunk->blk_allocator_mutable()->reserve_on_cache(blkid);
+    } else {
         // in non-recovery mode, if a blk is committed without allocating, it will cause data corruption
         HS_REL_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
                       blkid.to_string());
-    } else {
-        chunk->blk_allocator_mutable()->reserve_on_cache(blkid);
     }
     return chunk->blk_allocator_mutable()->reserve_on_disk(blkid);
 }

@@ -251,19 +251,19 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
     return ret;
 }
 
-BlkAllocStatus BlkDataService::commit_blk(MultiBlkId const& blkid) {
+BlkAllocStatus BlkDataService::commit_blk(MultiBlkId const& blkid, bool recommit) {
     if (is_stopping()) return BlkAllocStatus::FAILED;
     incr_pending_request_num();
 
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        auto ret = m_vdev->commit_blk(blkid);
+        auto ret = m_vdev->commit_blk(blkid, recommit);
         decr_pending_request_num();
         return ret;
     }
     auto it = blkid.iterate();
     while (auto const bid = it.next()) {
-        auto alloc_status = m_vdev->commit_blk(*bid);
+        auto alloc_status = m_vdev->commit_blk(*bid, recommit);
         if (alloc_status != BlkAllocStatus::SUCCESS) {
             decr_pending_request_num();
             return alloc_status;
