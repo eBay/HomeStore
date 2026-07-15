@@ -65,6 +65,7 @@ jobs:
 
   HomestoreDeps:
     needs: [IOMgrDeps, NuraftMesgDeps]
+    if: ${{ !cancelled() && (needs.IOMgrDeps.result == 'success' || needs.IOMgrDeps.result == 'skipped') && (needs.NuraftMesgDeps.result == 'success' || needs.NuraftMesgDeps.result == 'skipped') }}
     uses: ./.github/workflows/build_dependencies.yml
     with:
       branch: ${{ github.ref }}
