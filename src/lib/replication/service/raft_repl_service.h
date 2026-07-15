@@ -134,7 +134,9 @@ class ReplSvcCPContext : public CPContext {
     std::map< repl_dev*, cshared< ReplDevCPContext > > m_cp_ctx_map;
 
 public:
+    // clang-format off
     ReplSvcCPContext(CP* cp) : CPContext(cp) {};
+    // clang-format on
     virtual ~ReplSvcCPContext() = default;
     int add_repl_dev_ctx(repl_dev* dev, cshared< ReplDevCPContext > dev_ctx);
     cshared< ReplDevCPContext > get_repl_dev_ctx(repl_dev* dev);
