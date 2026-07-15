@@ -187,9 +187,14 @@ public:
      * @brief Commits the block with the given multi_blk_id.
      *
      * @param bid The multi_blk_id of the block to commit.
+     * @param recommit If true, skip the allocation check and commit the blk unconditionally.
+     *        Use this when re-committing a blk that is known to be live but whose allocator state
+     *        may have been lost (e.g. after a crash where the blk exists in the index but the
+     *        allocator watermarks were not yet persisted). Safe to pass when the allocator already
+     *        tracks the blk, as the underlying operations are monotonically advancing.
      * @return success, or the error_condition describing the failure.
      */
-    status commit_blk(multi_blk_id const& bid);
+    status commit_blk(multi_blk_id const& bid, bool recommit = false);
 
     /**
      * @brief Allocates a contiguous block of disk space of the given size. Use this when the consumer expects the blks
