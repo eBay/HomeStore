@@ -80,7 +80,10 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< repl_application >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
+
+// clang-format off
+SoloReplService::~SoloReplService(){};
+// clang-format on
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
