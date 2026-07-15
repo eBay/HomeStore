@@ -224,7 +224,7 @@ struct BlkAllocatorTest {
     }
 
     [[nodiscard]] blk_id pick_rand_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
-                                               const bool track_group_block) {
+                                                const bool track_group_block) {
         return m_track_slabs ? pick_rand_slab_blks_to_free(pref_nblks, track_group_block)
                              : pick_rand_pool_blks_to_free(pref_nblks, round_nblks, track_group_block);
     }
@@ -325,7 +325,7 @@ struct BlkAllocatorTest {
     }
 
     [[nodiscard]] blk_id pick_rand_pool_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
-                                                    const bool track_block_group) {
+                                                     const bool track_block_group) {
         uint32_t start_blk_num{0};
         blk_count_t n_blks{0};
 
@@ -517,7 +517,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     }
 
     [[nodiscard]] blk_id free_random_alloced_sized_blk(const blk_count_t reqd_size, const bool round_nblks,
-                                                      const bool track_block_group) {
+                                                       const bool track_block_group) {
         const blk_id bid{pick_rand_blks_to_free(reqd_size, round_nblks, track_block_group)};
         m_allocator->free(bid);
         return bid;

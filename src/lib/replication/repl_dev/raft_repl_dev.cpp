@@ -189,8 +189,8 @@ RaftReplDev::data_request_bidirectional(repl_dest_t const& dest, std::string con
 
 // All the steps in the implementation should be idempotent and retryable.
 async_status RaftReplDev::start_replace_member(std::string& task_id, const replica_member_info& member_out,
-                                                    const replica_member_info& member_in, uint32_t commit_quorum,
-                                                    uint64_t trace_id) {
+                                               const replica_member_info& member_in, uint32_t commit_quorum,
+                                               uint64_t trace_id) {
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
         return make_async_error<>(ReplServiceError::STOPPING);
@@ -359,8 +359,8 @@ async_status RaftReplDev::start_replace_member(std::string& task_id, const repli
 }
 
 async_status RaftReplDev::complete_replace_member(std::string& task_id, const replica_member_info& member_out,
-                                                       const replica_member_info& member_in, uint32_t commit_quorum,
-                                                       uint64_t trace_id) {
+                                                  const replica_member_info& member_in, uint32_t commit_quorum,
+                                                  uint64_t trace_id) {
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
         return make_async_error<>(ReplServiceError::STOPPING);
@@ -533,7 +533,7 @@ ReplServiceError RaftReplDev::do_add_member(const replica_member_info& member, u
 }
 
 async_status RaftReplDev::remove_member(const replica_id_t& member, uint32_t commit_quorum, bool wait_and_verify,
-                                             uint64_t trace_id) {
+                                        uint64_t trace_id) {
     RD_LOGI(trace_id, "Remove member, member={}", boost::uuids::to_string(member));
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
@@ -625,7 +625,7 @@ ReplServiceError RaftReplDev::do_remove_member(const replica_id_t& member, bool 
 }
 
 async_status RaftReplDev::flip_learner_flag(const replica_member_info& member, bool target, uint32_t commit_quorum,
-                                                 bool wait_and_verify, uint64_t trace_id) {
+                                            bool wait_and_verify, uint64_t trace_id) {
     RD_LOGI(trace_id, "Flip learner flag to {}, member={}", target, boost::uuids::to_string(member.id));
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
@@ -696,7 +696,7 @@ ReplServiceError RaftReplDev::do_flip_learner(const replica_member_info& member,
 }
 
 async_status RaftReplDev::clean_replace_member_task(const std::string& task_id, uint32_t commit_quorum,
-                                                         uint64_t trace_id) {
+                                                    uint64_t trace_id) {
     RD_LOGI(trace_id, "Clean replace member task, task={}, commit_quorum={}", task_id, commit_quorum);
     if (is_stopping()) {
         RD_LOGI(trace_id, "repl dev is being shutdown!");
@@ -1993,8 +1993,8 @@ repl_req_ptr_t RaftReplDev::repl_key_to_req(repl_key const& rkey) const {
 
 // async_read and async_free_blks graceful shutdown will be handled by data_service.
 
-sisl::async::task< iomgr::io_result > RaftReplDev::async_read(multi_blk_id const& bid, sisl::sg_list& sgs, uint32_t size,
-                                                              io_batch* batch, trace_id_t tid) {
+sisl::async::task< iomgr::io_result > RaftReplDev::async_read(multi_blk_id const& bid, sisl::sg_list& sgs,
+                                                              uint32_t size, io_batch* batch, trace_id_t tid) {
     if (is_stopping()) {
         LOGINFO("repl dev is being shutdown!");
         co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));

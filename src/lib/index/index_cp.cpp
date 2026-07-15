@@ -383,7 +383,9 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< blk_id,
 
     uint32_t cur_idx = 0;
     IndexBufferPtr parent_buf{nullptr};
-    if (rec->has_inplace_parent) { parent_buf = rec_to_buf(rec, rec->is_parent_meta, rec->get_blk_id(cur_idx++), nullptr); }
+    if (rec->has_inplace_parent) {
+        parent_buf = rec_to_buf(rec, rec->is_parent_meta, rec->get_blk_id(cur_idx++), nullptr);
+    }
 
     IndexBufferPtr inplace_child_buf{nullptr};
     if (rec->has_inplace_child) {

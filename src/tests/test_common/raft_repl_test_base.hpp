@@ -355,7 +355,7 @@ public:
     void free_user_snp_ctx(void*& user_snp_ctx) override {}
 
     result< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size,
-                                                      cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
+                                                  cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = jheader->key_id};
         auto iter = inmem_db_.find(k);
@@ -854,13 +854,15 @@ public:
                                    ReplServiceError error = ReplServiceError::OK) {
         this->run_on_leader(db, [this, error, db, task_id]() {
             LOGINFO("clean replace member task, task_id={}", task_id);
-            auto result = detail::sync_get(
-                hs()->repl_service().clean_replace_member_task(db->device()->group_id(), task_id, 0));
+            auto result =
+                detail::sync_get(hs()->repl_service().clean_replace_member_task(db->device()->group_id(), task_id, 0));
             if (error == ReplServiceError::OK) {
-                ASSERT_EQ(result.has_value(), true) << "Error in clean_replace_member_task, err=" << result.error().message();
+                ASSERT_EQ(result.has_value(), true)
+                    << "Error in clean_replace_member_task, err=" << result.error().message();
             } else {
                 ASSERT_EQ(result.has_value(), false);
-                ASSERT_EQ(result.error(), error) << "Error in clean_replace_member_task, err=" << result.error().message();
+                ASSERT_EQ(result.error(), error)
+                    << "Error in clean_replace_member_task, err=" << result.error().message();
             }
         });
     }

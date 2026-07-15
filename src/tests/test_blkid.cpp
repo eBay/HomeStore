@@ -76,7 +76,8 @@ TEST(BlkIdTest, MultiBlkIdTest) {
     ASSERT_EQ(mb1.chunk_num(), 1);
     ASSERT_EQ(mb1.is_multi(), true);
 
-    std::array< blk_id, 5 > abs{blk_id{20, 8, 1}, blk_id{30, 1, 1}, blk_id{60, 9, 1}, blk_id{80, 5, 1}, blk_id{90, 2, 1}};
+    std::array< blk_id, 5 > abs{blk_id{20, 8, 1}, blk_id{30, 1, 1}, blk_id{60, 9, 1}, blk_id{80, 5, 1},
+                                blk_id{90, 2, 1}};
     for (auto const& b : abs) {
         mb1.add(b);
     }

@@ -34,7 +34,7 @@ SISL_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "log_store", m_fq_name, , , msg, __VA_ARGS__)
 
 home_log_store::home_log_store(std::shared_ptr< LogDev > logdev, logstore_id_t id, bool append_mode,
-                           logstore_seq_num_t start_lsn) :
+                               logstore_seq_num_t start_lsn) :
         m_store_id{id},
         m_logdev{logdev},
         m_records{"HomeLogStoreRecords", start_lsn - 1},
@@ -67,7 +67,7 @@ logstore_seq_num_t home_log_store::write_async(logstore_req* req, const log_req_
 }
 
 logstore_seq_num_t home_log_store::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
-                                             const log_write_comp_cb_t& cb) {
+                                               const log_write_comp_cb_t& cb) {
     if (is_stopping()) return 0;
     incr_pending_request_num();
     // Form an internal request and issue the write
@@ -186,7 +186,7 @@ void home_log_store::on_write_completion(logstore_req* req, const logdev_key& ld
 }
 
 void home_log_store::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld_key, const logdev_key& flush_ld_key,
-                                log_buffer buf) {
+                                  log_buffer buf) {
     if (seq_num < m_start_lsn) { return; }
 
     logdev_key trunc_key;

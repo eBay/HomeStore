@@ -25,9 +25,7 @@ BitmapBlkAllocator::BitmapBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh,
     if (is_persistent()) {
         meta_service().register_handler(
             get_name(),
-            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                on_meta_blk_found(mblk, std::move(buf), size);
-            },
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(mblk, std::move(buf), size); },
             nullptr);
     }
 

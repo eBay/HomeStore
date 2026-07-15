@@ -41,7 +41,7 @@ blk_data_service::~blk_data_service() = default;
 
 // first-time boot path
 void blk_data_service::create_vdev(uint64_t size, HSDevType devType, uint32_t blk_size, blk_allocator_type_t alloc_type,
-                                 chunk_selector_type_t chunk_sel_type, uint32_t num_chunks, uint32_t chunk_size) {
+                                   chunk_selector_type_t chunk_sel_type, uint32_t num_chunks, uint32_t chunk_size) {
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::DATA_VDEV;
 
@@ -81,7 +81,7 @@ static sisl::async::task< iomgr::io_result > collect_all(std::vector< sisl::asyn
 // outlives the suspend at the device read -- a captured-by-reference coroutine lambda would dangle once the
 // enclosing method returned the (lazy) task.
 sisl::async::task< iomgr::io_result > blk_data_service::do_read_blk(blk_id bid, uint8_t* buf, uint32_t size,
-                                                                  bool part_of_batch) {
+                                                                    bool part_of_batch) {
     m_blk_read_tracker->insert(bid);
     auto const r = co_await m_vdev->async_read(r_cast< char* >(buf), size, bid, part_of_batch);
     m_blk_read_tracker->remove(bid);
@@ -89,15 +89,15 @@ sisl::async::task< iomgr::io_result > blk_data_service::do_read_blk(blk_id bid, 
 }
 
 sisl::async::task< iomgr::io_result > blk_data_service::do_readv_blk(blk_id bid, sisl::sg_iovs_t iovs, uint32_t size,
-                                                                   bool part_of_batch) {
+                                                                     bool part_of_batch) {
     m_blk_read_tracker->insert(bid);
     auto const r = co_await m_vdev->async_readv(iovs.data(), iovs.size(), size, bid, part_of_batch);
     m_blk_read_tracker->remove(bid);
     co_return r;
 }
 
-sisl::async::task< iomgr::io_result > blk_data_service::async_read(multi_blk_id const& blkid, uint8_t* buf, uint32_t size,
-                                                                 io_batch* batch) {
+sisl::async::task< iomgr::io_result > blk_data_service::async_read(multi_blk_id const& blkid, uint8_t* buf,
+                                                                   uint32_t size, io_batch* batch) {
     if (is_stopping()) co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
     bool const part_of_batch = (batch != nullptr);
@@ -118,7 +118,7 @@ sisl::async::task< iomgr::io_result > blk_data_service::async_read(multi_blk_id 
 }
 
 sisl::async::task< iomgr::io_result > blk_data_service::async_read(multi_blk_id const& blkid, sisl::sg_list& sgs,
-                                                                 uint32_t size, io_batch* batch) {
+                                                                   uint32_t size, io_batch* batch) {
     if (is_stopping()) co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
     bool const part_of_batch = (batch != nullptr);
@@ -139,8 +139,8 @@ sisl::async::task< iomgr::io_result > blk_data_service::async_read(multi_blk_id 
 }
 
 sisl::async::task< iomgr::io_result > blk_data_service::async_alloc_write(const sisl::sg_list& sgs,
-                                                                        const blk_alloc_hints& hints,
-                                                                        multi_blk_id& out_blkids, io_batch* batch) {
+                                                                          const blk_alloc_hints& hints,
+                                                                          multi_blk_id& out_blkids, io_batch* batch) {
     if (is_stopping()) co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
     auto blk_result = alloc_blks(sgs.size, hints);
@@ -157,7 +157,7 @@ sisl::async::task< iomgr::io_result > blk_data_service::async_alloc_write(const 
 }
 
 sisl::async::task< iomgr::io_result > blk_data_service::async_write(const char* buf, uint32_t size,
-                                                                  multi_blk_id const& blkid, io_batch* batch) {
+                                                                    multi_blk_id const& blkid, io_batch* batch) {
     if (is_stopping()) co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
     bool const part_of_batch = (batch != nullptr);
@@ -180,7 +180,7 @@ sisl::async::task< iomgr::io_result > blk_data_service::async_write(const char* 
 }
 
 sisl::async::task< iomgr::io_result > blk_data_service::async_write(sisl::sg_list const& sgs, multi_blk_id const& blkid,
-                                                                  io_batch* batch) {
+                                                                    io_batch* batch) {
     if (is_stopping()) co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
     bool const part_of_batch = (batch != nullptr);
@@ -247,12 +247,18 @@ io_batch& io_batch::operator=(io_batch&& o) noexcept {
 // currency; only the public blk_data_service boundary speaks error_condition.
 static std::error_condition to_error_condition(BlkAllocStatus s) {
     switch (s) {
-    case BlkAllocStatus::SPACE_FULL: return std::make_error_condition(std::errc::no_space_on_device);
-    case BlkAllocStatus::INVALID_INPUT: return std::make_error_condition(std::errc::invalid_argument);
-    case BlkAllocStatus::INVALID_DEV: return std::make_error_condition(std::errc::no_such_device);
-    case BlkAllocStatus::INVALID_THREAD: return std::make_error_condition(std::errc::operation_not_permitted);
-    case BlkAllocStatus::TOO_MANY_PIECES: return std::make_error_condition(std::errc::argument_list_too_long);
-    default: return std::make_error_condition(std::errc::io_error); // FAILED, REQ_MORE, PARTIAL, ...
+    case BlkAllocStatus::SPACE_FULL:
+        return std::make_error_condition(std::errc::no_space_on_device);
+    case BlkAllocStatus::INVALID_INPUT:
+        return std::make_error_condition(std::errc::invalid_argument);
+    case BlkAllocStatus::INVALID_DEV:
+        return std::make_error_condition(std::errc::no_such_device);
+    case BlkAllocStatus::INVALID_THREAD:
+        return std::make_error_condition(std::errc::operation_not_permitted);
+    case BlkAllocStatus::TOO_MANY_PIECES:
+        return std::make_error_condition(std::errc::argument_list_too_long);
+    default:
+        return std::make_error_condition(std::errc::io_error); // FAILED, REQ_MORE, PARTIAL, ...
     }
 }
 

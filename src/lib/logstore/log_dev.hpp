@@ -707,8 +707,8 @@ public:
     /// append_async calls succeed.
     /// @return future< shared< home_log_store > > : Future which will be set with the log store once it is opened
     sisl::async::task< shared< home_log_store > > open_log_store(logstore_id_t store_id, bool append_mode,
-                                                               log_found_cb_t log_found_cb = nullptr,
-                                                               log_replay_done_cb_t log_replay_done_cb = nullptr);
+                                                                 log_found_cb_t log_found_cb = nullptr,
+                                                                 log_replay_done_cb_t log_replay_done_cb = nullptr);
 
     /// @brief Remove the log store and its associated resources
     /// @param store_id Store id that was created/opened

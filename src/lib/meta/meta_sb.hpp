@@ -121,10 +121,10 @@ struct meta_blk_hdr_s {
     uint32_t version;
     uint32_t gen_cnt; // generation count, bump on every update
     crc32_t crc;
-    blk_id next_bid;         // next metablk
-    blk_id prev_bid;         // previous metablk
-    blk_id ovf_bid;          // overflow blk id;
-    blk_id bid;              // current blk id; might not be needd;
+    blk_id next_bid;        // next metablk
+    blk_id prev_bid;        // previous metablk
+    blk_id ovf_bid;         // overflow blk id;
+    blk_id bid;             // current blk id; might not be needd;
     uint64_t context_sz;    // total size of context data; if compressed is true, it is the round up of compressed size
                             // that is written to disk; if compressed is false, it is the original size of context data;
     uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
@@ -173,8 +173,8 @@ struct meta_blk {
 // single list overflow block chain
 #pragma pack(1)
 struct meta_blk_ovf_hdr_s {
-    uint32_t magic; // ovf magic
-    uint32_t nbids; // number of data blkids stored in data_bid;
+    uint32_t magic;  // ovf magic
+    uint32_t nbids;  // number of data blkids stored in data_bid;
     blk_id next_bid; // next ovf blk id;
     blk_id bid;      // self blkid
     uint64_t context_sz;

@@ -237,21 +237,20 @@ public:
     bool bind_data_service();
     bool join_group();
     async_status start_replace_member(std::string& task_id, const replica_member_info& member_out,
-                                           const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                           uint64_t trace_id = 0);
+                                      const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                      uint64_t trace_id = 0);
     async_status complete_replace_member(std::string& task_id, const replica_member_info& member_out,
-                                              const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                              uint64_t trace_id = 0);
+                                         const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                         uint64_t trace_id = 0);
     ReplaceMemberStatus get_replace_member_status(std::string& task_id, const replica_member_info& member_out,
                                                   const replica_member_info& member_in,
                                                   const std::vector< replica_member_info >& others,
                                                   uint64_t trace_id = 0);
     async_status flip_learner_flag(const replica_member_info& member, bool target, uint32_t commit_quorum,
-                                        bool wait_and_verify = true, uint64_t trace_id = 0);
+                                   bool wait_and_verify = true, uint64_t trace_id = 0);
     async_status remove_member(const replica_id_t& member, uint32_t commit_quorum, bool wait_and_verify,
-                                    uint64_t trace_id = 0);
-    async_status clean_replace_member_task(const std::string& task_id, uint32_t commit_quorum,
-                                                uint64_t trace_id = 0);
+                               uint64_t trace_id = 0);
+    async_status clean_replace_member_task(const std::string& task_id, uint32_t commit_quorum, uint64_t trace_id = 0);
     ReplServiceError do_add_member(const replica_member_info& member, uint64_t trace_id = 0);
     ReplServiceError do_remove_member(const replica_id_t& member, bool wait_and_verify = true, uint64_t trace_id = 0);
     ReplServiceError do_flip_learner(const replica_member_info& member, bool target, bool wait_and_verify,

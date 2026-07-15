@@ -87,8 +87,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     repl_req_ptr_t rreq;
     if ((jentry->code == journal_type_t::HS_DATA_LINKED) && (jentry->value_size > 0)) {
         multi_blk_id entry_blkid;
-        // FIXME:: here we assume that there is only one multi_blk_id in the log. We need to handle multiple multi_blk_id
-        // case.!!!
+        // FIXME:: here we assume that there is only one multi_blk_id in the log. We need to handle multiple
+        // multi_blk_id case.!!!
         entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
 
         rreq =

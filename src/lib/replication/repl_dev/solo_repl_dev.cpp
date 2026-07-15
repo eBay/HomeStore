@@ -227,8 +227,8 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     m_listener->on_commit(lsn, header, key, blkids, nullptr /* context */);
 }
 
-sisl::async::task< iomgr::io_result > SoloReplDev::async_read(multi_blk_id const& bid, sisl::sg_list& sgs, uint32_t size,
-                                                              io_batch* batch, trace_id_t tid) {
+sisl::async::task< iomgr::io_result > SoloReplDev::async_read(multi_blk_id const& bid, sisl::sg_list& sgs,
+                                                              uint32_t size, io_batch* batch, trace_id_t tid) {
     if (is_stopping()) { co_return std::unexpected(std::make_error_condition(std::errc::operation_canceled)); }
     incr_pending_request_num();
     auto result = data_service().async_read(bid, sgs, size, batch);

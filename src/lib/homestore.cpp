@@ -85,7 +85,7 @@ home_store& home_store::with_data_service(cshared< ChunkSelector >& custom_chunk
 }
 
 home_store& home_store::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs,
-                                         cshared< ChunkSelector >& custom_chunk_selector) {
+                                           cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::INDEX;
     s_index_cbs = std::move(cbs);
     s_custom_index_chunk_selector = std::move(custom_chunk_selector);
@@ -98,7 +98,7 @@ home_store& home_store::with_log_service() {
 }
 
 home_store& home_store::with_repl_data_service(cshared< repl_application >& repl_app,
-                                             cshared< ChunkSelector >& custom_chunk_selector) {
+                                               cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG;
     m_services.svcs &= ~HS_SERVICE::DATA; // ReplicationDataSvc or DataSvc are mutually exclusive
     s_repl_app = repl_app;

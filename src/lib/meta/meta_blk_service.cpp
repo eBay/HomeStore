@@ -46,7 +46,9 @@ namespace homestore {
 
 meta_blk_service& meta_service() { return hs()->meta_service(); }
 
-meta_blk_service::meta_blk_service(const char* name) : m_metrics{name} { m_last_mblk_id = std::make_unique< blk_id >(); }
+meta_blk_service::meta_blk_service(const char* name) : m_metrics{name} {
+    m_last_mblk_id = std::make_unique< blk_id >();
+}
 
 void meta_blk_service::create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks) {
     const auto phys_page_size = hs()->device_mgr()->optimal_page_size(devType);
@@ -224,7 +226,7 @@ void meta_blk_service::scan_meta_blks() {
 }
 
 bool meta_blk_service::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
-                                             blk_id* last_mblk_id, client_info_map_t& sub_info) {
+                                               blk_id* last_mblk_id, client_info_map_t& sub_info) {
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     auto bid = m_ssb->next_bid;
@@ -371,8 +373,8 @@ void meta_blk_service::deregister_handler(meta_sub_type type) {
 }
 
 void meta_blk_service::register_handler(meta_sub_type type, const meta_blk_found_cb_t& cb,
-                                      const meta_blk_recover_comp_cb_t& comp_cb, bool do_crc,
-                                      std::optional< meta_subtype_vec_t > deps) {
+                                        const meta_blk_recover_comp_cb_t& comp_cb, bool do_crc,
+                                        std::optional< meta_subtype_vec_t > deps) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     HS_REL_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
                      MAX_SUBSYS_TYPE_LEN);
@@ -446,7 +448,7 @@ sisl::byte_array meta_blk_service::to_meta_buf(sisl::byte_view buf, size_t size)
 }
 
 void meta_blk_service::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint8_t* context_data, uint64_t sz,
-                                           uint64_t offset, const std::string& type) {
+                                             uint64_t offset, const std::string& type) {
     HS_DBG_ASSERT_LE(ovf_hdr->h.context_sz + offset, sz);
 
     // write current ovf blk to disk;
@@ -609,7 +611,7 @@ meta_blk* meta_blk_service::init_meta_blk(blk_id& bid, meta_sub_type type, const
 // free after reboot
 //
 void meta_blk_service::write_meta_blk_ovf(blk_id& out_obid, const uint8_t* context_data, uint64_t sz,
-                                        const std::string& type) {
+                                          const std::string& type) {
     HS_DBG_ASSERT(m_meta_mtx.try_lock() == false, "mutex should be already be locked");
 
     // allocate data blocks
@@ -1289,7 +1291,9 @@ uint64_t meta_blk_service::used_size() const { return m_sb_vdev->used_size(); }
 uint32_t meta_blk_service::block_size() const { return m_sb_vdev->block_size(); }
 uint32_t meta_blk_service::align_size() const { return m_sb_vdev->align_size(); }
 uint64_t meta_blk_service::available_blks() const { return m_sb_vdev->available_blks(); }
-bool meta_blk_service::is_aligned_buf_needed(size_t size) const { return (size <= meta_blk_context_sz()) ? false : true; }
+bool meta_blk_service::is_aligned_buf_needed(size_t size) const {
+    return (size <= meta_blk_context_sz()) ? false : true;
+}
 
 bool meta_blk_service::s_self_recover{false};
 
@@ -1476,8 +1480,8 @@ nlohmann::json meta_blk_service::get_status(int log_level) {
 }
 
 nlohmann::json meta_blk_service::populate_json(int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
-                                             blk_id* last_mblk_id, client_info_map_t& sub_info, bool self_recover,
-                                             const std::string& client) {
+                                               blk_id* last_mblk_id, client_info_map_t& sub_info, bool self_recover,
+                                               const std::string& client) {
     std::string dump_dir = "/tmp/dump_meta";
     bool can_dump_to_file = false;
     const uint64_t total_free = 0;

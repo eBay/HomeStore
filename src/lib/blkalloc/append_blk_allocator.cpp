@@ -27,8 +27,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     // TODO: try to make all append_blk_allocator instances use same client type to reduce metablk's cache footprint;
     meta_service().register_handler(
         get_name(),
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), mblk); },
-        nullptr);
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), mblk); }, nullptr);
 
     if (need_format) {
         m_freeable_nblks = 0;

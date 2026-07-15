@@ -325,8 +325,8 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
     return status;
 }
 
-BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hints const& hints, multi_blk_id& out_blkid,
-                                                 Chunk* chunk) {
+BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hints const& hints,
+                                                 multi_blk_id& out_blkid, Chunk* chunk) {
 #ifdef _PRERELEASE
     if (auto const fake_status =
             iomgr_flip::instance()->get_test_flip< uint32_t >("blk_allocation_flip", nblks, chunk->vdev_id())) {

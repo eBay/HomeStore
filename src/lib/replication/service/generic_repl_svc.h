@@ -87,19 +87,19 @@ public:
     void stop() override;
 
     async_result< shared< repl_dev > > create_repl_dev(group_id_t group_id,
-                                                         std::set< replica_id_t > const& members) override;
+                                                       std::set< replica_id_t > const& members) override;
     async_status remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, meta_blk* meta_cookie) override;
     async_status replace_member(group_id_t group_id, std::string& task_id, const replica_member_info& member_out,
-                                     const replica_member_info& member_in, uint32_t commit_quorum = 0,
-                                     uint64_t trace_id = 0) const override;
+                                const replica_member_info& member_in, uint32_t commit_quorum = 0,
+                                uint64_t trace_id = 0) const override;
     async_status flip_learner_flag(group_id_t group_id, const replica_member_info& member, bool target,
-                                        uint32_t commit_quorum, bool wait_and_verify = true,
-                                        uint64_t trace_id = 0) const override;
+                                   uint32_t commit_quorum, bool wait_and_verify = true,
+                                   uint64_t trace_id = 0) const override;
     async_status remove_member(group_id_t group_id, const replica_id_t& member, uint32_t commit_quorum,
-                                    bool wait_and_verify = true, uint64_t trace_id = 0) const override;
+                               bool wait_and_verify = true, uint64_t trace_id = 0) const override;
     async_status clean_replace_member_task(group_id_t group_id, const std::string& task_id, uint32_t commit_quorum,
-                                                uint64_t trace_id = 0) const override;
+                                           uint64_t trace_id = 0) const override;
     result< std::vector< replace_member_task > > list_replace_member_tasks(uint64_t trace_id = 0) const override;
     ReplaceMemberStatus get_replace_member_status(group_id_t group_id, std::string& task_id,
                                                   const replica_member_info& member_out,

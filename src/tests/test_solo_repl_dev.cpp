@@ -105,9 +105,7 @@ public:
             }
         }
 
-        async_status create_snapshot(shared< snapshot_context > context) override {
-            return make_async_success<>();
-        }
+        async_status create_snapshot(shared< snapshot_context > context) override { return make_async_success<>(); }
         int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
             return 0;
         }
@@ -124,7 +122,7 @@ public:
                          cintrusive< repl_req_ctx >& ctx) override {}
 
         result< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size,
-                                                          cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
+                                                      cintrusive< homestore::repl_req_ctx >& hs_ctx) override {
             return blk_alloc_hints{};
         }
 

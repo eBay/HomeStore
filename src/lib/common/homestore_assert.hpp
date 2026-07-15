@@ -99,7 +99,7 @@
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
                 return true;                                                                                           \
             }),                                                                                                        \
-            homestore::home_store::periodic_logger(), msg, ##__VA_ARGS__);                                              \
+            homestore::home_store::periodic_logger(), msg, ##__VA_ARGS__);                                             \
     }
 #define HS_PERIODIC_LOG(level, mod, msg, ...) HS_PERIODIC_DETAILED_LOG(level, mod, , , , , msg, ##__VA_ARGS__)
 

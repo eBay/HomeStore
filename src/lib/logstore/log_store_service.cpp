@@ -40,22 +40,17 @@ log_store_service& logstore_service() { return hs()->logstore_service(); }
 log_store_service::log_store_service() : m_sb{"LogStoreServiceSB"} {
     meta_service().register_handler(
         logdev_sb_meta_name,
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            logdev_super_blk_found(std::move(buf), mblk);
-        },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { logdev_super_blk_found(std::move(buf), mblk); },
         nullptr);
 
     meta_service().register_handler(
         logdev_rollback_sb_meta_name,
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            rollback_super_blk_found(std::move(buf), mblk);
-        },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { rollback_super_blk_found(std::move(buf), mblk); },
         nullptr, true, std::optional< meta_subtype_vec_t >({logdev_sb_meta_name}));
 
     meta_service().register_handler(
         "LogStoreServiceSB",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), mblk); },
-        nullptr);
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), mblk); }, nullptr);
 }
 
 void log_store_service::on_meta_blk_found(const sisl::byte_view& buf, meta_blk* meta_cookie) {
@@ -65,7 +60,7 @@ void log_store_service::on_meta_blk_found(const sisl::byte_view& buf, meta_blk* 
 }
 
 sisl::async::task< iomgr::io_result > log_store_service::create_vdev(uint64_t size, HSDevType devType,
-                                                                   uint32_t chunk_size) {
+                                                                     uint32_t chunk_size) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
 
     hs_vdev_context hs_ctx;
@@ -192,7 +187,7 @@ void log_store_service::delete_unopened_logdevs() {
 }
 
 std::shared_ptr< LogDev > log_store_service::create_new_logdev_internal(logdev_id_t logdev_id, flush_mode_t flush_mode,
-                                                                      uuid_t pid) {
+                                                                        uuid_t pid) {
     auto logdev = std::make_shared< LogDev >(logdev_id, flush_mode, pid);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
@@ -295,10 +290,9 @@ std::shared_ptr< home_log_store > log_store_service::create_new_log_store(logdev
     return ret;
 }
 
-sisl::async::task< shared< home_log_store > > log_store_service::open_log_store(logdev_id_t logdev_id,
-                                                                            logstore_id_t store_id, bool append_mode,
-                                                                            log_found_cb_t log_found_cb,
-                                                                            log_replay_done_cb_t log_replay_done_cb) {
+sisl::async::task< shared< home_log_store > >
+log_store_service::open_log_store(logdev_id_t logdev_id, logstore_id_t store_id, bool append_mode,
+                                  log_found_cb_t log_found_cb, log_replay_done_cb_t log_replay_done_cb) {
     std::shared_lock< std::shared_mutex > holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
