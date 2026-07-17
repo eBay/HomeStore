@@ -13,10 +13,14 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
 #include <list>
 #include <gtest/gtest.h>
@@ -548,6 +552,86 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertRemoveAndWait2) {
     LOGMSG_ASSERT(outstanding_wait_bids_cnt.load() == 0, "expecting callback to be called for all waited bids!");
 
     LOGINFO("Step 4: Test Passed.");
+}
+
+// Regression: waiter callback must not run while upsert_or_delete holds the bucket write lock.
+//
+// When ref_cnt drops to 0, delete n runs under the write lock and ~blk_track_waiter fires m_cb().
+// If m_cb() blocks on an external resource (e.g. sync IO) while the external thread needs the same
+// write lock, the two threads can deadlock:
+//
+//   remove_thread: remove() and hold write lock in hashmap -> m_cb() -> waits for IO
+//   io_thread:    holds IO -> insert()/remove() -> waits for hashmap write lock
+//
+// disk_io_mtx stands in for "IO not finished yet". Without the fix, remove_thread holds the
+// write lock inside m_cb(); with the fix, m_cb() runs after the lock is released.
+//
+// Execution timeline (logs use [phase] tags matching this order):
+//   [setup]       insert pending read; register waiter whose m_cb() waits on disk IO
+//   [io_thread]   acquire disk_io_mtx (IO busy); signal ready
+//   [main]        wait until IO is held; start remove_thread
+//   [remove_thread] remove() -> ref_cnt 0 -> m_cb() fires
+//   [m_cb]        signal started; block on disk_io_mtx
+//   [io_thread]   insert()/remove() on same bucket (needs hashmap write lock)
+//   [io_thread]   release disk_io_mtx
+//   [m_cb]        finish; [remove_thread] return; [main] assert no deadlock
+TEST_F(BlkReadTrackerTest, WaiterCallbackRunsOutsideWriteLock) {
+    // --- [setup] ---
+    LOGINFO("[setup] insert pending read on a single bucket.");
+    get_inst()->set_entries_per_record(8);
+    const BlkId bid{0, 8, 0}; // all ops use the same bucket write lock
+    get_inst()->insert(bid);
+
+    std::mutex disk_io_mtx;
+    std::promise< void > io_thread_ready;
+    std::promise< void > callback_started;
+    std::atomic< bool > callback_done{false};
+
+    LOGINFO("[setup] register waiter; m_cb() will block until disk IO completes.");
+    get_inst()->wait_on(bid, [&]() {
+        LOGINFO("[m_cb] entered (ref_cnt reached 0).");
+        callback_started.set_value();
+        std::lock_guard lock(disk_io_mtx); // remove_thread path: m_cb() waits for IO
+        callback_done.store(true);
+        LOGINFO("[m_cb] finished after acquiring disk IO.");
+    });
+
+    // --- [io_thread] + [main] handoff ---
+    LOGINFO("[main] start io_thread.");
+    std::thread io_thread([&]() {
+        std::lock_guard lock(disk_io_mtx); // io_thread holds IO; m_cb() cannot finish yet
+        io_thread_ready.set_value();
+        LOGINFO("[io_thread] disk IO held; waiting for m_cb() to start.");
+
+        callback_started.get_future().wait();
+        LOGINFO("[io_thread] m_cb() started; trying insert()/remove() on same bucket.");
+
+        // Without fix: remove_thread still holds hashmap write lock -> blocks here -> deadlock.
+        // With fix:    write lock already released -> proceeds while m_cb() waits for IO.
+        get_inst()->insert(bid);
+        get_inst()->remove(bid);
+        LOGINFO("[io_thread] hashmap ops completed.");
+    });
+
+    io_thread_ready.get_future().wait();
+    LOGINFO("[main] disk IO is held; start remove_thread to trigger m_cb().");
+
+    // --- [remove_thread] ---
+    std::promise< void > remove_done;
+    std::thread remove_thread([&]() {
+        get_inst()->remove(bid); // ref_cnt -> 0, fires m_cb()
+        remove_done.set_value();
+        LOGINFO("[remove_thread] remove() returned (m_cb() completed).");
+    });
+
+    constexpr auto k_timeout = std::chrono::seconds(10);
+    ASSERT_EQ(remove_done.get_future().wait_for(k_timeout), std::future_status::ready)
+        << "deadlock: m_cb() appears to run under the bucket write lock";
+
+    remove_thread.join();
+    io_thread.join();
+    ASSERT_TRUE(callback_done.load());
+    LOGINFO("[main] passed - no deadlock, m_cb() was invoked.");
 }
 
 SISL_OPTION_GROUP(test_blk_read_tracker,
