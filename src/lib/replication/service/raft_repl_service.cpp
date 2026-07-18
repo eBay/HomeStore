@@ -210,7 +210,7 @@ void RaftReplService::start() {
 }
 
 void RaftReplService::stop() {
-    // we stop reaper thread here before destorying repl_dev to prevent data from being fetched after repl_dev is
+    // we stop reaper thread here before destroying repl_dev to prevent data from being fetched after repl_dev is
     // stopped.
 
     // FIXME: there is still a case that before we stop_reaper_thread, some fetch_data requests have already been sent

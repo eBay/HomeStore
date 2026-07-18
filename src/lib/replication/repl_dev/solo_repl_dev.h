@@ -122,7 +122,7 @@ public:
 
     void destroy();
 
-    // solo repl device truncation is triggerred by CP after flushing all the data in its cp_cleanup routine;
+    // solo repl device truncation is triggered by CP after flushing all the data in its cp_cleanup routine;
     void truncate();
 
     void trigger_snapshot_creation(repl_lsn_t compact_lsn, bool wait_for_commit) override { return; }

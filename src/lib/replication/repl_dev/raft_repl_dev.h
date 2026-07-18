@@ -92,8 +92,8 @@ public:
         REGISTER_HISTOGRAM(rreq_data_write_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
                            {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(rreq_push_data_latency_us, "rreq data write latency in us",
-                                                              "rreq_data_op_latency", {"op", "push"},
-                                                              HistogramBucketsType(OpLatecyBuckets));
+                                                      "rreq_data_op_latency", {"op", "push"},
+                                                      HistogramBucketsType(OpLatecyBuckets));
         // latency from follower->originator->follower, not including actual data write on follower;
         REGISTER_HISTOGRAM(rreq_data_fetch_latency_us, "rreq data fetch latency in us", "rreq_data_op_latency",
                            {"op", "fetch"}, HistogramBucketsType(OpLatecyBuckets));
@@ -103,26 +103,24 @@ public:
                            {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
 
         REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(rreq_pieces_per_write, "Number of individual pieces per write",
-                                                              HistogramBucketsType(SteppedUpto32Buckets));
+                                                      HistogramBucketsType(SteppedUpto32Buckets));
 
         // In the identical layout chunk, the blk num of the follower and leader is expected to be the same.
         // However, due to the concurrency between the data channel and the raft channel, there might be some
         // allocation differences on the same lsn. When a leader switch occurs, these differences could become garbage.
         // This metric can partially reflect the potential amount of garbage.
         REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(blk_diff_with_proposer,
-                                                              "allocated blk num diff on the same lsn with proposer "
-                                                              "when chunk usage >= 0.9",
-                                                              HistogramBucketsType(ExponentialOfTwoBuckets));
+                                                      "allocated blk num diff on the same lsn with proposer "
+                                                      "when chunk usage >= 0.9",
+                                                      HistogramBucketsType(ExponentialOfTwoBuckets));
 
         // Raft channel metrics
-        REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(raft_end_of_append_batch_latency_us,
-                                                              "Raft end_of_append_batch latency in us",
-                                                              "raft_logstore_append_latency",
-                                                              {"op", "end_of_append_batch"},
-                                                              HistogramBucketsType(OpLatecyBuckets));
+        REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(
+            raft_end_of_append_batch_latency_us, "Raft end_of_append_batch latency in us",
+            "raft_logstore_append_latency", {"op", "end_of_append_batch"}, HistogramBucketsType(OpLatecyBuckets));
         REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(data_channel_wait_latency_us, "Data channel wait latency in us",
-                                                              "raft_logstore_append_latency", {"op", "wait_for_data"},
-                                                              HistogramBucketsType(OpLatecyBuckets));
+                                                      "raft_logstore_append_latency", {"op", "wait_for_data"},
+                                                      HistogramBucketsType(OpLatecyBuckets));
 
         register_me_to_farm();
     }
@@ -224,7 +222,7 @@ private:
 
     // pending create requests, including both raft and data channel
     std::atomic_uint64_t m_pending_init_req_num;
-    std::atomic< bool > m_in_quience;
+    std::atomic< bool > m_in_quiescence;
     // we can only accept lsn that smaller than latch_lsn
     std::atomic< int64_t > m_latch_lsn{INT64_MAX};
 
@@ -440,7 +438,7 @@ public:
 
     /**
      * \brief This method is called to force leave the group without waiting for committing the destroy message.
-     * it is used when the repl_dev is a stale member of a destroyed group. this stable member does not receive the
+     * it is used when the repl_dev is a stale member of a destroyed group. this stale member does not receive the
      * destroy message. but the group is already destroyed, so no leader will send this message again to this stale
      * member. we need to force leave the group to avoid the stale member to be a part of the group.
      */
@@ -519,7 +517,7 @@ private:
                                   sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
                                   cshared< ReplDevListener >& listener);
 
-    bool is_in_quience() { return m_in_quience.load(std::memory_order_acquire); }
+    bool is_in_quiescence() { return m_in_quiescence.load(std::memory_order_acquire); }
 
     uint64_t get_pending_init_req_num() { return m_pending_init_req_num.load(std::memory_order_acquire); }
 };

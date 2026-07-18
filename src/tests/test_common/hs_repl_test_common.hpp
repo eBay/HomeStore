@@ -47,7 +47,7 @@ SISL_OPTION_GROUP(test_repl_common_setup,
                   (base_port, "", "base_port", "Port number of first replica",
                    ::cxxopts::value< uint16_t >()->default_value("4000"), "number"),
                   (replica_num, "", "replica_num",
-                   "Internal replica num (used to lauch multi process) - don't override",
+                   "Internal replica num (used to launch multi process) - don't override",
                    ::cxxopts::value< uint16_t >()->default_value("0"), "number"),
                   (replica_dev_list, "", "replica_dev_list", "Device list for all replicas",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"));
