@@ -95,6 +95,8 @@ public:
     virtual void repair_node(IndexBufferPtr const& buf) = 0;
     virtual void repair_root_node(IndexBufferPtr const& buf) = 0;
     virtual void delete_stale_children(IndexBufferPtr const& buf) = 0;
+    virtual bnodeid_t persisted_root_node_id() const = 0;
+    virtual bool set_root_from_committed_buf(IndexBufferPtr const& buf) = 0;
     virtual void audit_tree() const = 0;
     virtual void update_sb() = 0;
     virtual void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) = 0;

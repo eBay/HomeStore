@@ -15,6 +15,8 @@
  *********************************************************************************/
 #pragma once
 #include <atomic>
+#include <set>
+#include <unordered_set>
 #include <sisl/fds/concurrent_insert_vector.hpp>
 #include <homestore/blk.h>
 #include <homestore/index/index_internal.hpp>
@@ -144,6 +146,8 @@ public:
 
     iomgr::FiberManagerLib::mutex m_txn_journal_mtx;
     sisl::io_blob_safe m_txn_journal_buf;
+    std::unordered_set< uint32_t > m_root_changed_ordinals;
+    std::map< uint32_t, BlkId > m_recovered_root_ids;
 
 public:
     IndexCPContext(CP* cp);
@@ -156,6 +160,8 @@ public:
     std::map< BlkId, IndexBufferPtr > recover(sisl::byte_view sb);
 
     sisl::io_blob_safe const& journal_buf() const { return m_txn_journal_buf; }
+    IndexBufferPtrList root_change_preflush_bufs();
+    BlkId recovered_root_id(uint32_t ordinal) const;
 
     void add_to_dirty_list(const IndexBufferPtr& buf);
     bool any_dirty_buffers() const;

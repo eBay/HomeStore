@@ -867,6 +867,165 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     }
 }
 
+// Cover the first root split after a leaf root has already been made durable.
+TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_flush_on_meta");
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Cover the first root split window after the modified leaf root is durable but before its new root is published.
+TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_flush_on_root");
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// A partial preflush must leave the durable old root authoritative and safely discard the incomplete transition.
+TYPED_TEST(IndexCrashTest, CrashDuringRootPreflushOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_during_root_preflush");
+    hs()->crash_simulator().set_will_crash(true);
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Recovery must publish the durable new root if the table superblock still names the modified old root.
+TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnSecondRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+
+    // Establish a durable level-1 root before triggering the crash-sensitive level-1 -> level-2 split.
+    for (uint32_t k = 0; k <= max_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const persisted_root = this->m_bt->root_node_id();
+    auto const persisted_depth = this->m_bt->get_btree_depth();
+
+    this->set_basic_flip("crash_flush_on_meta");
+    const uint32_t phase2_count = max_keys * max_keys;
+    for (uint32_t k = max_keys + 1; k <= max_keys + phase2_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), persisted_root);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Cover the window where the old root is durable but the table superblock is stale, then restart again to verify that
+// recovery persisted the promoted root.
+TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnSecondRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+
+    for (uint32_t k = 0; k <= max_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const persisted_root = this->m_bt->root_node_id();
+    auto const persisted_depth = this->m_bt->get_btree_depth();
+
+    this->set_basic_flip("crash_flush_on_root");
+    this->set_basic_flip("skip_cp_after_index_root_recovery");
+    const uint32_t phase2_count = max_keys * max_keys;
+    for (uint32_t k = max_keys + 1; k <= max_keys + phase2_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), persisted_root);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+
+    // The recovery CP was deliberately skipped, so the original journal is still current. Crash and wait sequentially
+    // to prove replaying the already-published candidate is idempotent.
+    hs()->crash_simulator().set_will_crash(true);
+    hs()->crash_simulator().crash();
+    this->wait_for_crash_recovery(true);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
 TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     long_running_crash_options crash_test_options{
         .put_freq = 100,

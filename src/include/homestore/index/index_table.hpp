@@ -208,37 +208,117 @@ public:
     void repair_root_node(IndexBufferPtr const& idx_buf) override {
         LOGTRACEMOD(wbcache, "check if this was the previous root node {} for buf {} ", m_sb->root_node,
                     idx_buf->to_string());
-        if (m_sb->root_node == idx_buf->blkid().to_integer()) {
-            // This is the root node, we need to update the root node in superblk
-            LOGTRACEMOD(wbcache, "{} is old root so we need to update the meta node ", idx_buf->to_string());
-            BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), false /* init_buf */,
-                                           BtreeNode::identify_leaf_node(idx_buf->raw_buffer()));
-            static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
-            auto edge_id = n->next_bnode();
-
-            if (n->has_valid_edge() && hs()->has_fc_service()) {
-                auto const reason =
-                    fmt::format("root {} already has a valid edge {}, so we should have found the new root node",
-                                n->to_string(), n->get_edge_value().bnode_id());
-                hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&(m_sb->parent_uuid)),
-                                              reason);
-                return;
-            } else {
-                BT_REL_ASSERT(!n->has_valid_edge(),
-                              "root {} already has a valid edge {}, so we should have found the new root node",
-                              n->to_string(), n->get_edge_value().bnode_id());
-            }
-            n->set_next_bnode(empty_bnodeid);
-            n->set_edge_value(BtreeLinkInfo{edge_id, 0});
-            LOGTRACEMOD(wbcache, "change root node {}: edge updated to {} and invalidate the next node! ", n->node_id(),
-                        edge_id);
-            auto cpg = cp_mgr().cp_guard();
-            write_node_impl(n, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
-
-        } else {
+        if (m_sb->root_node != idx_buf->blkid().to_integer()) {
             LOGTRACEMOD(wbcache, "This is not the root node, so we can ignore this repair call for buf {}",
                         idx_buf->to_string());
+            return;
         }
+
+        LOGTRACEMOD(wbcache, "{} is old root so we need to update the meta node ", idx_buf->to_string());
+        auto* const raw_buf = idx_buf->raw_buffer();
+        if (raw_buf == nullptr || !BtreeNode::is_valid_node(sisl::blob{raw_buf, this->m_bt_cfg.node_size()})) {
+            LOGERROR("repair_root_node: skip invalid/unwritten buf {}", idx_buf->to_string());
+            return;
+        }
+
+        auto const* phdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        if (phdr->node_id != idx_buf->blkid().to_integer()) {
+            LOGERROR("repair_root_node: skip invalid/unwritten buf {}", idx_buf->to_string());
+            return;
+        }
+        if (phdr->next_node == empty_bnodeid) {
+            LOGTRACEMOD(wbcache, "repair_root_node: buf={} already has empty next_bnode; nothing to repair",
+                        idx_buf->to_string());
+            return;
+        }
+
+        BtreeNode* n = this->init_node(raw_buf, idx_buf->blkid().to_integer(), false /* init_buf */,
+                                       BtreeNode::identify_leaf_node(raw_buf));
+        static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
+        BtreeNodePtr root{n};
+        auto const edge_id = root->next_bnode();
+
+        BtreeNodePtr edge_node;
+        auto const ret = read_node_impl(edge_id, edge_node);
+        if (ret != btree_status_t::success || edge_node->level() >= root->level()) {
+            LOGERROR("repair_root_node: skip unsafe edge repair for buf={} next_bnode={} ret={} "
+                     "candidate_level={} root_level={}",
+                     idx_buf->to_string(), edge_id, enum_name(ret),
+                     edge_node ? static_cast< int >(edge_node->level()) : -1, root->level());
+            return;
+        }
+
+        if (root->has_valid_edge() && hs()->has_fc_service()) {
+            auto const reason =
+                fmt::format("root {} already has a valid edge {}, so we should have found the new root node",
+                            root->to_string(), root->get_edge_value().bnode_id());
+            hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&(m_sb->parent_uuid)),
+                                          reason);
+            return;
+        } else {
+            BT_REL_ASSERT(!root->has_valid_edge(),
+                          "root {} already has a valid edge {}, so we should have found the new root node",
+                          root->to_string(), root->get_edge_value().bnode_id());
+        }
+        root->set_next_bnode(empty_bnodeid);
+        root->set_edge_value(BtreeLinkInfo{edge_id, 0});
+        LOGTRACEMOD(wbcache, "change root node {}: edge updated to {} and invalidate the next node! ", root->node_id(),
+                    edge_id);
+        auto cpg = cp_mgr().cp_guard();
+        write_node_impl(root, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
+    }
+
+    bnodeid_t persisted_root_node_id() const override { return m_sb->root_node; }
+
+    bool set_root_from_committed_buf(IndexBufferPtr const& idx_buf) override {
+        auto* const raw_buf = idx_buf->raw_buffer();
+        if (m_sb->root_node == empty_bnodeid || raw_buf == nullptr ||
+            !BtreeNode::is_valid_node(sisl::blob{raw_buf, this->m_bt_cfg.node_size()})) {
+            LOGERROR("set_root_from_committed_buf: reject invalid candidate {}", idx_buf->to_string());
+            return false;
+        }
+
+        auto const* candidate_hdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        if (candidate_hdr->node_id != idx_buf->blkid().to_integer()) {
+            LOGERROR("set_root_from_committed_buf: reject invalid candidate {}", idx_buf->to_string());
+            return false;
+        }
+
+        try {
+            this->validate_node(idx_buf->blkid().to_integer());
+        } catch (std::exception const& e) {
+            LOGERROR("set_root_from_committed_buf: candidate={} failed validation: {}", idx_buf->to_string(), e.what());
+            return false;
+        }
+
+        auto const candidate_level = candidate_hdr->level;
+        if (m_sb->root_node == idx_buf->blkid().to_integer()) {
+            if (candidate_level != m_sb->btree_depth) {
+                LOGERROR("set_root_from_committed_buf: persisted root {} has level={} but SB depth={}",
+                         idx_buf->blkid().to_integer(), candidate_level, m_sb->btree_depth);
+                return false;
+            }
+            this->m_btree_depth = candidate_level;
+            this->set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->root_link_version});
+            return true;
+        }
+
+        BtreeNode* n = this->init_node(raw_buf, idx_buf->blkid().to_integer(), false /* init_buf */,
+                                       BtreeNode::identify_leaf_node(raw_buf));
+        static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
+        BtreeNodePtr root{n};
+
+        LOGINFOMOD(wbcache, "Recovery promotes committed root {} -> {} at level {}", m_sb->root_node, root->node_id(),
+                   root->level());
+        m_sb->root_node = root->node_id();
+        m_sb->root_link_version = root->link_version();
+        m_sb->btree_depth = root->level();
+        this->m_btree_depth = root->level();
+        this->set_root_node_info(BtreeLinkInfo{root->node_id(), root->link_version()});
+
+        // Recovery promotion must survive another crash even when no index buffer is dirty in the forced CP.
+        m_sb.write();
+        return true;
     }
 
     void delete_stale_children(IndexBufferPtr const& idx_buf) override {
@@ -266,8 +346,21 @@ public:
                         this->root_node_id());
             return;
         }
-        BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), false /* init_buf */,
-                                       BtreeNode::identify_leaf_node(idx_buf->raw_buffer()));
+
+        auto* const raw_buf = idx_buf->raw_buffer();
+        if (raw_buf == nullptr || !BtreeNode::is_valid_node(sisl::blob{raw_buf, this->m_bt_cfg.node_size()})) {
+            LOGERROR("repair_node: skip invalid/unwritten buf {}", idx_buf->to_string());
+            return;
+        }
+        auto const* phdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        if (phdr->node_id != idx_buf->blkid().to_integer()) {
+            LOGERROR("repair_node: skip buf {} whose persisted node_id={} does not match blkid={}",
+                     idx_buf->to_string(), phdr->node_id, idx_buf->blkid().to_integer());
+            return;
+        }
+
+        BtreeNode* n = this->init_node(raw_buf, idx_buf->blkid().to_integer(), false /* init_buf */,
+                                       BtreeNode::identify_leaf_node(raw_buf));
         static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
         auto cpg = cp_mgr().cp_guard();
 
@@ -307,7 +400,7 @@ protected:
         node->set_checksum();
         auto prev_state = idx_node->m_idx_buf->m_state.exchange(index_buf_state_t::DIRTY);
         LOGTRACEMOD(wbcache, "write_node_impl: node_id={} cp_id={} prev_state={} -> DIRTY", node->node_id(),
-                    cp_ctx->id(), static_cast<int>(prev_state));
+                    cp_ctx->id(), static_cast< int >(prev_state));
         idx_node->m_idx_buf->m_node_level = node->level();
         if (prev_state == index_buf_state_t::CLEAN) {
             // It was clean before, dirtying it first time, add it to the wb_cache list to flush

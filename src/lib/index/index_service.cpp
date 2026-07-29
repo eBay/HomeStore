@@ -23,6 +23,10 @@
 #include "common/homestore_assert.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
+
+#ifdef _PRERELEASE
+#include <iomgr/iomgr_flip.hpp>
+#endif
 #include "device/chunk.h"
 
 namespace homestore {
@@ -118,6 +122,11 @@ void IndexService::start() {
         tbl->audit_tree();
 #endif
     }
+#ifdef _PRERELEASE
+    // Tests can keep the recovered journal current, then perform a second crash sequentially to verify replay
+    // idempotence without racing nested HomeStore restarts.
+    if (iomgr_flip::instance()->test_flip("skip_cp_after_index_root_recovery")) { return; }
+#endif
     // Force taking cp after recovery done. This makes sure that the index table is in consistent state and dirty
     // buffer after recovery can be added to dirty list for flushing in the new cp
     hs()->cp_mgr().trigger_cp_flush(true /* force */);
