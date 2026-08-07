@@ -273,12 +273,11 @@ std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
         // Root-change records contain no split/merge side effects. Retaining the last record per ordinal identifies
         // the final intended root even if the same CP grows and then collapses the tree.
         if (rec->is_parent_meta && rec->num_freed_ids == 0) {
-            if (!rec->has_inplace_child && rec->num_new_ids == 1) {
-                auto const new_root_idx = rec->has_inplace_parent ? 1 : 0;
-                m_recovered_root_ids[rec->index_ordinal] = rec->blk_id(new_root_idx);
-            } else if (rec->has_inplace_child && rec->num_new_ids == 0) {
-                auto const child_idx = rec->has_inplace_parent ? 1 : 0;
-                m_recovered_root_ids[rec->index_ordinal] = rec->blk_id(child_idx);
+            bool const is_root_split = !rec->has_inplace_child && rec->num_new_ids == 1;
+            bool const is_root_collapse = rec->has_inplace_child && rec->num_new_ids == 0;
+            if (is_root_split || is_root_collapse) {
+                auto const root_idx = rec->has_inplace_parent ? 1 : 0;
+                m_recovered_root_ids[rec->index_ordinal] = rec->blk_id(root_idx);
             }
         }
 
@@ -300,22 +299,9 @@ std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
                         buffer->m_up_buffer->to_string());
         }
     };
-#if 0
-        auto dag_print = [](const std::map< BlkId, IndexBufferPtr >& dags, std::string delimiter) {
-            int index = 1;
-            for (const auto& [blkid, bufferPtr] : dags) {
-                LOGTRACEMOD(wbcache, "{}{} - blkid {} buffer {} ", delimiter, index++, blkid.to_integer(),
-                            bufferPtr->to_string());
-            }
-        };
-        LOGTRACEMOD(wbcache,"Before modify : \n ");
-        dag_print(buf_map, "Before: ");
-#endif
     for (auto& [blkid, bufferPtr] : buf_map) {
         modifyBuffer(bufferPtr);
     }
-    //    LOGTRACEMOD(wbcache,"\n\n\nAFTER modify : \n ");
-    //    dag_print(buf_map, "After: ");
 
     auto sanityCheck = [cp_id = id()](const std::map< BlkId, IndexBufferPtr >& dags) {
         for (const auto& [blkid, bufferPtr] : dags) {
@@ -408,8 +394,6 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
             }
 
 #ifndef NDEBUG
-            //  if (!is_sibling_link || (buf->m_up_buffer == real_up_buf)) { return buf;}
-            //  Already linked with same buf or its not a sibling link to override
             if (real_up_buf->is_in_down_buffers(buf)) { return buf; }
 #endif
 

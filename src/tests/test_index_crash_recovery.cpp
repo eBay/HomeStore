@@ -867,7 +867,20 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     }
 }
 
-// Cover the first root split after a leaf root has already been made durable.
+// Scenario: first root split (depth 0 → 1), crash while writing the SB (meta_buf).
+//
+// Setup: insert max_keys/2 keys and checkpoint to establish a durable leaf root (depth=0).
+// Then insert more keys until the first root split fires (depth becomes 1), with
+// "crash_flush_on_meta" armed so that the crash fires the moment the SB write begins.
+//
+// Disk state at crash:
+//   - new_root_buf is durable (Fix 2 pre-flush wrote it before the normal DAG flush).
+//   - old_root (the modified leaf) is durable in split state.
+//   - SB still names the old_root as root.
+//
+// Expected recovery (Fix 2): the journal identifies new_root_buf as the intended root,
+// persisted_root_was_committed() confirms old_root was written, so new_root_buf is
+// promoted.  After recovery depth == 1 and all keys are intact.
 TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnFirstRootSplit) {
     const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
     const uint32_t durable_key_count = max_keys / 2;
@@ -897,7 +910,21 @@ TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnFirstRootSplit) {
     this->get_all();
 }
 
-// Cover the first root split window after the modified leaf root is durable but before its new root is published.
+// Scenario: first root split (depth 0 → 1), crash after old_root is flushed but before
+// new_root_buf is written.
+//
+// Setup: same as CrashAtMetaBufOnFirstRootSplit, but "crash_flush_on_root" fires when
+// the new_root_buf write begins, so old_root reaches disk in its split state while
+// new_root_buf has not yet been written.
+//
+// Disk state at crash:
+//   - old_root is durable with edge_info=EMPTY and next_bnode=child_node2 (split state).
+//   - new_root_buf has NOT been written (Fix 2 pre-flush was interrupted).
+//   - SB still names old_root.
+//
+// Expected recovery: Fix 2 pre-flush guarantees new_root_buf is written before old_root
+// reaches disk (Fix 2 barrier), so new_root_buf must be durable.  Recovery identifies
+// it via the journal and promotes it.  After recovery depth == 1 and all keys are intact.
 TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnFirstRootSplit) {
     const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
     const uint32_t durable_key_count = max_keys / 2;
@@ -927,7 +954,23 @@ TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnFirstRootSplit) {
     this->get_all();
 }
 
-// A partial preflush must leave the durable old root authoritative and safely discard the incomplete transition.
+// Scenario: first root split (depth 0 → 1), crash during Fix 2's pre-flush barrier
+// before any node of the split reaches disk.
+//
+// Setup: same initial state (durable leaf root at depth=0), but "crash_during_root_preflush"
+// fires inside the async pre-flush writes, before the normal DAG flush starts.
+// crash_simulator.set_will_crash(true) is called explicitly because this flip fires
+// before the CP engine's own crash point.
+//
+// Disk state at crash:
+//   - Neither new_root_buf nor old_root has been written in the crashed CP.
+//   - The tree on disk is still in the pre-split consistent state (depth=0, old leaf root intact).
+//   - SB still names the original durable leaf root.
+//
+// Expected recovery: because old_root was never written in split state,
+// persisted_root_was_committed() returns false, new_root_buf is discarded, and the tree
+// reverts to its last fully consistent checkpoint.  After recovery root_node_id equals
+// durable_root and depth == 0.  reapply_after_crash re-inserts all post-CP keys.
 TYPED_TEST(IndexCrashTest, CrashDuringRootPreflushOnFirstRootSplit) {
     const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
     const uint32_t durable_key_count = max_keys / 2;
@@ -959,7 +1002,20 @@ TYPED_TEST(IndexCrashTest, CrashDuringRootPreflushOnFirstRootSplit) {
     this->get_all();
 }
 
-// Recovery must publish the durable new root if the table superblock still names the modified old root.
+// Scenario: second (or higher) root split (depth N → N+1), crash while writing the SB.
+//
+// Setup: insert max_keys+1 keys and checkpoint to establish a durable level-1 root.
+// Then insert max_keys*max_keys more keys to trigger one or more additional root splits,
+// with "crash_flush_on_meta" armed so the crash fires when the SB write begins.
+//
+// Disk state at crash:
+//   - new_root_buf (and any intermediate new roots) are durable via Fix 2 pre-flush.
+//   - old_root (level-1 internal node) is durable in split state.
+//   - SB still names the level-1 old_root.
+//
+// Expected recovery: same Fix 2 path as the first-split cases, but exercised on a
+// multi-level tree to confirm that the journal-based root promotion works regardless of
+// tree height.  After recovery depth > persisted_depth and all keys are intact.
 TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnSecondRootSplit) {
     const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
 
@@ -989,8 +1045,30 @@ TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnSecondRootSplit) {
     this->get_all();
 }
 
-// Cover the window where the old root is durable but the table superblock is stale, then restart again to verify that
-// recovery persisted the promoted root.
+// Scenario: second (or higher) root split, crash after old_root is flushed but before
+// new_root_buf is written; then crash a second time without a recovery CP to prove
+// that replaying the same journal and re-promoting the same root is idempotent.
+//
+// Setup: establish a durable level-1 root, then arm both "crash_flush_on_root" and
+// "skip_cp_after_index_root_recovery".  The first flip causes the crash after old_root
+// hits disk; the second flip suppresses the forced recovery CP so the original journal
+// remains on disk unchanged after the first recovery.
+//
+// Disk state at first crash:
+//   - old_root is durable in split state; new_root_buf is durable (Fix 2 pre-flush).
+//   - SB still names old_root.
+//
+// First recovery: Fix 2 promotes new_root_buf; depth > persisted_depth.
+//
+// Second crash (immediate, no recovery CP written):
+//   - The journal on disk still records the same root-change.
+//   - new_root_buf is already the in-memory root, and its blkid is already in the SB
+//     (written by set_root_from_committed_buf during the first recovery).
+//
+// Second recovery: the journal candidate is re-evaluated; set_root_from_committed_buf
+// detects the SB already names new_root_buf and is a no-op.  This verifies that
+// promoting an already-promoted root does not corrupt the tree.
+// After both recoveries depth > persisted_depth and all keys are intact.
 TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnSecondRootSplit) {
     const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
 
