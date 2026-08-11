@@ -867,6 +867,69 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     }
 }
 
+// Regression test for the root-split crash bug (SDSTOR-XXXXX):
+//   During a root split (tree height N→N+1), crash_flush_on_meta fires after
+//   all node buffers (new_root, old_root, child_node2) are written to disk but
+//   before meta_buf (SB) writes. On recovery, repair_root_node reads
+//   old_root.next_bnode (= child_node2.blkid, a level-N interior node) and
+//   writes it into old_root.edge_info, violating the invariant
+//   child.level == parent.level - 1.
+//
+// Two-phase design:
+//   Phase 1: trigger the 1st root split (leaf → level=1) cleanly so the tree
+//            reaches a stable level=1 state with an interior old_root.
+//   Phase 2: set crash_flush_on_meta, insert enough entries to trigger the 2nd
+//            root split (level=1 → level=2), then crash at meta_buf flush.
+//
+// Expected outcome after fix: recovery succeeds and the tree is consistent.
+// Without fix: repair_root_node writes child_node2 (level=1) as edge of
+//              old_root (level=1) → validate_node asserts "child level mismatch".
+TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnSecondRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+
+    // Phase 1: insert enough entries to trigger the first root split (leaf → level=1)
+    // and flush cleanly so the tree is at a stable level=1 before the crash CP.
+    LOGINFO("Phase 1: Insert {} entries to trigger first root split (leaf→level=1)", max_keys + 1);
+    for (uint32_t k = 0; k <= max_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    LOGINFO("Phase 1: Flush cleanly — tree is now at level=1, SB is up to date");
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+
+    // Phase 2: set crash_flush_on_meta before inserts so it fires when the 2nd
+    // root split calls transact_bufs(meta_buf, new_root_buf). The flip marks
+    // meta_buf with crash_flag; the actual crash fires only when meta_buf is
+    // ready to write (after all node bufs complete), leaving the SB stale.
+    LOGINFO("Phase 2: Set crash_flush_on_meta flip");
+    this->set_basic_flip("crash_flush_on_meta");
+
+    // max_keys^2 entries is sufficient to fill the level=1 root (which requires
+    // ~max_keys child splits, each needing ~max_keys inserts to fill a leaf).
+    const uint32_t phase2_count = max_keys * max_keys;
+    LOGINFO("Phase 2: Insert {} entries to trigger second root split (level=1→2)", phase2_count);
+    for (uint32_t k = max_keys + 1; k <= max_keys + phase2_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+
+    LOGINFO("Phase 2: Trigger CP (crash expected at meta_buf flush)");
+    test_common::HSTestHelper::trigger_cp(false);
+    LOGINFO("Phase 2: Waiting for crash and recovery");
+    this->wait_for_crash_recovery(true);
+
+    // Disk state after crash (verified against gdb evidence from the production incident):
+    //   - SB: root_node=old_root (level=1), btree_depth=1  [meta_buf not written]
+    //   - old_root on disk: edge_info=EMPTY, next_bnode=child_node2.blkid
+    //   - new_root (level=2) on disk                       [written before meta_buf]
+    //
+    // Without fix: repair_root_node sets old_root.edge_info=child_node2 (level=1)
+    //   → validate_node aborts: "child level: 1, expected: 0"
+    // With fix: recovery finds new_root correctly; tree is consistent.
+    LOGINFO("Recovery complete — reapplying and verifying tree integrity");
+    this->reapply_after_crash();
+    this->get_all();
+}
+
 TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     long_running_crash_options crash_test_options{
         .put_freq = 100,
