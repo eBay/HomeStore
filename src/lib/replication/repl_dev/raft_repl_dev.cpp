@@ -1995,7 +1995,6 @@ AsyncReplResult<> RaftReplDev::become_leader() {
         return make_async_error<>(ReplServiceError::STOPPING);
     }
     init_req_counter counter(pending_request_num);
-    reset_latch_lsn();
 
     return m_msg_mgr.become_leader(m_group_id)
         .via(&folly::InlineExecutor::instance())
@@ -2987,6 +2986,7 @@ void RaftReplDev::become_leader_cb() {
     RD_REL_ASSERT(new_gate >= static_cast< uint64_t >(current_gate),
                   "new_gate={} should be equal or larger than current_gate={}!", new_gate, current_gate);
 
+    reset_latch_lsn();
     m_traffic_ready_lsn.store(new_gate);
     // in nuraft, a leader might become a new leader directly, which means it is unnecessary to become a follower before
     // becoming a leader.
