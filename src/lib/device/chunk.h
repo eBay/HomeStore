@@ -25,9 +25,10 @@ private:
     PhysicalDev* const m_pdev;
     const uint32_t m_chunk_slot;
     const uint32_t m_stream_id;
-    uint32_t m_vdev_ordinal{0};
+    uint32_t m_vdev_ordinal{};
     shared< BlkAllocator > m_blk_allocator;
     float blk_usage_report_threshold{0.9};
+    std::atomic<uint64_t> m_wbc_epoch{};
 
 public:
     static constexpr auto MAX_CHUNK_SIZE = std::numeric_limits< uint32_t >::max();
@@ -42,7 +43,7 @@ public:
     Chunk& operator=(Chunk&&) noexcept = delete;
     virtual ~Chunk() = default;
 
-    /////////////// Pointer Getters ////////////////////
+    /////////////// Pointer Getters /////////////////////
     const PhysicalDev* physical_dev() const { return m_pdev; }
     PhysicalDev* physical_dev_mutable() { return m_pdev; };
     const chunk_info& info() const { return m_chunk_info; }
@@ -84,6 +85,9 @@ public:
 
     ////////////// Misc ////////////////////////
     void reset_block_allocator();
+
+    uint64_t wbc_epoch() const { return m_wbc_epoch.load(std::memory_order_acquire); }
+    void bump_wbc_epoch() { m_wbc_epoch.fetch_add(1, std::memory_order_acq_rel); }
 
 private:
     void write_chunk_info();

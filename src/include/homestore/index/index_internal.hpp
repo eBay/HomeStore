@@ -120,7 +120,8 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     cp_id_t m_created_cp_id{-1};                                        // CP id when this buffer is created.
     std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
     uint8_t* m_bytes{nullptr};                                          // Actual data buffer
-    uint32_t m_node_level{0};                                           // levels of the node in the btree
+    uint32_t m_node_level{};                                            // levels of the node in the btree
+    uint64_t m_chunk_epoch{};                                           // Track chunk epoch
 
     std::shared_ptr< IndexBuffer > m_up_buffer;             // Parent buffer in the chain to persisted
     sisl::atomic_counter< int > m_wait_for_down_buffers{0}; // Number of children need to wait for before persisting

@@ -93,5 +93,11 @@ private:
     void load_buf(IndexBufferPtr const& buf);
     void update_up_buffer_counters(IndexBufferPtr const& buf);
     void prune_up_buffers(IndexBufferPtr const& buf, std::vector< IndexBufferPtr >& bufs_to_repair);
+
+    // Helpers for maintaining cache validity
+    uint64_t current_chunk_epoch(const BlkId& blkid) const;
+    // These two always return false if chunk selector is not in use
+    bool is_stale_buf(const IndexBufferPtr& buf) const;
+    bool is_stale_node(const BtreeNodePtr& node) const;
 };
 } // namespace homestore

@@ -94,33 +94,53 @@ void IndexWBCache::start_flush_threads() {
 
 BtreeNodePtr IndexWBCache::alloc_buf(uint32_t ordinal, node_initializer_t&& node_initializer) {
     auto cpg = cp_mgr().cp_guard();
-    auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
 
     // Alloc a block of data from underlying vdev
     MultiBlkId blkid;
     // Ordinal used as a hint in the case of custom chunk selector exists
     blk_alloc_hints hints;
     hints.application_hint = ordinal;
-    auto ret = m_vdev->alloc_contiguous_blks(1, hints, blkid);
-    if (ret != BlkAllocStatus::SUCCESS) { return nullptr; }
+
+    if (m_vdev->alloc_contiguous_blks(1, hints, blkid) != BlkAllocStatus::SUCCESS) {
+        return nullptr;
+    }
 
     // Alloc buffer and initialize the node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
     idx_buf->m_created_cp_id = cpg->id();
     idx_buf->m_dirtied_cp_id = cpg->id();
+    idx_buf->m_chunk_epoch = current_chunk_epoch(idx_buf->blkid());
     auto node = node_initializer(idx_buf);
     idx_buf->m_node_level = node->level();
 
+    // Add the node to the cache. Skip if we are in recovery mode.
     if (!m_in_recovery) {
-        // Add the node to the cache. Skip if we are in recovery mode.
-        bool done = m_cache.insert(node);
-        HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node to cache, low memory or duplicate inserts?");
+retry_insert:
+        BtreeNodePtr existing;
+        if (m_cache.get(idx_buf->blkid(), existing)) {
+            if (!is_stale_node(existing)) {
+                HS_REL_ASSERT(false, "alloc_buf found live duplicate cache entry for blkid {}",
+                              idx_buf->blkid().to_string());
+            }
+            LOGTRACEMOD(wbcache, "alloc_buf evicting stale node for blkid {}", idx_buf->blkid().to_string());
+            m_cache.remove(idx_buf->blkid(), existing);
+        }
+
+        if (!m_cache.insert(node)) {
+            if (m_cache.get(idx_buf->blkid(), existing) && is_stale_node(existing)) {
+                m_cache.remove(idx_buf->blkid(), existing);
+                goto retry_insert;
+            }
+            HS_REL_ASSERT(false, "Unable to add alloc'd node to cache, low memory or duplicate inserts?");
+        }
     }
 
-    // The entire index is updated in the commit path, so we alloc the blk and commit them right away
-    auto alloc_status = m_vdev->commit_blk(blkid);
-    // if any error happens when committing the blk to index service, we should assert and crash
-    if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {}", blkid.to_string());
+    // The entire index is updated in the commit path, so we alloc the blk and commit them right away.
+    // If any error happens when committing the blk to index service, we should assert and crash
+    if (m_vdev->commit_blk(blkid) != BlkAllocStatus::SUCCESS) {
+        HS_REL_ASSERT(0, "Failed to commit blk: {}", blkid.to_string());
+    }
+
     return node;
 }
 
@@ -134,35 +154,54 @@ void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf
             LOGTRACEMOD(wbcache, "write buf [{}] in recovery mode", buf->to_string());
             m_vdev->sync_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid);
         }
-    } else {
-        if (node != nullptr) { m_cache.upsert(node); }
-        LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), buf->to_string());
-        r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
-        resource_mgr().inc_dirty_buf_size(m_node_size);
+
+        return;
     }
+
+    if (node) {
+        RELEASE_ASSERT(static_cast<IndexBtreeNode*>(node.get())->m_idx_buf == buf, "node/buffer mismatch");
+        buf->m_chunk_epoch = current_chunk_epoch(buf->blkid());
+        m_cache.upsert(node);
+    }
+
+    LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), buf->to_string());
+    r_cast<IndexCPContext*>(cp_ctx)->add_to_dirty_list(buf);
+    resource_mgr().inc_dirty_buf_size(m_node_size);
 }
 
 void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) {
     auto const blkid = BlkId{id};
 
 retry:
-    // Check if the blkid is already in cache, if notL load and put it into the cache
-    if (!m_in_recovery && m_cache.get(blkid, node)) { return; }
+    // Check if the blkid is already in cache, if not load and put it into the cache
+    if (!m_in_recovery) {
+        if (m_cache.get(blkid, node)) {
+            if (!is_stale_node(node)) { return; }
+            LOGTRACEMOD(wbcache, "stale cache hit for blkid {}, removing and re-reading", blkid.to_string());
+            m_cache.remove(blkid, node);
+            node.reset();
+        }
+    }
 
     // Read the buffer from virtual device
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
+    idx_buf->m_chunk_epoch = current_chunk_epoch(blkid);
     m_vdev->sync_read(r_cast< char* >(idx_buf->raw_buffer()), m_node_size, blkid);
 
     // Create the btree node out of buffer
     node = node_initializer(idx_buf);
 
     // Push the node into cache
-    if (!m_in_recovery) {
-        bool done = m_cache.insert(node);
-        if (!done) {
-            // There is a race between 2 concurrent reads from vdev and other party won the race. Re-read from cache
-            goto retry;
-        }
+    if (m_in_recovery || m_cache.insert(node)) { return; }
+
+    if (!m_cache.get(blkid, node)) {
+        HS_REL_ASSERT(false, "Failed to insert read buf {} into cache", blkid.to_string());
+    }
+
+    if (is_stale_node(node)) {
+        LOGTRACEMOD(wbcache, "stale cache race for blkid {}, removing and retrying", blkid.to_string());
+        m_cache.remove(blkid, node);
+        goto retry;
     }
 }
 
@@ -1205,6 +1244,26 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
             // There is some leader buffer still flushing, once done its completion will flush this buffer
         }
     }
+}
+
+uint64_t IndexWBCache::current_chunk_epoch(const BlkId& blkid) const {
+    auto* chunk = hs()->device_mgr()->get_chunk_mutable(blkid.chunk_num());
+    RELEASE_ASSERT(chunk != nullptr, "chunk {} not found", blkid.chunk_num());
+    return chunk->wbc_epoch();
+}
+
+bool IndexWBCache::is_stale_buf(const IndexBufferPtr& buf) const {
+    return buf->m_chunk_epoch != current_chunk_epoch(buf->blkid());
+}
+
+bool IndexWBCache::is_stale_node(const BtreeNodePtr& node) const {
+    if (!hs()->index_service().get_chunk_selector()) [[likely]] {
+        return false;
+    }
+
+    auto* idx_node = static_cast<IndexBtreeNode*>(node.get());
+    RELEASE_ASSERT(idx_node != nullptr && idx_node->m_idx_buf != nullptr, "invalid cached node");
+    return is_stale_buf(idx_node->m_idx_buf);
 }
 
 /*

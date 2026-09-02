@@ -82,6 +82,8 @@ void Chunk::reset_block_allocator() {
     auto vdev_ptr = hs()->device_mgr()->get_vdev_mutable(vdev_id());
     RELEASE_ASSERT(vdev_ptr, "VDev not found for vdev_id: {}", vdev_id());
     vdev_ptr->reset_chunk_blk_allocator(this);
+
+    bump_wbc_epoch();
 }
 
 } // namespace homestore

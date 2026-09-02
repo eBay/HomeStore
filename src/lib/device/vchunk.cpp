@@ -17,7 +17,7 @@
 #include "device/chunk.h"
 
 namespace homestore {
-VChunk::VChunk(cshared< Chunk >& chunk) : m_internal_chunk(chunk) {}
+VChunk::VChunk(cshared< Chunk > const& chunk) : m_internal_chunk(chunk) {}
 
 void VChunk::set_user_private(const sisl::blob& data) { m_internal_chunk->set_user_private(data); }
 
