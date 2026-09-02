@@ -50,8 +50,10 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair<
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
                 [](const sisl::CacheRecord& rec) -> bool {
-                    const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
-                    return static_cast< IndexBtreeNode* >(hnode.m_value.get())->m_idx_buf->is_clean();
+                    const auto& hnode = static_cast<const sisl::SingleEntryHashNode<BtreeNodePtr>&>(rec);
+                    const auto* idx_node = static_cast<const IndexBtreeNode*>(hnode.m_value.get());
+                    if (!idx_node || !idx_node->m_idx_buf) { return false; }
+                    return idx_node->m_idx_buf->is_clean();
                 }},
         m_node_size{node_size},
         m_meta_blk{sb.first} {
