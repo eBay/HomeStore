@@ -16,8 +16,11 @@
 #include "device/physical_dev.hpp"
 
 namespace homestore {
+
 class BlkAllocator;
 class CP;
+class BlkId;
+
 class Chunk {
 private:
     std::shared_mutex m_mgmt_mutex;
@@ -73,6 +76,8 @@ public:
     }
     float get_blk_usage_report_threshold() const { return blk_usage_report_threshold; }
     float get_blk_usage() const;
+
+    void foreach_allocated_blk(std::function<void(BlkId const&)>&& cb) const;
 
     ////////////// Setters /////////////////////
     void set_user_private(const sisl::blob& data);
