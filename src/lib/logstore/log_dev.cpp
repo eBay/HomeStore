@@ -233,6 +233,52 @@ void LogDev::do_load(off_t device_cursor) {
             break;
         }
 
+        if (loaded_from == -1 && header->start_idx() > m_log_idx) {
+            // Corner-case recovery: a SIGKILL landed after vdev chunk truncation (durable) but
+            // before logdev meta persist.  The chunk list reflects the new head; logdev meta
+            // still carries the old (dev_offset, log_idx).  We validate via the recovery hint
+            // written atomically into the head chunk during truncation and then advance m_log_idx
+            // to match the first log group the stream reader actually found.
+            THIS_LOGDEV_LOG(WARN,
+                            "LogDev {} corner-case recovery: header->start_idx()={} > m_log_idx={} "
+                            "(stale meta dev_offset={}); validating head chunk recovery hint",
+                            m_logdev_id, header->start_idx(), m_log_idx.load(), device_cursor);
+
+            auto const* hint = m_vdev_jd->head_chunk_private();
+            HS_REL_ASSERT(hint, "logdev={} corner-case recovery: head chunk hint is missing; possible data corruption",
+                          m_logdev_id);
+            HS_REL_ASSERT(hint->is_head && hint->head_magic == JournalChunkPrivate::JOURNAL_HEAD_MAGIC &&
+                              hint->head_version == JournalChunkPrivate::JOURNAL_HEAD_VERSION,
+                          "logdev={} corner-case recovery: start_idx={} > m_log_idx={} but head chunk hint is invalid "
+                          "(magic=0x{} version={} is_head={}); possible data corruption",
+                          m_logdev_id, header->start_idx(), m_log_idx.load(), to_hex(hint->head_magic),
+                          hint->head_version, hint->is_head);
+            HS_REL_ASSERT_GT(hint->head_start_idx, m_log_idx.load(),
+                             "logdev={} corner-case recovery: hint->head_start_idx={} must be > stale m_log_idx={}",
+                             m_logdev_id, hint->head_start_idx, m_log_idx.load());
+
+            THIS_LOGDEV_LOG(
+                WARN, "LogDev {} corner-case recovery: advancing m_log_idx {} -> {} data_start_offset {} -> {}",
+                m_logdev_id, m_log_idx.load(), hint->head_start_idx, device_cursor, hint->head_start_offset);
+
+            // Scope and known limitations of this recovery:
+            // - This fix is scoped to logstream positioning only. The following meta changes
+            //   from the aborted LogDev::truncate() are NOT replayed here:
+            //   * start_dev_offset / log_idx: not persisted here. The corner-case recovery
+            //     path is idempotent — the hint in the head chunk remains valid across
+            //     restarts until the next successful truncation persists consistent meta.
+            //   * unreserve-store: garbage store IDs self-heal at handle_unopened_log_stores()
+            //     on this restart and are removed at the next truncation.
+            //   * rollback-info cleanup: stale records remain semantically valid because
+            //     logids are monotonically increasing and never reused, so no false positives
+            //     can occur. Cleaned up at the next truncation.
+            m_log_idx.store(hint->head_start_idx, std::memory_order_release);
+            m_vdev_jd->update_data_start_offset(hint->head_start_offset);
+            device_cursor = hint->head_start_offset;
+            do_load(device_cursor);
+            return;
+        }
+
         THIS_LOGDEV_LOG(DEBUG, "Found log group header offset=0x{} header {}", to_hex(group_dev_offset), *header);
         HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx.load(), "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
@@ -637,7 +683,7 @@ uint64_t LogDev::truncate() {
         auto lstore = store.log_store;
         if (lstore == nullptr) { continue; }
         auto const [trunc_lsn, trunc_ld_key, tail_lsn] = lstore->truncate_info();
-        m_logdev_meta.update_store_superblk(store_id, logstore_superblk(trunc_lsn + 1), stopping /* persist_now */);
+        m_logdev_meta.update_store_superblk(store_id, logstore_superblk(trunc_lsn + 1), false /* persist_now */);
         // We found a new minimum logdev_key that we can truncate to
         if (trunc_ld_key.idx < min_safe_ld_key.idx) { min_safe_ld_key = trunc_ld_key; }
     }
@@ -664,8 +710,29 @@ uint64_t LogDev::truncate() {
 
     uint64_t const num_records_to_truncate = uint64_cast(min_safe_ld_key.idx - m_last_truncate_idx);
 
+    // Persist per-store start LSN before vdev truncation to avoid the following:
+    // If store superblocks are not persisted here and we crash after vdev truncate but before the
+    // final persist below, corner-case recovery still fixes logstream positioning via the head-chunk
+    // hint, but Raft start_index() loads a stale (too-low) m_first_seq_num from disk, making this
+    // node appear to retain more logs than it actually does and potentially triggering baseline resync.
+    m_logdev_meta.persist();
+
     // Truncate them in vdev
-    m_vdev_jd->truncate(min_safe_ld_key.dev_offset);
+    m_vdev_jd->truncate(min_safe_ld_key.dev_offset, min_safe_ld_key.idx);
+
+#ifdef _PRERELEASE
+    // Simulate a crash after vdev chunk truncation (durable) but before the final persist that
+    // updates logdev start_dev_offset. Per-store start LSN was already written above.
+    if (hs()->crash_simulator().crash_if_flip_set("abort_logdev_truncate_before_meta_persist")) {
+        THIS_LOGDEV_LOG(INFO,
+                        "CRASH FLIP fired: vdev truncated to dev_offset={} log_idx={} but logdev start offset "
+                        "not persisted. Stale logdev offset on disk: dev_offset={} log_idx={}",
+                        min_safe_ld_key.dev_offset, min_safe_ld_key.idx, m_logdev_meta.get_start_dev_offset(),
+                        m_logdev_meta.get_start_log_idx());
+        decr_pending_request_num();
+        return num_records_to_truncate;
+    }
+#endif
 
     // Update the start offset to be read upon restart
     m_last_truncate_idx = min_safe_ld_key.idx;

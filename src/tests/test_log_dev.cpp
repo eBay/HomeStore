@@ -184,6 +184,29 @@ public:
         }
     }
 
+    // Like insert_batch_sync but always allocates via malloc with exactly data_size payload bytes,
+    // giving deterministic log-group sizes needed for chunk-boundary geometry tests.
+    void insert_batch_fixed(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& lsn, int64_t batch,
+                            uint32_t data_size) {
+        std::vector< uint8_t* > bufs;
+        bufs.reserve(batch);
+        for (int64_t i = 0; i < batch; ++i) {
+            uint32_t const total = sizeof(test_log_data) + data_size;
+            auto* raw = static_cast< uint8_t* >(std::malloc(total));
+            auto* d = new (raw) test_log_data();
+            d->size = data_size;
+            const char c = static_cast< char >(((lsn + i) % 94) + 33);
+            std::memset(d->get_data(), c, data_size);
+            bufs.push_back(raw);
+            log_store->write_async(lsn + i, {uintptr_cast(raw), total, false}, nullptr, nullptr);
+        }
+        log_store->flush();
+        lsn += batch;
+        for (auto* raw : bufs) {
+            std::free(raw);
+        }
+    }
+
     void kickstart_inserts(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& cur_lsn, int64_t batch,
                            uint32_t fixed_size = 0) {
         auto last = cur_lsn + batch;
@@ -796,6 +819,122 @@ TEST_F(LogDevTest, DeleteUnopenedLogDev) {
         ASSERT_EQ(unopened_id_set.count(logdev->get_id()), 0);
     }
 }
+
+#ifdef _PRERELEASE
+TEST_F(LogDevTest, TruncateChunkMetaInconsistency) {
+    // Reproduces a crash on restart triggered by a SIGKILL arriving between:
+    //   (1) m_vdev_jd->truncate()  — persists new chunk head to disk via sync_write (durable)
+    //   (2) final m_logdev_meta.persist() — updates logdev start offset (never reached)
+    // Per-store start LSN is persisted before (1); see LogDev::truncate().
+    //
+    // On restart the chunk list reflects the new head chunk (from (1)) but logdev meta still
+    // holds the old (dev_offset, log_idx) pair (from before (2)). offset_to_chunk() maps the
+    // stale dev_offset against the new chunk list into the new head chunk where higher-indexed
+    // log data resides, causing do_load() to fire HS_REL_ASSERT_EQ(start_idx, m_log_idx).
+    LOGINFO("Step 1: Create a single logdev and logstore");
+    auto logdev_id = logstore_service().create_new_logdev(flush_mode_t::EXPLICIT);
+    s_max_flush_multiple = logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+    auto log_store = logstore_service().create_new_log_store(logdev_id, false);
+    const auto store_id = log_store->get_store_id();
+
+    // Geometry (all sizes assume flush_size_multiple=4096, chunk_size=8MB=8,388,608B):
+    //
+    // Each 4096B payload record becomes 4100B total (sizeof(test_log_data)=4 + 4096).
+    // 4100 % 4096 = 4 != 0 and !data.is_aligned() => always inlined (no OOB zero-copy).
+    // A batch of 500 records produces 3 log groups:
+    //   LG1 (202rec): round_up(48 + 202x20 + 202x4100 + 24, 4096) = round_up(832,312, 4096) = 835,584B (=204x4096)
+    //   LG2 (202rec): 835,584B
+    //   LG3 ( 96rec): round_up(48 +  96x20 +  96x4100 + 24, 4096) = round_up(395,592, 4096) = 397,312B (= 97x4096)
+    //   Total per batch = 2,068,480B (=505x4096)
+    // We use insert_batch_fixed (always malloc, never iobuf_alloc) to guarantee exact sizes.
+    //
+    // Step 2: 5 batches = 2,500 records (logdev idx 0-2499)
+    //   Batches 1-4: 4 x 2,068,480 = 8,273,920B fills chunk_0 (gap=114,688B to chunk end).
+    //   Batch 5 overflows chunk_0 (114,688B gap fills remainder), continues in chunk_1:
+    //     LG1 at chunk_1[       0] (idx 2000-2201)
+    //     LG2 at chunk_1[ 835,584] (idx 2202-2403)
+    //     LG3 at chunk_1[1,671,168] (idx 2404-2499)
+    //   m_last_flush_ld_key = {2404, X1=10,059,776} (LG3 of batch 5 in chunk_1).
+    //
+    // Step 3 truncation persists X1=10,059,776, Y1=2404 to meta; chunk_0 released, chunk_1 kept.
+    //
+    // Step 4: 4 batches = 2,000 records (logdev idx 2500-4499)
+    //   Batches 1-3 continue in chunk_1 from [2,068,480] to [8,273,920]. Batch 4 crosses into
+    //   chunk_2 (114,688B gap fills remainder of chunk_1). In chunk_2 this batch writes:
+    //     LG1 at chunk_2[       0] (idx 4000-4201)
+    //     LG2 at chunk_2[ 835,584] (idx 4202-4403)
+    //     LG3 at chunk_2[1,671,168] (idx 4404-4499)
+    //   m_last_flush_ld_key = {4404, X2=18,448,384} (LG3 of batch 4 in chunk_2).
+    //
+    // Step 7: second truncation targets X2=18,448,384.  vdev persists chunk_2 as head (durable),
+    //   releases chunk_1, then flip fires before meta.persist().  On disk: chunk_2 is head but
+    //   meta still holds stale (X1, Y1).
+    //
+    // Recovery: update_data_start_offset(X1=10,059,776) with chunk_list=[chunk_2].
+    //   offset_to_chunk(X1=10,059,776):
+    //     chunk_aligned = round_down(10,059,776, 8MB) = 8,388,608
+    //     off_l = 10,059,776 - 8,388,608 = 1,671,168  =>  chunk_2[1,671,168]
+    //   That is exactly the start of LG3 of step-4 batch 4: magic valid, start_idx=4404.
+    //   m_log_idx from stale meta = Y1 = 2404.
+    //   HS_REL_ASSERT_EQ(4404, 2404) fires  =>  crash reproduced.
+    constexpr uint32_t entry_size = 4096;
+    constexpr int64_t batch_size = 500;
+    constexpr int num_batches_step2 = 5;
+
+    LOGINFO("Step 2: Write {} deterministic entries ({}x{}) to fill chunk 0 and land X1 inside chunk 1",
+            batch_size * num_batches_step2, num_batches_step2, batch_size);
+    logstore_seq_num_t cur_lsn = 0;
+    for (int i = 0; i < num_batches_step2; ++i) {
+        insert_batch_fixed(log_store, cur_lsn, batch_size, entry_size);
+    }
+
+    LOGINFO("Step 3: Normal chunk-crossing truncation (no flip) — chunk 0 released, logdev meta persisted");
+    truncate_validate(log_store);
+
+    // Step 4: 4 more batches continue in chunk_1 then cross into chunk_2. The last log group of
+    // step 4 (LG3 of batch 4) lands at chunk_2[1,671,168], matching what offset_to_chunk maps
+    // stale X1=10,059,776 to when only chunk_2 is present after the step-7 crash.
+    constexpr int num_batches_step4 = 4;
+    LOGINFO("Step 4: Write {} more deterministic entries ({}x{}) to fill chunk 1 and allocate chunk 2",
+            batch_size * num_batches_step4, num_batches_step4, batch_size);
+    for (int i = 0; i < num_batches_step4; ++i) {
+        insert_batch_fixed(log_store, cur_lsn, batch_size, entry_size);
+    }
+
+    LOGINFO("Step 5: Register restart callback to re-open logdev and logstore after crash recovery");
+    std::promise< bool > reopen_done;
+    m_helper.change_start_cb([&logdev_id, &store_id, &log_store, &reopen_done]() {
+        logstore_service().open_logdev(logdev_id, flush_mode_t::EXPLICIT);
+        logstore_service()
+            .open_log_store(logdev_id, store_id, false /* append_mode */)
+            .thenValue([&log_store, &reopen_done](auto store) {
+                log_store = store;
+                reopen_done.set_value(true);
+            });
+    });
+
+    LOGINFO("Step 6: Inject flip to simulate SIGKILL after vdev chunk truncation, before logdev meta persist");
+    m_helper.set_basic_flip("abort_logdev_truncate_before_meta_persist");
+
+    LOGINFO("Step 7: Trigger second chunk-crossing truncation to fire the flip");
+    // Pass false so truncate() calls m_logdev->truncate(), where the flip fires:
+    // m_vdev_jd->truncate() completes (sync_write, durable) but the final meta persist that
+    // updates logdev start offset is bypassed. LogDev::stop() skips its healing truncate when
+    // is_crashed(), preserving the on-disk inconsistency for the restart to exercise.
+    const auto trunc_upto = log_store->get_contiguous_completed_seq_num(-1);
+    const auto expected_start_lsn = trunc_upto + 1;
+    log_store->truncate(trunc_upto, false /* in_memory_truncate_only */);
+
+    LOGINFO("Step 8: Wait for crash recovery (restart_homestore running in background thread)");
+    m_helper.wait_for_crash_recovery();
+    reopen_done.get_future().get(); // wait for logstore replay to complete
+
+    LOGINFO("Step 9: Restart succeeded — no do_load assertion fired; log store is valid");
+    ASSERT_NE(log_store, nullptr) << "Log store must be valid after crash recovery";
+    ASSERT_EQ(log_store->start_lsn(), expected_start_lsn)
+        << "Per-store start LSN must be loaded from superblock persisted before vdev truncation";
+}
+#endif
 
 SISL_OPTION_GROUP(test_log_dev,
                   (num_logdevs, "", "num_logdevs", "number of log devs",

@@ -35,11 +35,21 @@ using journal_id_t = uint64_t;
 // Each log device has a list of journal chunk data with next_chunk.
 // Journal vdev will arrange the chunks in order during recovery.
 struct JournalChunkPrivate {
+    // Fields below are the original on-disk layout (must stay at these offsets).
     logdev_id_t logdev_id{0};
     bool is_head{false};       // Is it the head element.
     uint64_t created_at{0};    // Creation timestamp
     uint64_t end_of_chunk{0};  // The offset indicates end of chunk.
     chunk_num_t next_chunk{0}; // Next chunk in the list.
+
+    // Head chunk recovery hint appended after the original fields.
+    // Only valid when is_head==true and head_magic==JOURNAL_HEAD_MAGIC.
+    static constexpr uint32_t JOURNAL_HEAD_VERSION{1u};
+    static constexpr uint32_t JOURNAL_HEAD_MAGIC{0xBEEFCAFE};
+    uint32_t head_version{0};
+    uint32_t head_magic{0};
+    off_t head_start_offset{0}; // logdev truncate offset persisted with head
+    logid_t head_start_idx{0};  // logdev truncate idx persisted with head
 };
 
 static_assert(sizeof(JournalChunkPrivate) <= chunk_info::user_private_size, "Journal private area bigger");
@@ -286,7 +296,7 @@ public:
          *
          * @return : return the new data start offset after truncation.
          */
-        off_t truncate(off_t truncate_offset);
+        off_t truncate(off_t truncate_offset, logid_t log_idx = -1);
 
         /**
          * @brief : get the total size in journal
@@ -331,6 +341,8 @@ public:
         nlohmann::json get_status(int log_level) const;
 
         logdev_id_t logdev_id() const { return m_logdev_id; }
+
+        const JournalChunkPrivate* head_chunk_private() const;
 
         std::string to_string() const;
 

@@ -566,7 +566,7 @@ void JournalVirtualDev::Descriptor::update_tail_offset(off_t tail) {
     LOGINFOMOD(journalvdev, "Updated tail offset arg 0x{} desc {} ", to_hex(tail), to_string());
 }
 
-off_t JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
+off_t JournalVirtualDev::Descriptor::truncate(off_t truncate_offset, logid_t log_idx) {
     const off_t ds_off = data_start_offset();
     COUNTER_INCREMENT(m_vdev.m_metrics, vdev_truncate_count, 1);
     HS_PERIODIC_LOG(DEBUG, journalvdev, "truncating to logical offset: 0x{} desc {}", to_hex(truncate_offset),
@@ -605,6 +605,14 @@ off_t JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     auto* private_data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(new_head_chunk->user_private()));
     private_data->is_head = true;
     private_data->logdev_id = m_logdev_id;
+    if (log_idx != -1) {
+        // Write recovery hint so do_load can handle a crash between this truncation and
+        // the subsequent logdev meta persist. Only written when log_idx is known.
+        private_data->head_version = JournalChunkPrivate::JOURNAL_HEAD_VERSION;
+        private_data->head_magic = JournalChunkPrivate::JOURNAL_HEAD_MAGIC;
+        private_data->head_start_offset = truncate_offset;
+        private_data->head_start_idx = log_idx;
+    }
     m_vdev.update_chunk_private(new_head_chunk, private_data);
 
     // Find all chunks which needs to be removed from the start of m_journal_chunks.
@@ -805,6 +813,11 @@ nlohmann::json JournalVirtualDev::Descriptor::get_status(int log_level) const {
 
     LOGINFO("{}", j.dump(2, ' '));
     return j;
+}
+
+const JournalChunkPrivate* JournalVirtualDev::Descriptor::head_chunk_private() const {
+    if (m_journal_chunks.empty()) { return nullptr; }
+    return r_cast< const JournalChunkPrivate* >(m_journal_chunks.front()->user_private());
 }
 
 std::string JournalVirtualDev::Descriptor::to_string() const {
