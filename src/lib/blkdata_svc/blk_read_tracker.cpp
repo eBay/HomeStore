@@ -46,14 +46,23 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                                                      return false;
                                                  });
         } else if (new_ref_count < 0) {
-            // This is a remove operation
+            // This is a remove operation. Extract waiters inside the lambda so they destruct after lambda returns
+            // and the write lock is released. Firing m_cb() under the write lock can have unexpected issue
+            // (e.g., destroy cp_guard and trigger cp flush, which deadlocks any iomgr thread that is concurrently
+            // trying to acquire the same write lock in its IO completion path.
+            folly::small_vector< blk_track_waiter_ptr, 8 > fired_waiters;
             m_pending_reads_map.upsert_or_delete(
-                base_blkid, [new_ref_count, &base_blkid](BlkTrackRecord& rec, bool existing) {
+                base_blkid, [new_ref_count, &base_blkid, &fired_waiters](BlkTrackRecord& rec, bool existing) {
                     HS_DBG_ASSERT_EQ(existing, true, "Decrement a ref count (blk: {}) which does not exist in map",
                                      base_blkid.to_string());
                     rec.m_ref_cnt += new_ref_count;
-                    return (rec.m_ref_cnt == 0);
+                    if (rec.m_ref_cnt == 0) {
+                        fired_waiters = std::move(rec.m_waiters);
+                        return true;
+                    }
+                    return false;
                 });
+            // fired_waiters destructs here, outside the write lock -> m_cb() fires safely
         } else {
             // this is wait_on operation
             m_pending_reads_map.update(base_blkid, [&waiter_rescheduled, &waiter](BlkTrackRecord& rec) {
