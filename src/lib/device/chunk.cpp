@@ -84,4 +84,19 @@ void Chunk::reset_block_allocator() {
     vdev_ptr->reset_chunk_blk_allocator(this);
 }
 
+void Chunk::foreach_allocated_blk(std::function<void(BlkId const&)>&& cb) const {
+    auto* ba = blk_allocator();
+    RELEASE_ASSERT(ba, "Blk allocator is null for chunk_id={}", chunk_id());
+
+    const auto total_blks = ba->get_total_blks();
+    const auto cid = chunk_id();
+
+    for (blk_num_t blk_num{}; blk_num < total_blks; ++blk_num) {
+        BlkId blkid{blk_num, 1, cid};
+        if (ba->is_blk_alloced(blkid, false)) {
+            cb(blkid);
+        }
+    }
+}
+
 } // namespace homestore
