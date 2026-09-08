@@ -52,11 +52,11 @@ private:
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::timer_handle_t m_replace_member_sync_check_timer_hdl;
-    iomgr::io_fiber_t m_reaper_fiber;
-    // Dedicated fiber for the fetch_pending_data timer. Kept separate from the reaper fiber so that
+    iomgr::IOReactor* m_reaper_reactor{nullptr};
+    // Dedicated reactor for the fetch_pending_data timer. Kept separate from the reaper reactor so that
     // a slow flush_durable_commit_lsn() (which does synchronous metablk I/O under m_rd_map_mtx) cannot
     // delay queued fetch batches past consensus.data_receive_timeout_ms.
-    iomgr::io_fiber_t m_fetcher_fiber;
+    iomgr::IOReactor* m_fetcher_reactor{nullptr};
     std::atomic< int32_t > restart_counter{0};
     std::mutex raft_restart_mutex;
 
