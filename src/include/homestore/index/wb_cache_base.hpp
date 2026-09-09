@@ -25,6 +25,7 @@
 namespace homestore {
 
 class BtreeNode;
+class Chunk;
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
 using BtreeNodeList = boost::container::small_vector< BtreeNodePtr, 3 >;
 using node_initializer_t = std::function< BtreeNodePtr(const IndexBufferPtr&) >;
@@ -67,6 +68,9 @@ public:
     /// @return
     // virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
     virtual void recover(sisl::byte_view sb) = 0;
+
+    /// Remove entries for a specific chunk from wbc
+    virtual void evict_chunk_blkids(const Chunk& chunk) = 0;
 };
 
 } // namespace homestore

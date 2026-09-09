@@ -1060,6 +1060,13 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
     }
 }
 
+void IndexWBCache::evict_chunk_blkids(const Chunk& chunk) {
+    chunk.foreach_allocated_blk([this](blk_id const& blkid) {
+        BtreeNodePtr node;
+        (void)m_cache.remove(blkid, node);
+    });
+}
+
 /*
 IndexBtreeNode* IndexBtreeNode::convert(BtreeNode* bt_node) {
     return r_cast< IndexBtreeNode* >(bt_node->get_node_context());
