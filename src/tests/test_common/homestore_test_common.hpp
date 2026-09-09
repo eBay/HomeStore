@@ -243,7 +243,11 @@ public:
 
         flip::FlipCondition dont_care_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
-        fc->inject_retval_flip< long >("set_minimum_chunk_size", {dont_care_cond}, freq, chunk_size);
+        fc->inject_retval_flip< long >(
+            "set_minimum_chunk_size",
+            std::array<flip::FlipCondition, 1>{dont_care_cond},
+            freq,
+            chunk_size);
 #endif
     }
 
@@ -253,7 +257,10 @@ public:
         flip::FlipFrequency freq;
         freq.set_count(count);
         freq.set_percent(percent);
-        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        m_fc.inject_noreturn_flip(
+            flip_name,
+            std::array<flip::FlipCondition, 1>{null_cond},
+            freq);
         LOGDEBUG("Flip {} set", flip_name);
     }
 
@@ -262,7 +269,11 @@ public:
         flip::FlipFrequency freq;
         freq.set_count(count);
         freq.set_percent(percent);
-        m_fc.inject_delay_flip(flip_name, {null_cond}, freq, delay_usec);
+        m_fc.inject_delay_flip(
+            flip_name,
+            std::array<flip::FlipCondition, 1>{null_cond},
+            freq,
+            delay_usec);
         LOGDEBUG("Flip {} set", flip_name);
     }
 
