@@ -94,7 +94,7 @@ public:
         flip::FlipFrequency freq;
         freq.set_count(10000);
         freq.set_percent(100);
-        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        m_fc.inject_noreturn_flip(flip_name, std::array< flip::FlipCondition, 1 >{null_cond}, freq);
         m_bt->set_flip_point(flip_name);
         LOGINFO("Flip {} set", flip_name);
     }
