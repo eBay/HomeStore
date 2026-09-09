@@ -288,17 +288,17 @@ result< std::vector< blk_id > > blk_data_service::alloc_blk_list(uint32_t size, 
     return out_blkids;
 }
 
-status blk_data_service::commit_blk(multi_blk_id const& blkid) {
+status blk_data_service::commit_blk(multi_blk_id const& blkid, bool recommit) {
     if (is_stopping()) return std::unexpected(std::make_error_condition(std::errc::operation_canceled));
     incr_pending_request_num();
 
     BlkAllocStatus ret = BlkAllocStatus::SUCCESS;
     if (blkid.num_pieces() == 1) {
-        ret = m_vdev->commit_blk(blkid); // shortcut for the most common case
+        ret = m_vdev->commit_blk(blkid, recommit); // shortcut for the most common case
     } else {
         auto it = blkid.iterate();
         while (auto const bid = it.next()) {
-            ret = m_vdev->commit_blk(*bid);
+            ret = m_vdev->commit_blk(*bid, recommit);
             if (ret != BlkAllocStatus::SUCCESS) { break; }
         }
     }
