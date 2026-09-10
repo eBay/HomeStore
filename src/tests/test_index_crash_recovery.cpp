@@ -16,9 +16,13 @@
 #include <gtest/gtest.h>
 #include <boost/uuid/random_generator.hpp>
 
+#include <set>
+#include <vector>
 #include <sisl/utility/enum.hpp>
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"
+#include "device/chunk.h"
+#include "device/virtual_dev.hpp"
 #include "test_common/homestore_test_common.hpp"
 #include "test_common/range_scheduler.hpp"
 #include "btree_helpers/btree_test_helper.hpp"
@@ -863,6 +867,243 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     }
 }
 
+// Scenario: first root split (depth 0 → 1), crash while writing the SB (meta_buf).
+//
+// Setup: insert max_keys/2 keys and checkpoint to establish a durable leaf root (depth=0).
+// Then insert more keys until the first root split fires (depth becomes 1), with
+// "crash_flush_on_meta" armed so that the crash fires the moment the SB write begins.
+//
+// Disk state at crash:
+//   - new_root_buf is durable (Fix 2 pre-flush wrote it before the normal DAG flush).
+//   - old_root (the modified leaf) is durable in split state.
+//   - SB still names the old_root as root.
+//
+// Expected recovery (Fix 2): the journal identifies new_root_buf as the intended root,
+// persisted_root_was_committed() confirms old_root was written, so new_root_buf is
+// promoted.  After recovery depth == 1 and all keys are intact.
+TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_flush_on_meta");
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Scenario: first root split (depth 0 → 1), crash after old_root is flushed but before
+// new_root_buf is written.
+//
+// Setup: same as CrashAtMetaBufOnFirstRootSplit, but "crash_flush_on_root" fires when
+// the new_root_buf write begins, so old_root reaches disk in its split state while
+// new_root_buf has not yet been written.
+//
+// Disk state at crash:
+//   - old_root is durable with edge_info=EMPTY and next_bnode=child_node2 (split state).
+//   - new_root_buf has NOT been written (Fix 2 pre-flush was interrupted).
+//   - SB still names old_root.
+//
+// Expected recovery: Fix 2 pre-flush guarantees new_root_buf is written before old_root
+// reaches disk (Fix 2 barrier), so new_root_buf must be durable.  Recovery identifies
+// it via the journal and promotes it.  After recovery depth == 1 and all keys are intact.
+TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_flush_on_root");
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Scenario: first root split (depth 0 → 1), crash during Fix 2's pre-flush barrier
+// before any node of the split reaches disk.
+//
+// Setup: same initial state (durable leaf root at depth=0), but "crash_during_root_preflush"
+// fires inside the async pre-flush writes, before the normal DAG flush starts.
+// crash_simulator.set_will_crash(true) is called explicitly because this flip fires
+// before the CP engine's own crash point.
+//
+// Disk state at crash:
+//   - Neither new_root_buf nor old_root has been written in the crashed CP.
+//   - The tree on disk is still in the pre-split consistent state (depth=0, old leaf root intact).
+//   - SB still names the original durable leaf root.
+//
+// Expected recovery: because old_root was never written in split state,
+// persisted_root_was_committed() returns false, new_root_buf is discarded, and the tree
+// reverts to its last fully consistent checkpoint.  After recovery root_node_id equals
+// durable_root and depth == 0.  reapply_after_crash re-inserts all post-CP keys.
+TYPED_TEST(IndexCrashTest, CrashDuringRootPreflushOnFirstRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+    const uint32_t durable_key_count = max_keys / 2;
+
+    for (uint32_t k = 0; k < durable_key_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const durable_root = this->m_bt->root_node_id();
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+
+    this->set_basic_flip("crash_during_root_preflush");
+    hs()->crash_simulator().set_will_crash(true);
+    uint32_t next_key = durable_key_count;
+    while (this->m_bt->get_btree_depth() == 0) {
+        this->put(next_key++, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 1);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(this->m_bt->root_node_id(), durable_root);
+    ASSERT_EQ(this->m_bt->get_btree_depth(), 0);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Scenario: second (or higher) root split (depth N → N+1), crash while writing the SB.
+//
+// Setup: insert max_keys+1 keys and checkpoint to establish a durable level-1 root.
+// Then insert max_keys*max_keys more keys to trigger one or more additional root splits,
+// with "crash_flush_on_meta" armed so the crash fires when the SB write begins.
+//
+// Disk state at crash:
+//   - new_root_buf (and any intermediate new roots) are durable via Fix 2 pre-flush.
+//   - old_root (level-1 internal node) is durable in split state.
+//   - SB still names the level-1 old_root.
+//
+// Expected recovery: same Fix 2 path as the first-split cases, but exercised on a
+// multi-level tree to confirm that the journal-based root promotion works regardless of
+// tree height.  After recovery depth > persisted_depth and all keys are intact.
+TYPED_TEST(IndexCrashTest, CrashAtMetaBufOnSecondRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+
+    // Establish a durable level-1 root before triggering the crash-sensitive level-1 -> level-2 split.
+    for (uint32_t k = 0; k <= max_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const persisted_root = this->m_bt->root_node_id();
+    auto const persisted_depth = this->m_bt->get_btree_depth();
+
+    this->set_basic_flip("crash_flush_on_meta");
+    const uint32_t phase2_count = max_keys * max_keys;
+    for (uint32_t k = max_keys + 1; k <= max_keys + phase2_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), persisted_root);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
+// Scenario: second (or higher) root split, crash after old_root is flushed but before
+// new_root_buf is written; then crash a second time without a recovery CP to prove
+// that replaying the same journal and re-promoting the same root is idempotent.
+//
+// Setup: establish a durable level-1 root, then arm both "crash_flush_on_root" and
+// "skip_cp_after_index_root_recovery".  The first flip causes the crash after old_root
+// hits disk; the second flip suppresses the forced recovery CP so the original journal
+// remains on disk unchanged after the first recovery.
+//
+// Disk state at first crash:
+//   - old_root is durable in split state; new_root_buf is durable (Fix 2 pre-flush).
+//   - SB still names old_root.
+//
+// First recovery: Fix 2 promotes new_root_buf; depth > persisted_depth.
+//
+// Second crash (immediate, no recovery CP written):
+//   - The journal on disk still records the same root-change.
+//   - new_root_buf is already the in-memory root, and its blkid is already in the SB
+//     (written by set_root_from_committed_buf during the first recovery).
+//
+// Second recovery: the journal candidate is re-evaluated; set_root_from_committed_buf
+// detects the SB already names new_root_buf and is a no-op.  This verifies that
+// promoting an already-promoted root does not corrupt the tree.
+// After both recoveries depth > persisted_depth and all keys are intact.
+TYPED_TEST(IndexCrashTest, CrashAfterOldRootFlushOnSecondRootSplit) {
+    const uint32_t max_keys = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+
+    for (uint32_t k = 0; k <= max_keys; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+    auto const persisted_root = this->m_bt->root_node_id();
+    auto const persisted_depth = this->m_bt->get_btree_depth();
+
+    this->set_basic_flip("crash_flush_on_root");
+    this->set_basic_flip("skip_cp_after_index_root_recovery");
+    const uint32_t phase2_count = max_keys * max_keys;
+    for (uint32_t k = max_keys + 1; k <= max_keys + phase2_count; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    ASSERT_NE(this->m_bt->root_node_id(), persisted_root);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+
+    // The recovery CP was deliberately skipped, so the original journal is still current. Crash and wait sequentially
+    // to prove replaying the already-published candidate is idempotent.
+    hs()->crash_simulator().set_will_crash(true);
+    hs()->crash_simulator().crash();
+    this->wait_for_crash_recovery(true);
+    ASSERT_GT(this->m_bt->get_btree_depth(), persisted_depth);
+    this->reapply_after_crash();
+    this->get_all();
+}
+
 TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     long_running_crash_options crash_test_options{
         .put_freq = 100,
@@ -1414,6 +1655,334 @@ TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
 
     LOGINFO("Step 6: Recovery succeeded - bug is fixed (SDSTOR-21880)");
     ASSERT_EQ(hs()->index_service().num_tables(), 2) << "Both tables should be recovered";
+}
+
+// Regression reproducer for the recovery ordering bug where a node that is
+// created and freed in the crashed CP is put into deleted_bufs even though its
+// blkid was never persisted in the allocator bitmap.
+//
+// This test does not add or depend on any new test flip. It uses the existing
+// crash_flush_on_split_at_parent flip only to stop the CP after the index journal
+// is persisted. The first current-CP split is immediately merged away so that
+// its newly allocated blkid is also freed in the same CP; because that allocation
+// is the first one after the clean baseline CP, the blkid is small and appears
+// near the head of fixed_blk_allocator::m_free_blk_q after restart. The later
+// split storm creates enough child links for recovery repair to allocate parent
+// repair nodes normally; when repair reuses that small created+freed blkid,
+// deleted_bufs later frees the live repair node. Subsequent normal inserts then
+// either crash in IndexWBCache::alloc_buf() at the duplicate cache insert assert,
+// or corrupt a shared-blkid btree node and crash during validation/use.
+struct IndexCrashCreatedFreedReuseTest : public test_common::HSTestHelper,
+                                         BtreeTestHelper< FixedLenBtree >,
+                                         public ::testing::Test {
+    using T = FixedLenBtree;
+    using K = T::KeyType;
+    using V = T::ValueType;
+
+    struct InspectableIndexTable : public T::BtreeType {
+        InspectableIndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, BtreeConfig const& cfg,
+                              bool* flush_recovery_free_list, std::set< bnodeid_t >* recovery_freed_node_ids) :
+                T::BtreeType{uuid, parent_uuid, user_sb_size, cfg},
+                m_flush_recovery_free_list{flush_recovery_free_list},
+                m_recovery_freed_node_ids{recovery_freed_node_ids} {}
+
+        InspectableIndexTable(superblk< index_table_sb >&& sb, BtreeConfig const& cfg, bool* flush_recovery_free_list,
+                              std::set< bnodeid_t >* recovery_freed_node_ids) :
+                T::BtreeType{std::move(sb), cfg},
+                m_flush_recovery_free_list{flush_recovery_free_list},
+                m_recovery_freed_node_ids{recovery_freed_node_ids} {}
+
+        void recovery_completed() override {
+            T::BtreeType::recovery_completed();
+            if (m_flush_recovery_free_list && *m_flush_recovery_free_list) {
+                auto cpg = hs()->cp_mgr().cp_guard();
+                auto* cp_ctx = s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+                if (m_recovery_freed_node_ids) {
+                    cp_ctx->m_free_blkid_list.foreach_entry(
+                        [this](blk_id bid) { m_recovery_freed_node_ids->insert(bid.to_integer()); });
+                }
+                auto const root_blk = blk_id{this->root_node_id()};
+                auto* chunk = hs()->device_mgr()->get_chunk_mutable(root_blk.chunk_num());
+                RELEASE_ASSERT(chunk != nullptr, "Index chunk not found for root blkid {}", root_blk.to_string());
+                auto* vdev = hs()->device_mgr()->get_vdev_mutable(chunk->vdev_id());
+                RELEASE_ASSERT(vdev != nullptr, "Index vdev not found for root blkid {}", root_blk.to_string());
+                vdev->cp_flush(cp_ctx);
+                *m_flush_recovery_free_list = false;
+            }
+        }
+
+        std::set< bnodeid_t > collect_node_ids() const {
+            std::set< bnodeid_t > ids;
+            collect_node_ids_recurse(this->root_node_id(), ids);
+            return ids;
+        }
+
+    private:
+        void collect_node_ids_recurse(bnodeid_t node_id, std::set< bnodeid_t >& ids) const {
+            if ((node_id == empty_bnodeid) || ids.contains(node_id)) { return; }
+
+            BtreeNodePtr node;
+            if ((this->read_node_impl(node_id, node) != btree_status_t::success) || node->is_node_deleted()) { return; }
+            ids.insert(node_id);
+
+            if (node->is_leaf()) { return; }
+
+            for (uint32_t i = 0; i < node->total_entries(); ++i) {
+                BtreeLinkInfo child_info;
+                node->get_nth_value(i, &child_info, false /* copy */);
+                collect_node_ids_recurse(child_info.bnode_id(), ids);
+            }
+
+            if (node->has_valid_edge()) { collect_node_ids_recurse(node->get_edge_value().bnode_id(), ids); }
+        }
+
+        bool* m_flush_recovery_free_list{nullptr};
+        std::set< bnodeid_t >* m_recovery_freed_node_ids{nullptr};
+    };
+
+    using BtType = InspectableIndexTable;
+
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(IndexCrashCreatedFreedReuseTest* test) : m_test{test} {}
+
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
+            LOGINFO("Index table recovered, root bnode_id {} uuid {} ordinal {} version {}",
+                    static_cast< uint64_t >(sb->root_node), boost::uuids::to_string(sb->uuid), sb->ordinal,
+                    sb->root_link_version);
+            m_test->init_cfg();
+            m_test->m_bt = std::make_shared< BtType >(std::move(sb), m_test->m_cfg, &m_test->m_flush_recovery_free_list,
+                                                      &m_test->m_recovery_freed_node_ids);
+            return m_test->m_bt;
+        }
+
+    private:
+        IndexCrashCreatedFreedReuseTest* m_test;
+    };
+
+    IndexCrashCreatedFreedReuseTest() : testing::Test() { this->m_is_multi_threaded = false; }
+
+    bool m_flush_recovery_free_list{false};
+    std::set< bnodeid_t > m_recovery_freed_node_ids;
+
+    void init_cfg() {
+        this->m_cfg = BtreeConfig(hs()->index_service().node_size());
+        this->m_cfg.m_leaf_node_type = T::leaf_node_type;
+        this->m_cfg.m_int_node_type = T::interior_node_type;
+        this->m_cfg.m_max_keys_in_node = 20;
+        this->m_cfg.m_min_keys_in_node = 6;
+        this->m_cfg.m_max_merge_level = 1;
+    }
+
+    void SetUp() override {
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            s.generic.cp_timer_us = 0x8000000000000000;
+            s.resource_limits.dirty_buf_percent = 100;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        this->start_homestore(
+            "test_index_crash_recovery",
+            {{HS_SERVICE::META, {.size_pct = 10.0}},
+             {HS_SERVICE::INDEX, {.size_pct = 10.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+            nullptr, {}, true /* init_device */);
+
+        BtreeTestHelper< FixedLenBtree >::SetUp();
+        init_cfg();
+
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+        this->m_bt = std::make_shared< BtType >(uuid, parent_uuid, 0, this->m_cfg, &m_flush_recovery_free_list,
+                                                &m_recovery_freed_node_ids);
+        hs()->index_service().add_index_table(this->m_bt);
+    }
+
+    void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
+        this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        test_common::HSTestHelper::restart_homestore(shutdown_delay_sec);
+    }
+
+    void TearDown() override {
+        BtreeTestHelper< FixedLenBtree >::TearDown();
+        this->shutdown_homestore(false);
+    }
+
+    void insert_key(uint32_t key_num) {
+        K key{key_num};
+        V value{V::generate_rand()};
+        auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::INSERT};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->put(req);
+        ASSERT_EQ(ret, btree_status_t::success) << "insert key=" << key_num << " failed with " << enum_name(ret);
+    }
+
+    void update_key(uint32_t key_num) {
+        K key{key_num};
+        V value{V::generate_rand()};
+        auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::UPDATE};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->put(req);
+        ASSERT_EQ(ret, btree_status_t::success) << "update key=" << key_num << " failed with " << enum_name(ret);
+    }
+
+    bool remove_key(uint32_t key_num) {
+        auto existing_v = std::make_unique< V >();
+        K key{key_num};
+        auto req = BtreeSingleRemoveRequest{&key, existing_v.get()};
+        req.enable_route_tracing();
+        auto const ret = this->m_bt->remove(req);
+        if ((ret != btree_status_t::success) && (ret != btree_status_t::not_found)) {
+            ADD_FAILURE() << "remove key=" << key_num << " failed with " << enum_name(ret);
+        }
+        return ret == btree_status_t::success;
+    }
+
+    void insert_sparse_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        for (auto k = begin; k <= end; k += step) {
+            insert_key(k);
+        }
+    }
+
+    void insert_range_skip_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        for (auto k = begin; k < end; ++k) {
+            if ((k % step) == 0) { continue; }
+            insert_key(k);
+        }
+    }
+
+    void remove_range_skip_multiples(uint32_t begin, uint32_t end, uint32_t step) {
+        uint32_t removed{0};
+        for (auto k = begin; k < end; ++k) {
+            if ((k % step) == 0) { continue; }
+            if (remove_key(k)) { ++removed; }
+        }
+        ASSERT_GT(removed, 0u) << "expected at least one key to be removed in [" << begin << ", " << end << ")";
+    }
+
+    void verify_existing_range(uint32_t begin, uint32_t end) {
+        for (auto k = begin; k < end; ++k) {
+            auto out_v = std::make_unique< V >();
+            K key{k};
+            auto req = BtreeSingleGetRequest{&key, out_v.get()};
+            req.enable_route_tracing();
+            auto const ret = this->m_bt->get(req);
+            ASSERT_EQ(ret, btree_status_t::success) << "get key=" << k << " failed with " << enum_name(ret);
+        }
+    }
+
+    std::shared_ptr< BtType > inspectable_bt() const { return std::static_pointer_cast< BtType >(this->m_bt); }
+
+    bnodeid_t first_added_node_id(std::set< bnodeid_t > const& before, std::set< bnodeid_t > const& after) const {
+        for (auto const id : after) {
+            if (!before.contains(id)) { return id; }
+        }
+        return empty_bnodeid;
+    }
+
+    std::vector< bnodeid_t > added_then_freed_node_ids(std::set< bnodeid_t > const& before,
+                                                       std::set< bnodeid_t > const& after_add,
+                                                       std::set< bnodeid_t > const& after_free) const {
+        std::vector< bnodeid_t > ids;
+        for (auto const id : after_add) {
+            if (!before.contains(id) && !after_free.contains(id)) { ids.push_back(id); }
+        }
+        return ids;
+    }
+
+    void commit_index_free_queue_until(uint64_t remaining_blks) {
+        auto const root_blk = blk_id{this->m_bt->root_node_id()};
+        auto* chunk = hs()->device_mgr()->get_chunk_mutable(root_blk.chunk_num());
+        RELEASE_ASSERT(chunk != nullptr, "Index chunk not found for root blkid {}", root_blk.to_string());
+        auto* vdev = hs()->device_mgr()->get_vdev_mutable(chunk->vdev_id());
+        RELEASE_ASSERT(vdev != nullptr, "Index vdev not found for root blkid {}", root_blk.to_string());
+
+        blk_alloc_hints hints;
+        hints.application_hint = this->m_bt->ordinal();
+
+        uint64_t consumed{0};
+        while (vdev->available_blks() > remaining_blks) {
+            blk_id blkid;
+            auto status = vdev->alloc_contiguous_blks(1, hints, blkid);
+            ASSERT_EQ(status, BlkAllocStatus::SUCCESS)
+                << "failed to consume index free queue after " << consumed << " allocations";
+            status = vdev->commit_blk(blkid);
+            ASSERT_EQ(status, BlkAllocStatus::SUCCESS) << "failed to commit consumed blk " << blkid.to_string();
+            ++consumed;
+        }
+        LOGINFO("Persistently consumed {} index free blks; remaining free blks={}", consumed, vdev->available_blks());
+    }
+};
+
+TEST_F(IndexCrashCreatedFreedReuseTest, CreatedAndFreedBlkReusedByRecoveryRepair) {
+    constexpr uint32_t sparse_step = 100;
+    constexpr uint32_t preload_last_key = 2000;
+    constexpr uint64_t crash_cp_free_queue_blks = 512;
+
+    LOGINFO("Step 1: preload sparse keys [0, {}] step {} and flush the baseline CP", preload_last_key, sparse_step);
+    insert_sparse_multiples(0, preload_last_key, sparse_step);
+    test_common::HSTestHelper::trigger_cp(true);
+
+    LOGINFO("Step 1b: persistently consume index free queue so crash-CP created nodes are near recovery queue head");
+
+    // simulate a case that a lot of blk is consumed by other btree node allocation. for example, we have 2 btrees. one
+    // is used for reproduce this issue(the current one) , the other is used for consuming blks(receives lots of put
+    // request and lead to a lot of  blk allocation). commit_index_free_queue_until is used to consume free blks , just
+    // like what the second btree does.
+    commit_index_free_queue_until(crash_cp_free_queue_blks);
+    update_key(0);
+    test_common::HSTestHelper::trigger_cp(true);
+
+    LOGINFO("Step 2: set existing crash flip to crash after journal persistence but before parent flush");
+    this->set_basic_flip("crash_flush_on_split_at_parent");
+
+    LOGINFO("Step 3: observe the first current-CP split node, then make that exact blkid created+freed");
+    auto const before_first_split = inspectable_bt()->collect_node_ids();
+    insert_range_skip_multiples(1, 160, sparse_step);
+    auto const after_first_split = inspectable_bt()->collect_node_ids();
+    ASSERT_NE(first_added_node_id(before_first_split, after_first_split), empty_bnodeid)
+        << "expected first current-CP split to add a node";
+
+    remove_range_skip_multiples(1, 160, sparse_step);
+    auto const after_target_merge = inspectable_bt()->collect_node_ids();
+    auto const created_freed_node_ids =
+        added_then_freed_node_ids(before_first_split, after_first_split, after_target_merge);
+    ASSERT_FALSE(created_freed_node_ids.empty()) << "expected a current-CP split node to be freed in the same CP";
+    LOGINFO("Found {} created+freed node candidates in the crash CP", created_freed_node_ids.size());
+
+    LOGINFO("Step 4: create many more split records in the same unflushed CP to force recovery repair allocations");
+    insert_range_skip_multiples(1, preload_last_key, sparse_step);
+
+    LOGINFO("Step 5: crash and recover through the normal recovery/repair path");
+    m_flush_recovery_free_list = true;
+    m_recovery_freed_node_ids.clear();
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    LOGINFO("Step 6: do sanity check");
+    // 1 all the recovered nodes should not exist in m_recovery_freed_node_ids either ( should not be freed during
+    // recovery)
+    auto const recovered_nodes = inspectable_bt()->collect_node_ids();
+    for (const auto id : m_recovery_freed_node_ids) {
+        ASSERT_FALSE(recovered_nodes.contains(id))
+            << "created_freed_node " << id << " was freed and also recovered as a live node";
+    }
+
+    // 2 all the created+freed blkids should not be freed during recovery ( should not appear in
+    // m_recovery_freed_node_ids)
+    for (auto const id : created_freed_node_ids) {
+        ASSERT_FALSE(m_recovery_freed_node_ids.contains(id))
+            << "created_freed_node " << id << " was freed during recovery";
+    }
+
+    LOGINFO("Step 7: fixed recovery detected; no same-CP created+freed blkid was freed, verify writes and reads");
+    for (auto k = 100000u; k < 100300u; ++k) {
+        insert_key(k);
+    }
+
+    for (auto k = 0u; k <= preload_last_key; k += sparse_step) {
+        verify_existing_range(k, k + 1);
+    }
 }
 
 #endif

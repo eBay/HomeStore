@@ -72,6 +72,8 @@ public:
 
 private:
     void start_flush_threads();
+    void start_buffer_flush(IndexCPContext* cp_ctx);
+    sisl::async::task< void > preflush_root_nodes(IndexCPContext* cp_ctx, IndexBufferPtrList preflush_bufs);
     void recover_new_nodes(sisl::byte_view sb);
     void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr const& pbuf);
     void do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch);

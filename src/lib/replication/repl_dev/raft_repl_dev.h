@@ -224,7 +224,7 @@ private:
 
     // pending create requests, including both raft and data channel
     std::atomic_uint64_t m_pending_init_req_num;
-    std::atomic< bool > m_in_quience;
+    std::atomic< bool > m_in_quiescence;
     // we can only accept lsn that smaller than latch_lsn
     std::atomic< int64_t > m_latch_lsn{INT64_MAX};
 
@@ -440,7 +440,7 @@ public:
 
     /**
      * \brief This method is called to force leave the group without waiting for committing the destroy message.
-     * it is used when the repl_dev is a stale member of a destroyed group. this stable member does not receive the
+     * it is used when the repl_dev is a stale member of a destroyed group. this stale member does not receive the
      * destroy message. but the group is already destroyed, so no leader will send this message again to this stale
      * member. we need to force leave the group to avoid the stale member to be a part of the group.
      */
@@ -522,9 +522,11 @@ private:
                                   sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
                                   cshared< repl_dev_listener >& listener);
 
-    bool is_in_quience() { return m_in_quience.load(std::memory_order_acquire); }
+    bool is_in_quiescence() { return m_in_quiescence.load(std::memory_order_acquire); }
 
     uint64_t get_pending_init_req_num() { return m_pending_init_req_num.load(std::memory_order_acquire); }
+
+    static size_t get_safe_append_batch_size(const std::vector< nuraft::ptr< nuraft::log_entry > >& entries);
 };
 
 } // namespace homestore
