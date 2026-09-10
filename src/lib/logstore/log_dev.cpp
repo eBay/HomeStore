@@ -462,6 +462,17 @@ bool LogDev::flush_if_necessary(int64_t threshold_size) {
             decr_pending_request_num();
             return flush();
         }
+        // Lost the race to a concurrent flush() (e.g. another write's own flush_if_necessary() call, or
+        // HomeLogStore::truncate()'s internal flush()). That concurrent flush's own snapshot of m_log_idx
+        // may not include the data that made this call decide to flush, so giving up here silently can
+        // leave that data unflushed indefinitely if nothing else ever calls flush_if_necessary() again
+        // for this logdev -- normally masked by the periodic flush timer eventually retrying, but with
+        // it disabled (flush_timer_frequency_us=0, e.g. in tests) this is a real, reproducible hang: the
+        // very last write issued in a run has no later trigger to fall back on. Reschedule a follow-up
+        // attempt on the flush thread instead of dropping it, mirroring the !can_flush_in_this_thread()
+        // reschedule above.
+        iomanager.run_on_forget(logstore_service().flush_thread(),
+                                [this, threshold_size]() { flush_if_necessary(threshold_size); });
     }
     decr_pending_request_num();
     return false;
