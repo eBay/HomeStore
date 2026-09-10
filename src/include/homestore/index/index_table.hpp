@@ -225,7 +225,7 @@ public:
             return;
         }
 
-        auto const* phdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        auto const* phdr = reinterpret_cast< persistent_hdr_t const* >(raw_buf);
         if (phdr->node_id != idx_buf->blkid().to_integer()) {
             LOGERROR("repair_root_node: skip invalid/unwritten buf {}", idx_buf->to_string());
             return;
@@ -282,7 +282,7 @@ public:
             return false;
         }
 
-        auto const* candidate_hdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        auto const* candidate_hdr = reinterpret_cast< persistent_hdr_t const* >(raw_buf);
         if (candidate_hdr->node_id != idx_buf->blkid().to_integer()) {
             LOGERROR("set_root_from_committed_buf: reject invalid candidate {}", idx_buf->to_string());
             return false;
@@ -356,7 +356,7 @@ public:
             LOGERROR("repair_node: skip invalid/unwritten buf {}", idx_buf->to_string());
             return;
         }
-        auto const* phdr = r_cast< persistent_hdr_t const* >(raw_buf);
+        auto const* phdr = reinterpret_cast< persistent_hdr_t const* >(raw_buf);
         if (phdr->node_id != idx_buf->blkid().to_integer()) {
             LOGERROR("repair_node: skip buf {} whose persisted node_id={} does not match blkid={}",
                      idx_buf->to_string(), phdr->node_id, idx_buf->blkid().to_integer());
