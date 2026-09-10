@@ -749,7 +749,12 @@ private:
      */
     void unreserve_store_id(logstore_id_t store_id);
 
-    void on_flush_completion(LogGroup* lg);
+    // status is default-constructed (no error) on the normal success path. On a flush I/O failure, called
+    // with a failure status *only if* every record in the flushed range belongs to a log store that has
+    // opted in via HomeLogStore::set_propagates_write_errors(true) -- otherwise this is not called at all,
+    // preserving today's exact behavior (and its accidental but relied-upon retry-on-transient-error
+    // resilience) for every log store that hasn't opted in.
+    void on_flush_completion(LogGroup* lg, std::error_condition status = {});
     void on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb);
     void handle_unopened_log_stores(bool format);
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,

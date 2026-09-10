@@ -283,6 +283,15 @@ public:
 
     auto get_comp_cb() const { return m_comp_cb; }
 
+    /**
+     * @brief Opt in to receiving a failure-status completion when a flush I/O error occurs, instead of the
+     * completion callback never being invoked at all (today's behavior for every log store). Off by
+     * default so existing callers (e.g. the RAFT/Solo repl_dev log stores) are completely unaffected --
+     * this is additive, not a behavior change, until a store explicitly opts in.
+     */
+    void set_propagates_write_errors(bool propagate) { m_propagates_write_errors = propagate; }
+    bool propagates_write_errors() const { return m_propagates_write_errors; }
+
     void stop();
 
 private:
@@ -290,6 +299,7 @@ private:
     std::shared_ptr< LogDev > m_logdev;
     sisl::StreamTracker< logstore_record > m_records;
     bool m_append_mode{false};
+    bool m_propagates_write_errors{false};
     log_req_comp_cb_t m_comp_cb;
     log_found_cb_t m_found_cb;
     log_replay_done_cb_t m_replay_done_cb;

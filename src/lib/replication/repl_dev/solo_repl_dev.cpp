@@ -1,4 +1,5 @@
 #include <latch>
+#include <system_error>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "replication/repl_dev/common.h"
@@ -78,7 +79,9 @@ void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
 
     m_data_journal->append_async(
         sisl::io_blob{rreq->raw_journal_buf(), rreq->journal_entry_size(), false /* is_aligned */},
-        nullptr /* cookie */, [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, void*) mutable {
+        nullptr /* cookie */,
+        // status intentionally unused here -- tracked under SDSTOR-25623, not fixed as part of this change.
+        [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, std::error_condition, void*) mutable {
             rreq->set_lsn(lsn);
             m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 

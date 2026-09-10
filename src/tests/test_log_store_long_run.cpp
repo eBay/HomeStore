@@ -32,6 +32,7 @@
 #include <random> // std::default_random_engine
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -125,7 +126,9 @@ public:
             auto* d = prepare_data(lsn, io_memory);
             m_log_store->write_async(
                 lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
-                [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
+                [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key,
+                                     std::error_condition status, void* ctx) {
+                    assert(!status);
                     assert(ld_key);
                     if (io_memory) {
                         iomanager.iobuf_free(uintptr_cast(d));

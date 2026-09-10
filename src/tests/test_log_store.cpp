@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -32,6 +33,7 @@
 #include <random> // std::default_random_engine
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -152,7 +154,9 @@ public:
                 auto* d = prepare_data(lsn, io_memory);
                 m_log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
                                          [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b,
-                                                              logdev_key ld_key, void* ctx) {
+                                                              logdev_key ld_key, std::error_condition status,
+                                                              void* ctx) {
+                                             assert(!status);
                                              assert(ld_key);
                                              if (io_memory) {
                                                  iomanager.iobuf_free(uintptr_cast(d));
@@ -869,6 +873,10 @@ protected:
         }
     }
 
+    HomeLogStore* raw_log_store(size_t idx = 0) {
+        return SampleDB::instance().m_log_store_clients[idx]->m_log_store.get();
+    }
+
 private:
     SampleLogStoreClient* pick_log_store() {
         static thread_local std::random_device rd{};
@@ -1184,6 +1192,51 @@ TEST_F(LogStoreTest, FlushSync) {
     fc->remove_flip("simulate_log_flush_delay");
 #endif
 }
+
+#ifdef _PRERELEASE
+TEST_F(LogStoreTest, FlushIOErrorPropagatesToCallback) {
+    LOGINFO("Step 1: Reinit with no records -- this test issues its own single write directly");
+    this->init(0);
+
+    auto* log_store = this->raw_log_store(0);
+    LOGINFO("Step 2: Opt this log store in to flush-failure propagation (off by default for everyone else)");
+    log_store->set_propagates_write_errors(true);
+
+    LOGINFO("Step 3: Arm a flip to force the next flush's sync_pwritev to fail");
+    flip::FlipClient* fc = iomgr_flip::client_instance();
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_noreturn_flip("simulate_log_flush_error", {dont_care_cond}, freq);
+
+    LOGINFO("Step 4: Issue one write with a status-aware callback and force a flush");
+    bool io_memory{false};
+    const auto lsn = log_store->get_contiguous_issued_seq_num(-1) + 1;
+    auto* d = SampleLogStoreClient::prepare_data(lsn, io_memory);
+    std::promise< std::error_condition > status_promise;
+    auto status_future = status_promise.get_future();
+    log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
+                           [&status_promise, d, io_memory](logstore_seq_num_t, const sisl::io_blob&, logdev_key,
+                                                            std::error_condition status, void*) {
+                               if (io_memory) {
+                                   iomanager.iobuf_free(uintptr_cast(d));
+                               } else {
+                                   std::free(voidptr_cast(d));
+                               }
+                               status_promise.set_value(status);
+                           });
+    log_store->flush();
+
+    LOGINFO("Step 5: The callback must fire with a failure status -- pre-fix, it would never fire at all");
+    auto const wait_status = status_future.wait_for(std::chrono::seconds(30));
+    fc->remove_flip("simulate_log_flush_error");
+    ASSERT_EQ(wait_status, std::future_status::ready)
+        << "flush-failure completion callback was never invoked (would hang forever pre-fix)";
+    ASSERT_TRUE(bool(status_future.get())) << "expected a failure status on the callback, got success";
+}
+#endif
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;

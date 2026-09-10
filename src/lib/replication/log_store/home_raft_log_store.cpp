@@ -13,6 +13,8 @@
  *
  *********************************************************************************/
 
+#include <system_error>
+
 #include "home_raft_log_store.h"
 #include "storage_engine_buffer.h"
 #include <sisl/fds/utils.hpp>
@@ -165,9 +167,10 @@ ulong HomeRaftLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     REPL_STORE_LOG(TRACE, "append entry term={}, log_val_type={} size={}", entry->get_term(),
                    static_cast< uint32_t >(entry->get_val_type()), entry->get_buf().size());
     auto buf = entry->serialize();
-    auto const next_seq =
-        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
-                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const next_seq = m_log_store->append_async(
+        sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */}, nullptr /* cookie */,
+        // status intentionally unused here -- tracked under SDSTOR-25623, not fixed as part of this change.
+        [buf](int64_t, sisl::io_blob&, logdev_key, std::error_condition, void*) {});
     ulong lsn = to_repl_lsn(next_seq);
 
     auto position_in_cache = lsn % m_log_entry_cache.size();
@@ -187,9 +190,10 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
     // calls, but it is dangerous to set higher number.
     m_last_durable_lsn = -1;
 
-    auto const appended_seq =
-        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
-                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const appended_seq = m_log_store->append_async(
+        sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */}, nullptr /* cookie */,
+        // status intentionally unused here -- tracked under SDSTOR-25623, not fixed as part of this change.
+        [buf](int64_t, sisl::io_blob&, logdev_key, std::error_condition, void*) {});
     HS_REL_ASSERT_EQ(to_repl_lsn(appended_seq), static_cast< repl_lsn_t >(index),
                      "write_at appended lsn mismatch: expected {} actual {}", index, to_repl_lsn(appended_seq));
 

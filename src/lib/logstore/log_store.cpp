@@ -74,8 +74,8 @@ logstore_seq_num_t HomeLogStore::write_async(logstore_seq_num_t seq_num, const s
     auto* req = logstore_req::make(this, seq_num, b);
     req->cookie = cookie;
 
-    auto ret = write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
-        if (cb) { cb(req->seq_num, req->data, written_lkey, req->cookie); }
+    auto ret = write_async(req, [cb](logstore_req* req, logdev_key written_lkey, std::error_condition status) {
+        if (cb) { cb(req->seq_num, req->data, written_lkey, status, req->cookie); }
         logstore_req::free(req);
     });
     decr_pending_request_num();

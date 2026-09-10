@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -38,13 +39,16 @@ struct logdev_key;
 
 typedef int64_t logid_t;
 typedef int64_t logstore_seq_num_t;
-typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
+// status is default-constructed (no error) on success; set on a flush I/O error (a sync_pwritev
+// failure that today returns from LogDev::flush() without ever reaching this callback at all).
+typedef std::function< void(logstore_req*, logdev_key, std::error_condition) > log_req_comp_cb_t;
 typedef sisl::byte_view log_buffer;
 typedef uint32_t logstore_id_t;
 typedef uint32_t logdev_id_t;
 
-typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
-typedef std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) > log_write_comp_cb_t;
+typedef std::function< void(logstore_req*, logdev_key, std::error_condition) > log_req_comp_cb_t;
+typedef std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, std::error_condition, void*) >
+    log_write_comp_cb_t;
 typedef std::function< void(logstore_seq_num_t, log_buffer, void*) > log_found_cb_t;
 typedef std::function< void(std::shared_ptr< HomeLogStore >) > log_store_opened_cb_t;
 typedef std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t) > log_replay_done_cb_t;
