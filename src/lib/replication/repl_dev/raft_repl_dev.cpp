@@ -90,7 +90,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     m_identify_str = m_rdev_name + ":" + group_id_str();
 
     RD_LOGI(NO_TRACE_ID,
-            "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, "
+            "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} committed_lsn={}, "
             "compact_lsn={}, checkpoint_lsn:{}, next_dsn={} "
             "log_dev={} log_store={}",
             (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
@@ -784,7 +784,7 @@ ReplServiceError RaftReplDev::set_priority(const replica_id_t& member, int32_t p
     auto priority_ret = raft_server()->set_priority(nuraft_mesg::to_server_id(member), priority);
     // Set_priority should be handled by leader, but if the intent is to set the leader's priority to 0, it returns
     // BROADCAST. In this case return NOT_LEADER to let client retry new leader.
-    // If there is an uncommited_config, nuraft set_priority will honor this uncommited config and generate new
+    // If there is an uncommitted_config, nuraft set_priority will honor this uncommitted config and generate new
     // config based on it and won't have config_changing error.
     if (priority_ret != nuraft::raft_server::PrioritySetResult::SET) {
         RD_LOGE(trace_id, "Propose to raft to set priority failed, result: {}",
@@ -814,7 +814,7 @@ sisl::async::task< ReplServiceError > RaftReplDev::destroy_group() {
     // will become a garbage rreq in this follower. now if we trigger a destroy_group, a new rreq {originator=1, term=1,
     // dsn=0} will created in the follower since the default dsn of a repl_key is 0.after the log of this rreq is
     // appended to log store and get a new lsn, if we link the new lsn to the old rreq (rreq is identified by
-    // {originator, term, dsn}) which has alread have a lsn, then a assert will be throw out. pls refer to
+    // {originator, term, dsn}) which has already have a lsn, then a assert will be throw out. pls refer to
     // repl_req_ctx::set_lsn
 
     // here, we set the dsn to a new one , which is definitely unique in the follower, so that the new rreq will not
@@ -1248,7 +1248,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         } else {
             RD_LOGD(
                 rkey.traceID,
-                "For Repl_key=[{}] alloc hints returned error={}, failing this req, data_channl: {}, is_proposer: {} ",
+                "For Repl_key=[{}] alloc hints returned error={}, failing this req, data_channel: {}, is_proposer: {} ",
                 rkey.to_string(), status, is_data_channel, rreq->is_proposer());
         }
         // Do not call handle_error here, because handle_error is for rreq which needs to be terminated. This one can be
@@ -1793,7 +1793,7 @@ void RaftReplDev::handle_config_commit(const repl_lsn_t lsn, raft_cluster_config
     (void)new_conf;
     auto prev_lsn = m_commit_upto_lsn.load(std::memory_order_relaxed);
     if (prev_lsn >= lsn || !m_commit_upto_lsn.compare_exchange_strong(prev_lsn, lsn)) {
-        RD_LOGE(NO_TRACE_ID, "Raft Channel: unexpected log {} commited before config {} committed", prev_lsn, lsn);
+        RD_LOGE(NO_TRACE_ID, "Raft Channel: unexpected log {} committed before config {} committed", prev_lsn, lsn);
     }
 }
 
@@ -2026,7 +2026,6 @@ async_status RaftReplDev::become_leader() {
         return make_async_error<>(ReplServiceError::STOPPING);
     }
     init_req_counter counter(pending_request_num);
-    reset_latch_lsn();
 
     // become_leader is control-plane; block for its result and wrap into the async_result task this method
     // returns. counter lives on this frame until sync_get returns, the same span the old continuation kept alive.
@@ -2136,7 +2135,7 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
     // peer's last log idx should also >= leader's start_index-1(ensure existence), otherwise leader can't append log
-    // entries to it and baseline resync will be triggerred. Try to avoid conflict between baseline resync and normal
+    // entries to it and baseline resync will be triggered. Try to avoid conflict between baseline resync and normal
     // replication.
     least_active_repl_idx = std::max(least_active_repl_idx, m_data_journal->start_index() - 1);
     for (auto p : repl_status) {
@@ -2366,7 +2365,7 @@ void RaftReplDev::leave() {
     //  2. it is removed from the cluster and the new config(excluding this node) is being committed on this node
     //  3. it is removed from the cluster , but the node is down and new config log(excluding this node) is not
     //  replicated to this removed node. when the node restart, leader will not send any append entry to this node,
-    //  since it is not a member of the raft group. it will become a condidate and send request-vote request to other
+    //  since it is not a member of the raft group. it will become a candidate and send request-vote request to other
     //  members of this raft group. a member will send RemovedFromCluster to the node if this member finds the node
     //  is no longer a member of the raft group.
 
@@ -2380,8 +2379,11 @@ void RaftReplDev::leave() {
 
     // Persist that destroy pending in superblk, so that in case of crash before cleanup of resources, it can be done
     // post restart.
-    m_rd_sb->destroy_pending = 0x1;
-    m_rd_sb.write();
+    {
+        std::unique_lock lg{m_sb_mtx};
+        m_rd_sb->destroy_pending = 0x1;
+        m_rd_sb.write();
+    }
 
     RD_LOGI(NO_TRACE_ID, "RaftReplDev leave group_id={}", group_id_str());
     m_destroy_promise.complete(ReplServiceError::OK); // In case proposer is waiting for the destroy to complete
@@ -2402,14 +2404,26 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
             return ret;
         }
 
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->callback_flip("raft_append_batch_received", raft_req)) {
+            RD_LOGT(NO_TRACE_ID, "Raft channel: Append entries callback flip completed, lsn {} ~ {}", start_lsn,
+                    start_lsn + entries.size() - 1);
+        }
+        if (iomgr_flip::instance()->test_flip("fake_reject_append_raft_channel")) {
+            RD_LOGD(NO_TRACE_ID, "Raft channel: Reject append entries requested by flip, lsn {} ~ {}", start_lsn,
+                    start_lsn + entries.size() - 1);
+            return nuraft::cb_func::ReturnCode::ReturnNull;
+        }
+#endif
+
         // there is a very corner case like following:
         // T1: L1 is leader, push data to follower F1, F1 generate rreq1 and allocate blk for this data. let`s say the
         // lsn of this data is lsn-100
 
-        // T2: leader switchs to L2, L2 send log to F1, F1 generate rreq2 and try to allocate blk but got
+        // T2: leader switches to L2, L2 send log to F1, F1 generate rreq2 and try to allocate blk but got
         // no_space_left. then it will set the quiesce flag and waiting for the commit of lsn-99 (100 - 1).
 
-        // T3: leader switchs back to L1, L1 send log (lsn-100) to F1, when F1 tries to create rreq for lsn-100,  rreq1
+        // T3: leader switches back to L1, L1 send log (lsn-100) to F1, when F1 tries to create rreq for lsn-100,  rreq1
         // (which is created at T1) will be found since the rkey{server,term,dsn} is same as rreq1. so F1 will skip
         // creating a new rreq. since the data for lsn-100 is already in written at T1, F1 start appending log entries
         // to its log store, which will call logstore::append_log_entries and thus call localize_journal_entry_finish.
@@ -2431,6 +2445,20 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
                 NO_TRACE_ID,
                 "Raft channel: Reject append entries on follower from leader due to latch_lsn {}, start_lsn {} ~ {}",
                 m_latch_lsn.load(), start_lsn, start_lsn + entries.size() - 1);
+            return nuraft::cb_func::ReturnCode::ReturnNull;
+        }
+
+        // NuRaft flushes the log store immediately when it appends a config entry. Reject a batch if that config
+        // entry follows an app log, otherwise the config flush can make the app log durable before its linked data.
+        // The saved hint is returned after NuRaft's rejection handshake, causing the leader to resend only the safe
+        // prefix. For example, [A, A, A, C, A, C] is retried as [A, A, A], then [C, A], then [C].
+        const auto safe_batch_size = get_safe_append_batch_size(entries);
+        if (safe_batch_size < entries.size()) {
+            m_state_machine->reset_next_batch_size_hint(int64_cast(safe_batch_size));
+            RD_LOGW(NO_TRACE_ID,
+                    "Raft channel: Reject mixed app+conf append entries to avoid config flush bypassing the "
+                    "data-write barrier: lsn {} ~ {}, first unsafe config lsn {}, retry batch size {}",
+                    start_lsn, start_lsn + entries.size() - 1, start_lsn + safe_batch_size, safe_batch_size);
             return nuraft::cb_func::ReturnCode::ReturnNull;
         }
 
@@ -2464,7 +2492,7 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
                 // always go with -1 from NuRraft code.
                 //
                 // We are rejecting this log entry, meaning we can accept previous log entries.
-                // If there is nothing we can accept(i==0), that maens we are waiting for commit
+                // If there is nothing we can accept(i==0), that means we are waiting for commit
                 // of previous lsn, set it to 1 in this case.
                 m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
                 return nuraft::cb_func::ReturnCode::ReturnNull;
@@ -2596,7 +2624,7 @@ void RaftReplDev::monitor_replace_member_replication_status() {
             boost::uuids::to_string(replica_in), boost::uuids::to_string(replica_out))
 }
 
-///////////////////////////////////  Private metohds ////////////////////////////////////
+///////////////////////////////////  Private methods ////////////////////////////////////
 void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     if (is_destroyed()) {
         RD_LOGI(NO_TRACE_ID, "Raft repl dev is destroyed, ignore cp flush");
@@ -2646,7 +2674,7 @@ void RaftReplDev::cp_cleanup(CP*) {}
 void RaftReplDev::gc_repl_reqs() {
     auto cur_dsn = m_next_dsn.load();
     if (cur_dsn != 0) cur_dsn = cur_dsn - 1;
-    // On follower, DSN below cur_dsn should very likely be commited.
+    // On follower, DSN below cur_dsn should very likely be committed.
     // It is not guaranteed because DSN and LSN are generated separately,
     // DSN in async_alloc_write before pushing data, LSN later when
     // proposing to raft. Two simultaneous write requests on leader can have
@@ -2673,7 +2701,7 @@ void RaftReplDev::gc_repl_reqs() {
             // The DSN can be out of order, wait till rreq expired.
             RD_LOGD_EVERY_N(
                 unmove(gc_log_freq), rreq->traceID(),
-                "legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_hours {}",
+                "legacy req with committed DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_hours {}",
                 rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
                 get_elapsed_time_sec(rreq->created_time()) / 3600);
             expired_rreqs.push_back(rreq);
@@ -2802,7 +2830,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     }
 
     rreq->set_lsn(repl_lsn);
-    // keep lentry in scope for the lyfe cycle of the rreq
+    // keep lentry in scope for the life cycle of the rreq
     rreq->set_lentry(lentry);
     auto status = init_req_ctx(rreq, rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry),
                                entry_to_key(jentry), data_size, m_listener);
@@ -2887,13 +2915,13 @@ bool RaftReplDev::save_snp_resync_data(nuraft::buffer& data, nuraft::snapshot& s
 void RaftReplDev::on_restart() { m_listener->on_restart(); }
 
 bool RaftReplDev::is_resync_mode() {
-    int64_t const leader_commited_lsn = raft_server()->get_leader_committed_log_idx();
+    int64_t const leader_committed_lsn = raft_server()->get_leader_committed_log_idx();
     int64_t const my_log_idx = raft_server()->get_last_log_idx();
-    auto diff = leader_commited_lsn - my_log_idx;
+    auto diff = leader_committed_lsn - my_log_idx;
     bool resync_mode = (diff > HS_DYNAMIC_CONFIG(consensus.resync_log_idx_threshold));
     if (resync_mode) {
-        RD_LOGD(NO_TRACE_ID, "Raft Channel: Resync mode, leader_commited_lsn={}, my_log_idx={}, diff={}",
-                leader_commited_lsn, my_log_idx, diff);
+        RD_LOGD(NO_TRACE_ID, "Raft Channel: Resync mode, leader_committed_lsn={}, my_log_idx={}, diff={}",
+                leader_committed_lsn, my_log_idx, diff);
     }
     return resync_mode;
 }
@@ -2916,8 +2944,8 @@ void RaftReplDev::quiesce_reqs() {
     // can make sure
     // 1 all the pending reqs has allocated their blocks
     // 2 no new pending reqs will be initialized again.
-    m_in_quience.store(true, std::memory_order_release);
-    RD_LOGD(NO_TRACE_ID, "enter quience state, waiting for all the pending req to be initialized");
+    m_in_quiescence.store(true, std::memory_order_release);
+    RD_LOGD(NO_TRACE_ID, "enter quiescence state, waiting for all the pending req to be initialized");
     while (true) {
         uint64_t pending_req_num = get_pending_init_req_num();
         if (pending_req_num) {
@@ -2931,9 +2959,9 @@ void RaftReplDev::quiesce_reqs() {
 void RaftReplDev::reset_latch_lsn() { m_latch_lsn.store(INT64_MAX); }
 
 void RaftReplDev::resume_accepting_reqs() {
-    m_in_quience.store(false, std::memory_order_release);
+    m_in_quiescence.store(false, std::memory_order_release);
     reset_latch_lsn();
-    RD_LOGD(NO_TRACE_ID, "exit quience state, resume accepting new requests");
+    RD_LOGD(NO_TRACE_ID, "exit quiescence state, resume accepting new requests");
 }
 
 void RaftReplDev::clear_chunk_req(chunk_num_t chunk_id) {
@@ -2983,10 +3011,10 @@ ReplServiceError RaftReplDev::init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, j
     }
 
     init_req_counter counter(m_pending_init_req_num);
-    if (is_in_quience()) {
-        // In quience state, reject any new requests.
-        RD_LOGD(rkey.traceID, "Rejecting new request in quience state, rkey=[{}]", rkey.to_string());
-        return ReplServiceError::QUIENCE_STATE;
+    if (is_in_quiescence()) {
+        // In quiescence state, reject any new requests.
+        RD_LOGD(rkey.traceID, "Rejecting new request in quiescence state, rkey=[{}]", rkey.to_string());
+        return ReplServiceError::QUIESCENCE_STATE;
     }
 
     return rreq->init(rkey, op_code, is_proposer, user_header, key, data_size, m_listener);
@@ -2999,6 +3027,7 @@ void RaftReplDev::become_leader_cb() {
     RD_REL_ASSERT(new_gate >= static_cast< uint64_t >(current_gate),
                   "new_gate={} should be equal or larger than current_gate={}!", new_gate, current_gate);
 
+    reset_latch_lsn();
     m_traffic_ready_lsn.store(new_gate);
     // in nuraft, a leader might become a new leader directly, which means it is unnecessary to become a follower before
     // becoming a leader.
@@ -3028,6 +3057,16 @@ bool RaftReplDev::is_state_machine_paused() { return raft_server()->is_state_mac
 void RaftReplDev::resume_state_machine() {
     RD_LOGI(NO_TRACE_ID, "Resume state machine execution for group_id={}", group_id_str());
     raft_server()->resume_state_machine_execution();
+}
+
+size_t RaftReplDev::get_safe_append_batch_size(const std::vector< nuraft::ptr< nuraft::log_entry > >& entries) {
+    bool seen_app_log = false;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto val_type = entries[i]->get_val_type();
+        if (val_type == nuraft::log_val_type::conf && seen_app_log) { return i; }
+        if (val_type == nuraft::log_val_type::app_log) { seen_app_log = true; }
+    }
+    return entries.size();
 }
 
 } // namespace homestore

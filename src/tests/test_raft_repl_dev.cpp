@@ -14,7 +14,99 @@
  *********************************************************************************/
 #include "test_common/raft_repl_test_base.hpp"
 
-class RaftReplDevTest : public RaftReplDevTestBase {};
+class RaftAppendBatchTest : public testing::Test {
+protected:
+    static std::vector< nuraft::ptr< nuraft::log_entry > >
+    make_raft_entries(std::initializer_list< nuraft::log_val_type > types) {
+        std::vector< nuraft::ptr< nuraft::log_entry > > entries;
+        entries.reserve(types.size());
+        for (const auto type : types) {
+            entries.emplace_back(
+                nuraft::cs_new< nuraft::log_entry >(1, nuraft::buffer::alloc(0), type, 0, false, 0, false));
+        }
+        return entries;
+    }
+};
+
+class RaftReplDevTest : public RaftReplDevTestBase {
+protected:
+#ifdef _PRERELEASE
+    class AppendBatchTracker {
+    public:
+        void install() {
+            auto* fc = iomgr_flip::client_instance();
+            auto dont_care = fc->create_condition("", flip::Operator::DONT_CARE, 0);
+            flip::FlipFrequency freq;
+            freq.set_count(10);
+            freq.set_percent(100);
+            fc->inject_callback_flip< void, nuraft::req_msg* >(
+                "raft_append_batch_received", {dont_care}, freq,
+                std::function< void(nuraft::req_msg*) >([this](nuraft::req_msg* req) { on_batch(req); }));
+        }
+
+        void on_batch(nuraft::req_msg* req) {
+            std::vector< nuraft::log_val_type > entry_types;
+            entry_types.reserve(req->log_entries().size());
+            for (const auto& entry : req->log_entries()) {
+                entry_types.emplace_back(entry->get_val_type());
+            }
+
+            std::unique_lock lk{m_mtx};
+            m_batches.emplace_back(std::move(entry_types));
+            m_cv.notify_all();
+            if (m_batches.size() == 1) {
+                m_cv.wait(lk, [&] { return m_release_first_batch; });
+            }
+        }
+
+        bool wait_for_batch_count(size_t count) {
+            std::unique_lock lk{m_mtx};
+            return m_cv.wait_for(lk, std::chrono::seconds{30}, [&] { return m_batches.size() >= count; });
+        }
+
+        void release_first_batch() {
+            std::unique_lock lk{m_mtx};
+            m_release_first_batch = true;
+            lk.unlock();
+            m_cv.notify_all();
+        }
+
+        std::vector< std::vector< nuraft::log_val_type > > batches() const {
+            std::lock_guard lk{m_mtx};
+            return m_batches;
+        }
+
+    private:
+        mutable std::mutex m_mtx;
+        std::condition_variable m_cv;
+        bool m_release_first_batch{false};
+        std::vector< std::vector< nuraft::log_val_type > > m_batches;
+    };
+#endif
+};
+
+TEST_F(RaftAppendBatchTest, SplitBeforeConfigFollowingAppLog) {
+    EXPECT_EQ(RaftReplDev::get_safe_append_batch_size(make_raft_entries(
+                  {nuraft::log_val_type::app_log, nuraft::log_val_type::app_log, nuraft::log_val_type::app_log,
+                   nuraft::log_val_type::conf, nuraft::log_val_type::app_log, nuraft::log_val_type::conf})),
+              3);
+    EXPECT_EQ(RaftReplDev::get_safe_append_batch_size(make_raft_entries(
+                  {nuraft::log_val_type::conf, nuraft::log_val_type::app_log, nuraft::log_val_type::conf})),
+              2);
+}
+
+TEST_F(RaftAppendBatchTest, KeepSafeBatch) {
+    EXPECT_EQ(RaftReplDev::get_safe_append_batch_size(make_raft_entries(
+                  {nuraft::log_val_type::conf, nuraft::log_val_type::app_log, nuraft::log_val_type::app_log})),
+              3);
+    EXPECT_EQ(RaftReplDev::get_safe_append_batch_size(
+                  make_raft_entries({nuraft::log_val_type::app_log, nuraft::log_val_type::app_log})),
+              2);
+    EXPECT_EQ(RaftReplDev::get_safe_append_batch_size(
+                  make_raft_entries({nuraft::log_val_type::conf, nuraft::log_val_type::conf})),
+              2);
+}
+
 TEST_F(RaftReplDevTest, Write_Duplicated_Data) {
     uint64_t total_writes = 1;
     g_helper->runner().qdepth_ = total_writes;
@@ -212,6 +304,92 @@ TEST_F(RaftReplDevTest, Follower_Reject_Append) {
         g_helper->remove_flip("fake_reject_append_raft_channel");
         g_helper->remove_flip("slow_down_data_channel");
     }
+}
+
+TEST_F(RaftReplDevTest, Follower_Retry_Mixed_App_And_Config_Batch) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    constexpr uint16_t target_follower{2};
+    constexpr uint64_t bootstrap_config_lsn{3};
+    constexpr uint64_t first_key{1000001};
+    constexpr uint64_t expected_app_log_count{4};
+    auto db = pick_one_db();
+    auto local_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+    ASSERT_NE(local_rdev, nullptr);
+
+    LOGINFO("Step 1: Wait for target follower={} to commit bootstrap config through lsn={}", target_follower,
+            bootstrap_config_lsn);
+    if (g_helper->replica_num() == target_follower) {
+        ASSERT_TRUE(local_rdev->wait_and_check(
+            [&] { return local_rdev->raft_server()->get_committed_log_idx() >= bootstrap_config_lsn; }, 60000));
+        LOGINFO("Target follower={} committed bootstrap config", target_follower);
+    }
+
+    g_helper->runner().qdepth_ = 1;
+    g_helper->runner().total_tasks_ = 1;
+    AppendBatchTracker batch_tracker;
+
+    LOGINFO("Step 2: Install append tracking and rejection flips on target follower={}", target_follower);
+    if (g_helper->replica_num() == target_follower) {
+        batch_tracker.install();
+        g_helper->set_basic_flip("fake_reject_append_raft_channel", 1, 100);
+    }
+
+    // Ensure the flips are installed before the leader appends the entries below.
+    g_helper->sync_for_verify_start();
+
+    LOGINFO("Step 3: Build the A,A,A,C,A,C log sequence on the leader");
+    run_on_leader(db, [&] {
+        auto leader_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+        ASSERT_NE(leader_rdev, nullptr);
+
+        ASSERT_EQ(write_with_id(first_key), ReplServiceError::OK);
+        ASSERT_EQ(write_with_id(first_key + 1), ReplServiceError::OK);
+        ASSERT_EQ(write_with_id(first_key + 2), ReplServiceError::OK);
+        ASSERT_EQ(leader_rdev->set_priority(g_helper->replica_id(target_follower), 2), ReplServiceError::OK);
+        ASSERT_EQ(write_with_id(first_key + 3), ReplServiceError::OK);
+        ASSERT_EQ(leader_rdev->set_priority(g_helper->replica_id(target_follower), 1), ReplServiceError::OK);
+    });
+
+    bool first_batch_received{true};
+    if (g_helper->replica_num() == target_follower) { first_batch_received = batch_tracker.wait_for_batch_count(1); }
+
+    // The first request stays in-flight until the leader has built the complete A,A,A,C,A,C log sequence.
+    g_helper->sync_for_cleanup_start();
+
+    LOGINFO("Step 4: Release the first rejected batch and allow the follower retries");
+    if (g_helper->replica_num() == target_follower) {
+        batch_tracker.release_first_batch();
+        ASSERT_TRUE(first_batch_received);
+    }
+
+    LOGINFO("Step 5: Wait for app-log commits and verify the follower retry batches");
+    wait_for_commits(expected_app_log_count);
+
+    if (g_helper->replica_num() == target_follower) {
+        const bool all_batches_received = batch_tracker.wait_for_batch_count(6);
+        g_helper->remove_flip("raft_append_batch_received");
+        g_helper->remove_flip("fake_reject_append_raft_channel");
+        ASSERT_TRUE(all_batches_received);
+        LOGINFO("Target follower={} received all expected retry batches", target_follower);
+
+        using enum nuraft::log_val_type;
+        const std::vector< std::vector< nuraft::log_val_type > > expected_retry_batches{
+            {app_log, app_log, app_log, conf, app_log, conf},
+            {app_log, app_log, app_log},
+            {conf, app_log, conf},
+            {conf, app_log},
+            {conf},
+        };
+        const auto received_batches = batch_tracker.batches();
+        ASSERT_EQ(received_batches.size(), expected_retry_batches.size() + 1);
+        const std::vector< std::vector< nuraft::log_val_type > > actual_retry_batches{received_batches.cbegin() + 1,
+                                                                                      received_batches.cend()};
+        EXPECT_EQ(actual_retry_batches, expected_retry_batches);
+    }
+
+    g_helper->sync_for_test_start();
 }
 #endif
 
