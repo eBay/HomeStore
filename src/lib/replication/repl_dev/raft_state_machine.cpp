@@ -80,6 +80,19 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     repl_key const rkey{
         .server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn, .traceID = jentry->traceID};
 
+    // Guard against a duplicate AppendEntries arriving after this rreq is already flushed.
+    // This is to avoid the following race:
+    // T1: Follower receives append request LSN1-LSN10, localizes and flushes the logs.
+    // T2: Follower receives the same LSN1-LSN10 again; localize_journal_entry_prepare is called again.
+    // T3: Commit thread applies LSN5, calling handle_commit() which reads rreq->header() by const reference.
+    // T4: The duplicate localize path (T2) is still running and rebinds m_journal_buf / m_header / m_key,
+    // corrupting the ReplicationMessageHeader concurrently read by T3.
+    if (auto existing_rreq = m_rd.repl_key_to_req(rkey);
+        existing_rreq && existing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
+        RD_LOGT(rkey.traceID, "Repl_key=[{}] already flushed, skip duplicate prepare", rkey.to_string());
+        return existing_rreq;
+    }
+
     // Create a new rreq (or) Pull rreq from the map given the repl_key, header and key. Any new rreq will
     // allocate the blks (in case of large data). We will use the new blkid and transform the current journal entry's
     // blkid with this new one
