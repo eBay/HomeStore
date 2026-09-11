@@ -470,28 +470,21 @@ bool LogDev::flush_if_necessary(int64_t threshold_size, bool force) {
         // it disabled (flush_timer_frequency_us=0, e.g. in tests) this is a real, reproducible hang: the
         // very last write issued in a run has no later trigger to fall back on.
         //
-        // Reschedule a follow-up attempt -- with force=true, unlike the initial call. LogDev::flush()
-        // unconditionally resets m_last_flush_time at its very start, so the concurrent flush that just
-        // stole this race will, by the time the retry runs, likely have already reset that clock to "now"
-        // (making flush_by_time re-evaluate false) while this call's own pending size may still be under
-        // threshold_size (making flush_by_size false too) -- silently abandoning the retry with nothing
-        // left to trigger it again. force=true bypasses that re-derivation on the retry: we already
-        // decided this data needs flushing, so the retry's only job is to keep trying to actually acquire
-        // the lock, not re-litigate whether to.
+        // Reschedule with force=true. LogDev::flush() unconditionally resets m_last_flush_time at its
+        // start, so the flush that just won this race may have already reset that clock by the time the
+        // retry runs -- re-deriving flush_by_size/flush_by_time here could then read false again (this
+        // write's own size may still be under threshold_size) and silently abandon the retry for good.
+        // force=true skips that re-derivation: we already decided to flush, so the retry only needs to
+        // keep trying the lock, not re-litigate whether to.
         //
-        // Reschedule onto a random *worker* reactor, not flush_thread() directly, even though flush_thread
-        // is where the retry ultimately needs to run (can_flush_in_this_thread() will bounce it back
-        // there). We're already executing on flush_thread at this point (that's how we got past the
-        // can_flush_in_this_thread() check above) -- IOReactor::deliver_msg takes a same-thread shortcut
-        // that calls the target inline instead of queuing it when sender and receiver are the same
-        // reactor, so posting straight back to flush_thread here would recurse synchronously on this same
-        // call stack for every failed try_lock, not queue a new task. Under sustained lock contention
-        // (verified: a lock held for as little as ~200ms is enough) that recursion runs thousands of
-        // frames deep and stack-overflows the process -- a real crash, reproduced with and without
-        // force=true, i.e. pre-existing in the original reschedule-on-lost-race fix, not introduced by
-        // force. Bouncing through random_worker first forces a genuine cross-thread hop (a real reactor,
-        // never flush_thread itself), so the message is queued and this stack frame unwinds before the
-        // retry runs, no matter how many times it fails.
+        // Target a random *worker* reactor, not flush_thread() directly, even though the retry ultimately
+        // needs to run there (can_flush_in_this_thread() bounces it back). We're already ON flush_thread
+        // here, and IOReactor::deliver_msg runs same-reactor targets inline instead of queuing them --
+        // so posting straight back to flush_thread would recurse synchronously on every failed try_lock.
+        // Under sustained contention this stack-overflows the process (confirmed with the lock held for
+        // just ~200ms; this predates force -- it's already present in the plain reschedule above).
+        // Routing through random_worker first forces a real queued hop, so the stack unwinds between
+        // attempts no matter how many times try_lock fails.
         iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
                                 [this, threshold_size]() { flush_if_necessary(threshold_size, /* force = */ true); });
     }

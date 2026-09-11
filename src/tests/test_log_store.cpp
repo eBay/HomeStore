@@ -1191,42 +1191,29 @@ TEST_F(LogStoreTest, FlushSync) {
 }
 
 #ifdef _PRERELEASE
-// Regression test for a gap in flush_if_necessary()'s lost-try_lock-race reschedule: the reschedule
-// re-invokes flush_if_necessary(), which re-derives flush_by_size/flush_by_time from scratch. Since
-// LogDev::flush() unconditionally resets m_last_flush_time at its very start, the concurrent flush that
-// won the race can reset that clock right as the retry runs, making flush_by_time false again -- and if
-// this write's own size never crosses threshold_size on its own, flush_by_size stays false too, silently
-// dropping the retry with nothing left to trigger it again.
+// Regression test for a gap in flush_if_necessary()'s lost-try_lock-race reschedule: it re-invokes
+// flush_if_necessary(), re-deriving flush_by_size/flush_by_time from scratch. LogDev::flush()
+// unconditionally resets m_last_flush_time at its start, so a concurrent flush that won the race can
+// reset the clock right as the retry runs -- if this write's own size never crosses threshold_size,
+// both conditions can read false and the retry silently drops.
 //
-// A real racer flush() call can't cleanly isolate this: whatever holds the lock long enough for our
-// target write's try_lock to fail will, once released, take its own fresh snapshot of m_log_idx -- which
-// by then includes the target write too (it was appended while the racer held the lock), so releasing
-// the racer would flush the target write regardless of whether the fix is present. To test the reschedule
-// mechanism in isolation, this uses two test-only LogDev hooks instead:
-//  - test_acquire_flush_mtx(): grabs the real m_flush_mtx directly, without going through flush() at all
-//    -- so releasing it later never triggers any snapshot/flush of its own.
+// A real racer flush() can't isolate this: whoever holds the lock long enough for our write to lose
+// its try_lock will, once released, take a fresh snapshot that includes the write anyway (it was
+// appended while the lock was held) -- so releasing the racer completes the write regardless of the
+// fix. Instead this uses two test-only LogDev hooks:
+//  - test_acquire_flush_mtx(): grabs m_flush_mtx directly, bypassing flush() -- releasing it later
+//    triggers no snapshot/flush of its own.
 //  - test_touch_last_flush_time(): resets m_last_flush_time on demand (gated by the
-//    "test_touch_last_flush_time" flip), simulating the *side effect* of a concurrent flush completing,
-//    without the *other* side effect of actually flushing anything.
+//    "test_touch_last_flush_time" flip) -- simulates just the clock-reset side effect of a concurrent
+//    flush, without actually flushing anything.
 //
-// Sequence:
-//  1. Acquire m_flush_mtx directly (test_acquire_flush_mtx()). A fresh logdev's m_last_flush_time starts
-//     effectively infinitely stale, so flush_by_time would read true for anyone checking right now.
-//  2. Issue the target write and its own flush_if_necessary() call. It decides to flush (flush_by_time
-//     true, since nothing has touched the clock yet) but loses the try_lock race (we hold m_flush_mtx) --
-//     that loss is what queues the retry.
-//  3. Arm the "test_touch_last_flush_time" flip and call test_touch_last_flush_time() -- resets the clock
-//     to *now*, exactly as a concurrent flush completing would, but with the lock still held by us and
-//     nothing actually flushed.
-//  4. Keep holding m_flush_mtx for 200ms, with max_time_between_flush_us configured far larger (2s) than
-//     that hold. Every retry landing anywhere in this window sees a still-too-recent clock (flush_by_time
-//     false) and a pending size still under threshold_size (flush_by_size false) -- the exact condition
-//     the fix targets, held open long enough that timing luck can't save a retry that isn't robust to it.
-//  5. Release m_flush_mtx via a plain unlock (not flush()) -- this does not touch m_log_idx or complete
-//     anything on its own. Pre-fix, whatever retry was dropped during step 4's window is gone for good,
-//     and the write never completes. Post-fix, force=true has kept retrying the whole time and now wins
-//     the lock, calling a real flush() that (for the first time) takes a snapshot including the target
-//     write and completes it.
+// Sequence: acquire the lock directly (m_last_flush_time starts infinitely stale on a fresh logdev, so
+// flush_by_time reads true) -> issue the write, whose flush_if_necessary() decides to flush but loses
+// the try_lock race, queuing the retry -> touch the clock (simulating the racing flush completing) and
+// hold the lock 200ms (with max_time_between_flush_us set far larger, so every retry in this window
+// sees a still-too-recent clock and a too-small pending size -- exactly the condition the fix targets)
+// -> release the lock via plain unlock (not flush()). Pre-fix, the retry dropped during that window is
+// gone for good and the write hangs; post-fix, force=true has kept retrying and now wins the lock.
 TEST_F(LogStoreTest, FlushIfNecessaryRetrySurvivesStaleClockReset) {
     LOGINFO("Step 1: Reinit with no records -- this test issues its own write directly");
     this->init(0);

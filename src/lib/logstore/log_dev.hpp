@@ -584,18 +584,14 @@ public:
     }
 
 #ifdef _PRERELEASE
-    // Test-only: directly acquire m_flush_mtx from test code, bypassing flush()/flush_under_guard()
-    // entirely -- lets a UT create a lost-try_lock race deterministically (holding the real lock
-    // flush_if_necessary() contends on) without going through a real flush cycle, which would
-    // unavoidably also flush any data appended while the lock was held (its snapshot of m_log_idx is
-    // taken fresh at flush() call time, so it would include anything appended before that call runs,
-    // regardless of when the lock was originally acquired). See
+    // Test-only: acquires m_flush_mtx directly, bypassing flush() -- lets a UT hold the real lock
+    // deterministically without a real flush cycle, which would unavoidably flush any data appended
+    // while held (its m_log_idx snapshot is taken fresh at call time). See
     // LogStoreTest.FlushIfNecessaryRetrySurvivesStaleClockReset.
     std::unique_lock< iomgr::FiberManagerLib::mutex > test_acquire_flush_mtx() { return std::unique_lock(m_flush_mtx); }
 
-    // Test-only: simulates the side effect of an unrelated concurrent flush completing (resetting
-    // m_last_flush_time) without actually flushing anything. Only takes effect if the
-    // "test_touch_last_flush_time" flip is armed, so calling this is inert otherwise.
+    // Test-only: simulates a concurrent flush's clock-reset side effect (resets m_last_flush_time)
+    // without actually flushing. Only active if the "test_touch_last_flush_time" flip is armed.
     void test_touch_last_flush_time();
 #endif
 
