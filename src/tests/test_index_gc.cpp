@@ -12,7 +12,6 @@
 #include "btree_helpers/btree_decls.h"
 #include "btree_helpers/blob_route.h"
 
-
 using namespace homestore;
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -22,11 +21,11 @@ SISL_LOGGING_DECL(test_index_gc)
 SISL_OPTION_GROUP(
     test_index_gc,
     (num_iters, "", "num_iters", "number of iterations for rand ops",
-    ::cxxopts::value< uint32_t >()->default_value("500000"), "number"),
+     ::cxxopts::value< uint32_t >()->default_value("500000"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("7000"), "number"),
-    (num_put, "", "num_put", "number of entries to test with",
-     ::cxxopts::value< uint32_t >()->default_value("20000"), "number"),
+    (num_put, "", "num_put", "number of entries to test with", ::cxxopts::value< uint32_t >()->default_value("20000"),
+     "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint64_t >()->default_value("36000"), "seconds"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
@@ -34,14 +33,14 @@ SISL_OPTION_GROUP(
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
     (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
-    (ignore_node_lock_refresh, "", "ignore_node_lock_refresh", "ignore node lock refresh", ::cxxopts::value< bool >(), ""),
+    (ignore_node_lock_refresh, "", "ignore_node_lock_refresh", "ignore node lock refresh", ::cxxopts::value< bool >(),
+     ""),
     (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
      ::cxxopts::value< bool >()->default_value("1"), ""),
     (max_merge_level, "", "max_merge_level", "max merge level", ::cxxopts::value< uint8_t >()->default_value("127"),
      ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
-
 
 using BtreeType = IndexTable< BlobRouteByChunkKey, TestFixedValue >;
 using op_func_t = std::function< void(void) >;
@@ -93,10 +92,10 @@ public:
         create_io_reactors(g_num_fibers);
         m_run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
 
-        //m_operations["put"] = std::bind(&BtreeTestHelper::put_random, this);
-        //m_operations["range_remove"] = std::bind(&BtreeTestHelper::range_remove_existing_random, this);
-        //m_operations["range_query"] = std::bind(&BtreeTestHelper::query_random, this);
-        //m_operations["get"] = std::bind(&BtreeTestHelper::get_random, this);
+        // m_operations["put"] = std::bind(&BtreeTestHelper::put_random, this);
+        // m_operations["range_remove"] = std::bind(&BtreeTestHelper::range_remove_existing_random, this);
+        // m_operations["range_query"] = std::bind(&BtreeTestHelper::query_random, this);
+        // m_operations["get"] = std::bind(&BtreeTestHelper::get_random, this);
         m_bt = std::make_shared< BtreeType >(uuid, parent_uuid, 0, m_cfg);
         hs()->index_service().add_index_table(m_bt);
         LOGINFO("Added index table to index service");
@@ -131,17 +130,17 @@ public:
         };
         auto ctx = std::make_shared< Context >();
         for (uint32_t i{0}; i < num_io_reactors; ++i) {
-        iomanager.create_reactor("homeblks_long_running_io" + std::to_string(i), iomgr::INTERRUPT_LOOP, 1u,
-                                 [this, ctx](bool is_started) {
-                                     if (is_started) {
-                                         {
-                                             std::unique_lock< std::mutex > lk{ctx->mtx};
-                                             m_fibers.push_back(iomanager.iofiber_self());
-                                             ++(ctx->thread_cnt);
+            iomanager.create_reactor("homeblks_long_running_io" + std::to_string(i), iomgr::INTERRUPT_LOOP, 1u,
+                                     [this, ctx](bool is_started) {
+                                         if (is_started) {
+                                             {
+                                                 std::unique_lock< std::mutex > lk{ctx->mtx};
+                                                 m_fibers.push_back(iomanager.iofiber_self());
+                                                 ++(ctx->thread_cnt);
+                                             }
+                                             ctx->cv.notify_one();
                                          }
-                                         ctx->cv.notify_one();
-                                     }
-                                 });
+                                     });
         }
         {
             std::unique_lock< std::mutex > lk{ctx->mtx};
@@ -152,7 +151,8 @@ public:
 
     void put_many_random(uint16_t chunk_id, uint32_t num_put) {
         for (uint16_t i = 0; i < num_put; ++i) {
-            auto key = BlobRouteByChunkKey{BlobRouteByChunk(chunk_id, g_randval_generator(g_re), g_randval_generator(g_re))};
+            auto key =
+                BlobRouteByChunkKey{BlobRouteByChunk(chunk_id, g_randval_generator(g_re), g_randval_generator(g_re))};
             auto value = TestFixedValue::generate_rand();
             auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT};
             sreq.enable_route_tracing();
@@ -189,13 +189,13 @@ public:
         status = m_bt->query(query_req, valid_blob_indexes);
         if (status != homestore::btree_status_t::success) {
             LOGERROR("Failed to query blobs after purging reserved chunk={} in gc index table, index ret={}", chunk_id,
-                    status);
+                     status);
             return false;
         }
 
         if (!valid_blob_indexes.empty()) {
             LOGERROR("gc index table is not empty for chunk={} after purging, valid_blob_indexes.size={}", chunk_id,
-                    valid_blob_indexes.size());
+                     valid_blob_indexes.size());
             return SISL_OPTIONS["ignore_node_lock_refresh"].as< bool >();
         }
 
@@ -205,18 +205,18 @@ public:
     void gc_task(uint32_t idx) {
         LOGINFO("GC task {} started", idx);
         auto num_puts = SISL_OPTIONS["num_put"].as< uint32_t >();
-        while(!time_to_stop()) {
+        while (!time_to_stop()) {
             // Step 1: preload chunks with some data
             for (uint16_t i = 0; i < 20; ++i) {
-                uint16_t chunk_id = 20*idx + i;
+                uint16_t chunk_id = 20 * idx + i;
                 put_many_random(chunk_id, num_puts);
             }
             LOGDEBUG("Preload done for index {}", idx);
 
             // Step 2: start chunk gc
             for (uint16_t i = 0; i < 20; ++i) {
-                uint16_t chunk_id = 20*idx + i;
-            ASSERT_TRUE(do_gc(chunk_id));
+                uint16_t chunk_id = 20 * idx + i;
+                ASSERT_TRUE(do_gc(chunk_id));
             }
             LOGDEBUG("GC done for index {}", idx);
             auto elapsed_time = get_elapsed_time_sec(m_start_time);
@@ -234,7 +234,7 @@ public:
         LOGINFO("Put task {} started", idx);
         while (!time_to_stop()) {
             for (uint16_t i = 0; i < 1000; ++i) {
-                uint16_t chunk_id = 20*idx + i;
+                uint16_t chunk_id = 20 * idx + i;
                 put_many_random(chunk_id, 10);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -247,8 +247,9 @@ public:
         LOGINFO("Get task {} started", idx);
         while (!time_to_stop()) {
             for (uint16_t i = 0; i < 1000; ++i) {
-                uint16_t chunk_id = 20*idx + i;
-                auto key = BlobRouteByChunkKey{BlobRouteByChunk(chunk_id, g_randval_generator(g_re), g_randval_generator(g_re))};
+                uint16_t chunk_id = 20 * idx + i;
+                auto key = BlobRouteByChunkKey{
+                    BlobRouteByChunk(chunk_id, g_randval_generator(g_re), g_randval_generator(g_re))};
                 TestFixedValue value;
                 homestore::BtreeSingleGetRequest get_req{&key, &value};
                 m_bt->get(get_req);
@@ -259,9 +260,7 @@ public:
         m_test_done_latch.count_down();
     }
 
-    bool time_to_stop() const {
-        return (get_elapsed_time_sec(m_start_time) > m_run_time);
-    }
+    bool time_to_stop() const { return (get_elapsed_time_sec(m_start_time) > m_run_time); }
 
     BtreeConfig m_cfg{g_node_size};
     std::shared_ptr< BtreeType > m_bt;
@@ -278,18 +277,10 @@ public:
 TEST_F(TestIndexGC, chunk_gc_test) {
     LOGINFO("Chunk GC test start");
     m_start_time = Clock::now();
-    iomanager.run_on_forget(m_fibers[0], [this]() {
-        gc_task(0);
-    });
-    iomanager.run_on_forget(m_fibers[1], [this]() {
-        gc_task(1);
-    });
-    iomanager.run_on_forget(m_fibers[2], [this]() {
-        put_task(2);
-    });
-    iomanager.run_on_forget(m_fibers[3], [this]() {
-        get_task(3);
-    });
+    iomanager.run_on_forget(m_fibers[0], [this]() { gc_task(0); });
+    iomanager.run_on_forget(m_fibers[1], [this]() { gc_task(1); });
+    iomanager.run_on_forget(m_fibers[2], [this]() { put_task(2); });
+    iomanager.run_on_forget(m_fibers[3], [this]() { get_task(3); });
     m_test_done_latch.wait();
     LOGINFO("Chunk GC test passed");
 }
