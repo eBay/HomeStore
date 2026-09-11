@@ -482,7 +482,7 @@ bool LogDev::flush_if_necessary(int64_t threshold_size, bool force) {
         // here, and IOReactor::deliver_msg runs same-reactor targets inline instead of queuing them --
         // so posting straight back to flush_thread would recurse synchronously on every failed try_lock.
         // Under sustained contention this stack-overflows the process (confirmed with the lock held for
-        // just ~200ms; this predates force -- it's already present in the plain reschedule above).
+        // ~200ms in testing; this predates force -- it's already present in the plain reschedule above).
         // Routing through random_worker first forces a real queued hop, so the stack unwinds between
         // attempts no matter how many times try_lock fails.
         iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
