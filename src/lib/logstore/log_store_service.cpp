@@ -417,13 +417,13 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(logdev_flush_records_distribution,
-                                                          "Distribution of num records to flush",
-                                                          HistogramBucketsType(LinearUpto128Buckets));
+                                                  "Distribution of num records to flush",
+                                                  HistogramBucketsType(LinearUpto128Buckets));
     REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(logstore_record_size, "Distribution of log record size",
-                                                          HistogramBucketsType(ExponentialOfTwoBuckets));
+                                                  HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(logdev_post_flush_processing_latency,
-                                                          "Logdev post flush processing (including callbacks) latency",
-                                                          HistogramBucketsType(OpLatecyBuckets));
+                                                  "Logdev post flush processing (including callbacks) latency",
+                                                  HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_flush_time_us, "time elapsed since last flush time in us",
                        HistogramBucketsType(OpLatecyBuckets));
 

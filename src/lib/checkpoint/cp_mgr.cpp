@@ -97,13 +97,11 @@ void CPManager::start_timer() {
     auto usecs = cp_timer_us();
     LOGINFO("cp timer is set to {} usec", usecs);
     iomanager.run_on_wait(m_timer_fiber, [this, usecs]() {
-        m_cp_timer_hdl = iomanager.schedule_thread_timer(usecs * 1000, true /* recurring */, nullptr /* cookie */,
-                                                         [this](void*, uint64_t exp_count) {
-                                                             if (exp_count > 1) {
-                                                                 LOGINFO("cp timer expired {} times, running once", exp_count);
-                                                             }
-                                                             trigger_cp_flush(false /* false */);
-                                                         });
+        m_cp_timer_hdl = iomanager.schedule_thread_timer(
+            usecs * 1000, true /* recurring */, nullptr /* cookie */, [this](void*, uint64_t exp_count) {
+                if (exp_count > 1) { LOGINFO("cp timer expired {} times, running once", exp_count); }
+                trigger_cp_flush(false /* false */);
+            });
     });
 }
 
