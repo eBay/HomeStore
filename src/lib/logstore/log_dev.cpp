@@ -437,12 +437,12 @@ bool LogDev::can_flush_in_this_thread() {
     return (!HS_DYNAMIC_CONFIG(logstore.flush_only_in_dedicated_thread) && iomanager.am_i_worker_reactor());
 }
 
-bool LogDev::flush_if_necessary(int64_t threshold_size) {
+bool LogDev::flush_if_necessary(int64_t threshold_size, bool force) {
     if (is_stopping()) return false;
     incr_pending_request_num();
     if (!can_flush_in_this_thread()) {
         iomanager.run_on_forget(logstore_service().flush_thread(),
-                                [this, threshold_size]() { flush_if_necessary(threshold_size); });
+                                [this, threshold_size, force]() { flush_if_necessary(threshold_size, force); });
         decr_pending_request_num();
         return false;
     }
@@ -456,7 +456,7 @@ bool LogDev::flush_if_necessary(int64_t threshold_size) {
     bool const flush_by_size = (pending_sz >= threshold_size);
     bool const flush_by_time =
         !flush_by_size && pending_sz && (elapsed_time > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
-    if (flush_by_size || flush_by_time) {
+    if (force || flush_by_size || flush_by_time) {
         std::unique_lock lck(m_flush_mtx, std::try_to_lock);
         if (lck.owns_lock()) {
             decr_pending_request_num();
@@ -468,11 +468,32 @@ bool LogDev::flush_if_necessary(int64_t threshold_size) {
         // leave that data unflushed indefinitely if nothing else ever calls flush_if_necessary() again
         // for this logdev -- normally masked by the periodic flush timer eventually retrying, but with
         // it disabled (flush_timer_frequency_us=0, e.g. in tests) this is a real, reproducible hang: the
-        // very last write issued in a run has no later trigger to fall back on. Reschedule a follow-up
-        // attempt on the flush thread instead of dropping it, mirroring the !can_flush_in_this_thread()
-        // reschedule above.
-        iomanager.run_on_forget(logstore_service().flush_thread(),
-                                [this, threshold_size]() { flush_if_necessary(threshold_size); });
+        // very last write issued in a run has no later trigger to fall back on.
+        //
+        // Reschedule a follow-up attempt -- with force=true, unlike the initial call. LogDev::flush()
+        // unconditionally resets m_last_flush_time at its very start, so the concurrent flush that just
+        // stole this race will, by the time the retry runs, likely have already reset that clock to "now"
+        // (making flush_by_time re-evaluate false) while this call's own pending size may still be under
+        // threshold_size (making flush_by_size false too) -- silently abandoning the retry with nothing
+        // left to trigger it again. force=true bypasses that re-derivation on the retry: we already
+        // decided this data needs flushing, so the retry's only job is to keep trying to actually acquire
+        // the lock, not re-litigate whether to.
+        //
+        // Reschedule onto a random *worker* reactor, not flush_thread() directly, even though flush_thread
+        // is where the retry ultimately needs to run (can_flush_in_this_thread() will bounce it back
+        // there). We're already executing on flush_thread at this point (that's how we got past the
+        // can_flush_in_this_thread() check above) -- IOReactor::deliver_msg takes a same-thread shortcut
+        // that calls the target inline instead of queuing it when sender and receiver are the same
+        // reactor, so posting straight back to flush_thread here would recurse synchronously on this same
+        // call stack for every failed try_lock, not queue a new task. Under sustained lock contention
+        // (verified: a lock held for as little as ~200ms is enough) that recursion runs thousands of
+        // frames deep and stack-overflows the process -- a real crash, reproduced with and without
+        // force=true, i.e. pre-existing in the original reschedule-on-lost-race fix, not introduced by
+        // force. Bouncing through random_worker first forces a genuine cross-thread hop (a real reactor,
+        // never flush_thread itself), so the message is queued and this stack frame unwinds before the
+        // retry runs, no matter how many times it fails.
+        iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                                [this, threshold_size]() { flush_if_necessary(threshold_size, /* force = */ true); });
     }
     decr_pending_request_num();
     return false;

@@ -653,9 +653,12 @@ public:
     /// redirect the flush to a flush thread and run there.
     ///
     /// @param threshold_size [Optional]: Size in bytes after which it will flush, if set to -1, will use default size
+    /// @param force [Optional]: Skip the size/time threshold check and go straight to the try_lock. Used internally
+    ///        when rescheduling a retry after losing the try_lock race, so the retry can't be silently talked out of
+    ///        trying again by a stale-clock re-derivation of the threshold check.
     ///
     /// @return bool : True if it has flushed the data, false otherwise
-    bool flush_if_necessary(int64_t threshold_size = -1);
+    bool flush_if_necessary(int64_t threshold_size = -1, bool force = false);
 
     /// @brief : Look at all logstore and find out the safest point upto which it can truncate and truncate them.
     ///
