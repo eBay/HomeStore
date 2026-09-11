@@ -583,6 +583,22 @@ public:
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
+#ifdef _PRERELEASE
+    // Test-only: directly acquire m_flush_mtx from test code, bypassing flush()/flush_under_guard()
+    // entirely -- lets a UT create a lost-try_lock race deterministically (holding the real lock
+    // flush_if_necessary() contends on) without going through a real flush cycle, which would
+    // unavoidably also flush any data appended while the lock was held (its snapshot of m_log_idx is
+    // taken fresh at flush() call time, so it would include anything appended before that call runs,
+    // regardless of when the lock was originally acquired). See
+    // LogStoreTest.FlushIfNecessaryRetrySurvivesStaleClockReset.
+    std::unique_lock< iomgr::FiberManagerLib::mutex > test_acquire_flush_mtx() { return std::unique_lock(m_flush_mtx); }
+
+    // Test-only: simulates the side effect of an unrelated concurrent flush completing (resetting
+    // m_last_flush_time) without actually flushing anything. Only takes effect if the
+    // "test_touch_last_flush_time" flip is armed, so calling this is inert otherwise.
+    void test_touch_last_flush_time();
+#endif
+
     LogDev(logdev_id_t logdev_id,
            flush_mode_t flush_mode = static_cast< flush_mode_t >(HS_DYNAMIC_CONFIG(logstore.flush_mode)),
            uuid_t pid = boost::uuids::nil_uuid());

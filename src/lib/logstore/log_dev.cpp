@@ -513,6 +513,12 @@ bool LogDev::flush_under_guard() {
     return flush();
 }
 
+#ifdef _PRERELEASE
+void LogDev::test_touch_last_flush_time() {
+    if (iomgr_flip::instance()->test_flip("test_touch_last_flush_time")) { m_last_flush_time = Clock::now(); }
+}
+#endif
+
 bool LogDev::flush() {
     if (!is_ready()) {
         THIS_LOGDEV_LOG(INFO, "LogDev is not ready to flush, log_dev={}", m_logdev_id);
