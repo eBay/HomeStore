@@ -50,8 +50,10 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair<
                     return static_cast< IndexBtreeNode* >(node.get())->m_idx_buf->m_blkid;
                 },
                 [](const sisl::CacheRecord& rec) -> bool {
-                    const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
-                    return static_cast< IndexBtreeNode* >(hnode.m_value.get())->m_idx_buf->is_clean();
+                    const auto& hnode = static_cast<const sisl::SingleEntryHashNode<BtreeNodePtr>&>(rec);
+                    const auto* idx_node = static_cast<const IndexBtreeNode*>(hnode.m_value.get());
+                    if (!idx_node || !idx_node->m_idx_buf) { return false; }
+                    return idx_node->m_idx_buf->is_clean();
                 }},
         m_node_size{node_size},
         m_meta_blk{sb.first} {
@@ -1205,6 +1207,13 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
             // There is some leader buffer still flushing, once done its completion will flush this buffer
         }
     }
+}
+
+void IndexWBCache::evict_chunk_blkids(const Chunk& chunk) {
+    chunk.foreach_allocated_blk([this](BlkId const& blkid) {
+        BtreeNodePtr node;
+        (void)m_cache.remove(blkid, node);
+    });
 }
 
 /*

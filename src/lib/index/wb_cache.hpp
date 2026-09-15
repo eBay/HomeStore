@@ -57,6 +57,7 @@ public:
                        CPContext* cp_ctx) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     bool refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPContext* cp_ctx) override;
+    void evict_chunk_blkids(const Chunk& chunk) override;
 
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
