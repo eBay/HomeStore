@@ -63,7 +63,7 @@ public:
         REGISTER_COUNTER(compress_backoff_ratio_cnt, "compression back-off cnt because of exceeding ratio limit");
 
         REGISTER_HISTOGRAM_WITH_CARDINALITY_REDUCTION(compress_ratio_percent, "compression ration percentage",
-                                                              HistogramBucketsType(PercentileBuckets));
+                                                      HistogramBucketsType(PercentileBuckets));
         register_me_to_farm();
     }
 

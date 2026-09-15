@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -564,6 +565,10 @@ protected:
             lsc->reset_recovery();
         }
         set_store_workload_freq(inp_freqs); // Equal distribution by default
+    }
+
+    HomeLogStore* raw_log_store(size_t idx = 0) {
+        return SampleDB::instance().m_log_store_clients[idx]->m_log_store.get();
     }
 
     void kickstart_inserts(uint32_t batch_size, uint32_t q_depth, uint32_t holes_per_batch = 0) {
@@ -1184,6 +1189,95 @@ TEST_F(LogStoreTest, FlushSync) {
     fc->remove_flip("simulate_log_flush_delay");
 #endif
 }
+
+#ifdef _PRERELEASE
+// Regression test for a gap in flush_if_necessary()'s lost-try_lock-race reschedule: it re-invokes
+// flush_if_necessary(), re-deriving flush_by_size/flush_by_time from scratch. LogDev::flush()
+// unconditionally resets m_last_flush_time at its start, so a concurrent flush that won the race can
+// reset the clock right as the retry runs -- if this write's own size never crosses threshold_size,
+// both conditions can read false and the retry silently drops.
+//
+// A real racer flush() can't isolate this: whoever holds the lock long enough for our write to lose
+// its try_lock will, once released, take a fresh snapshot that includes the write anyway (it was
+// appended while the lock was held) -- so releasing the racer completes the write regardless of the
+// fix. Instead this uses two test-only LogDev hooks:
+//  - test_acquire_flush_mtx(): grabs m_flush_mtx directly, bypassing flush() -- releasing it later
+//    triggers no snapshot/flush of its own.
+//  - test_touch_last_flush_time(): resets m_last_flush_time on demand (gated by the
+//    "test_touch_last_flush_time" flip) -- simulates just the clock-reset side effect of a concurrent
+//    flush, without actually flushing anything.
+//
+// Sequence: acquire the lock directly (m_last_flush_time starts infinitely stale on a fresh logdev, so
+// flush_by_time reads true) -> issue the write, whose flush_if_necessary() decides to flush but loses
+// the try_lock race, queuing the retry -> touch the clock (simulating the racing flush completing) and
+// hold the lock 200ms (with max_time_between_flush_us set far larger, so every retry in this window
+// sees a still-too-recent clock and a too-small pending size -- exactly the condition the fix targets)
+// -> release the lock via plain unlock (not flush()). Pre-fix, the retry dropped during that window is
+// gone for good and the write hangs; post-fix, force=true has kept retrying and now wins the lock.
+TEST_F(LogStoreTest, FlushIfNecessaryRetrySurvivesStaleClockReset) {
+    LOGINFO("Step 1: Reinit with no records -- this test issues its own write directly");
+    this->init(0);
+    auto* log_store = this->raw_log_store(0);
+    auto logdev = log_store->get_logdev();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.logstore.max_time_between_flush_us = 2000000ul; /* 2s -- see step 4 above */
+    });
+    HS_SETTINGS_FACTORY().save();
+    static constexpr int64_t threshold = 4096; // bigger than one small write, so flush_by_size alone
+                                               // can't save it -- flush_by_time must do the work.
+
+    LOGINFO("Step 2: Directly acquire the flush lock, bypassing flush() entirely");
+    auto flush_lock = logdev->test_acquire_flush_mtx();
+
+    LOGINFO("Step 3: Issue our target write and its own flush_if_necessary() call -- guaranteed to lose "
+            "the try_lock race since we hold the lock directly");
+    bool io_memory{false};
+    const auto lsn = log_store->get_contiguous_issued_seq_num(-1) + 1;
+    auto* d = SampleLogStoreClient::prepare_data(lsn, io_memory);
+    auto completed = std::make_shared< std::promise< void > >();
+    auto fut = completed->get_future();
+    log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
+                           [completed, d, io_memory](logstore_seq_num_t, const sisl::io_blob&, logdev_key, void*) {
+                               if (io_memory) {
+                                   iomanager.iobuf_free(uintptr_cast(d));
+                               } else {
+                                   std::free(voidptr_cast(d));
+                               }
+                               completed->set_value();
+                           });
+    logdev->flush_if_necessary(threshold);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // let the try_lock fail and the retry
+                                                                // get queued before we touch the clock
+
+    LOGINFO("Step 4: Simulate a concurrent flush completing (clock reset, nothing else), then hold the "
+            "lock for 200ms -- long enough that no amount of retry-latency luck can save a non-robust "
+            "retry");
+    flip::FlipClient* fc = iomgr_flip::client_instance();
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_noreturn_flip("test_touch_last_flush_time", {dont_care_cond}, freq);
+    logdev->test_touch_last_flush_time();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    LOGINFO("Step 5: Release the lock directly (not via flush()) -- must not touch m_log_idx or complete "
+            "anything on its own");
+    flush_lock.unlock();
+
+    LOGINFO("Step 6: The write must still complete -- pre-fix, the retry silently drops during step 4's "
+            "window and never comes back");
+    auto status = fut.wait_for(std::chrono::seconds(10));
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.logstore.max_time_between_flush_us = 300ul; });
+    HS_SETTINGS_FACTORY().save();
+
+    ASSERT_EQ(status, std::future_status::ready)
+        << "write never completed -- lost-race reschedule was silently dropped by a stale clock reset";
+}
+#endif
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;

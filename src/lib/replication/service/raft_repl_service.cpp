@@ -660,8 +660,8 @@ void RaftReplService::start_repl_service_timers() {
                 HS_DYNAMIC_CONFIG(consensus.replace_member_sync_check_interval_ms) * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*, uint64_t exp_count) {
                     if (exp_count > 1) {
-                        LOGINFOMOD(replication,
-                                   "replace member sync check timer expired {} times, running once", exp_count);
+                        LOGINFOMOD(replication, "replace member sync check timer expired {} times, running once",
+                                   exp_count);
                     }
                     monitor_replace_member_replication_status();
                 });
@@ -674,27 +674,22 @@ void RaftReplService::start_repl_service_timers() {
     // GC on the reaper fiber cannot delay queued fetch batches past consensus.data_receive_timeout_ms
     // (default 10s), which would otherwise cause "Data fetch timeout" assertion / TIMEOUT errors.
     std::latch fetcher_latch{1};
-    iomanager.create_reactor("raft_repl_fetcher", iomgr::INTERRUPT_LOOP, 1u,
-                             [this, &fetcher_latch](bool is_started) {
-                                 if (is_started) {
-                                     m_fetcher_fiber = iomanager.iofiber_self();
-                                     // Check for queued fetches at the minimum every second
-                                     uint64_t interval_ns = std::min(
-                                         HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000,
-                                         1ul * 1000 * 1000 * 1000);
-                                     m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(
-                                         interval_ns, true /* recurring */, nullptr,
-                                         [this](void*, uint64_t exp_count) {
-                                             if (exp_count > 1) {
-                                                 LOGINFOMOD(replication,
-                                                            "fetch pending data timer expired {} times, running once",
-                                                            exp_count);
-                                             }
-                                             fetch_pending_data();
-                                         });
-                                     fetcher_latch.count_down();
-                                 }
-                             });
+    iomanager.create_reactor("raft_repl_fetcher", iomgr::INTERRUPT_LOOP, 1u, [this, &fetcher_latch](bool is_started) {
+        if (is_started) {
+            m_fetcher_fiber = iomanager.iofiber_self();
+            // Check for queued fetches at the minimum every second
+            uint64_t interval_ns =
+                std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
+            m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(
+                interval_ns, true /* recurring */, nullptr, [this](void*, uint64_t exp_count) {
+                    if (exp_count > 1) {
+                        LOGINFOMOD(replication, "fetch pending data timer expired {} times, running once", exp_count);
+                    }
+                    fetch_pending_data();
+                });
+            fetcher_latch.count_down();
+        }
+    });
     fetcher_latch.wait();
 }
 
@@ -711,7 +706,7 @@ void RaftReplService::stop_repl_service_timers() {
     });
 }
 
-void RaftReplService::add_to_fetch_queue(cshared<RaftReplDev> &rdev, std::vector<repl_req_ptr_t> rreqs) {
+void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs) {
     std::unique_lock lg(m_pending_fetch_mtx);
     m_pending_fetch_batches.push(std::make_pair(rdev, std::move(rreqs)));
 }
@@ -719,7 +714,7 @@ void RaftReplService::add_to_fetch_queue(cshared<RaftReplDev> &rdev, std::vector
 void RaftReplService::fetch_pending_data() {
     std::unique_lock lg(m_pending_fetch_mtx);
     while (!m_pending_fetch_batches.empty()) {
-        auto const &[d, rreqs] = m_pending_fetch_batches.front();
+        auto const& [d, rreqs] = m_pending_fetch_batches.front();
         if (get_elapsed_time_ms(rreqs.at(0)->created_time()) < HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms)) {
             break;
         }

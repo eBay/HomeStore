@@ -144,7 +144,7 @@
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
-                return check_and_format_log(buf, freq, 0);                                                                                          \
+                return check_and_format_log(buf, freq, 0);                                                             \
             }),                                                                                                        \
             msg, ##__VA_ARGS__);                                                                                       \
     }
@@ -152,7 +152,7 @@
 #define HS_LOG_EVERY_N(level, mod, freq, msg, ...) HS_DETAILED_LOG_EVERY_N(level, mod, freq, , , , , msg, ##__VA_ARGS__)
 
 #define HS_DETAILED_LOG_EVERY_N_SEC(level, mod, interval_sec, submod_name, submod_val, detail_name, detail_val, msg,   \
-                                     ...)                                                                              \
+                                    ...)                                                                               \
     {                                                                                                                  \
         LOG##level##MOD_FMT(                                                                                           \
             BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                                           \
@@ -168,7 +168,7 @@
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
-                return check_and_format_log(buf, 0, interval_sec);                                                                                          \
+                return check_and_format_log(buf, 0, interval_sec);                                                     \
             }),                                                                                                        \
             msg, ##__VA_ARGS__);                                                                                       \
     }
@@ -176,8 +176,8 @@
 #define HS_LOG_EVERY_N_SEC(level, mod, interval_sec, msg, ...)                                                         \
     HS_DETAILED_LOG_EVERY_N_SEC(level, mod, interval_sec, , , , , msg, ##__VA_ARGS__)
 
-#define HS_DETAILED_LOG_EVERY_N_OR_SEC(level, mod, freq, interval_sec, submod_name, submod_val, detail_name,          \
-                                        detail_val, msg, ...)                                                          \
+#define HS_DETAILED_LOG_EVERY_N_OR_SEC(level, mod, freq, interval_sec, submod_name, submod_val, detail_name,           \
+                                       detail_val, msg, ...)                                                           \
     {                                                                                                                  \
         LOG##level##MOD_FMT(                                                                                           \
             BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                                           \
@@ -193,7 +193,7 @@
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
-                return check_and_format_log(buf, freq, interval_sec);                                                                                          \
+                return check_and_format_log(buf, freq, interval_sec);                                                  \
             }),                                                                                                        \
             msg, ##__VA_ARGS__);                                                                                       \
     }
@@ -361,7 +361,7 @@
  * If interval_sec >= 300, the behavior effectively becomes "log first occurrence after each 5min reset."
  */
 [[maybe_unused]] static bool check_and_format_log(fmt::memory_buffer& buf, uint64_t freq = 0,
-                                                    uint64_t interval_sec = 0) {
+                                                  uint64_t interval_sec = 0) {
     static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
     static thread_local Clock::time_point last_cleanup{Clock::now()};
     static thread_local std::unordered_map< size_t, std::pair< uint32_t, uint64_t > > log_map{};
@@ -388,8 +388,7 @@
     const size_t msg_hash = std::hash< std::string_view >{}(msg);
 
     // Milliseconds since last cleanup (max ~49 days with uint32_t)
-    const uint32_t now_ms =
-        std::chrono::duration_cast< std::chrono::milliseconds >(now - last_cleanup).count();
+    const uint32_t now_ms = std::chrono::duration_cast< std::chrono::milliseconds >(now - last_cleanup).count();
 
     auto [it, happened] = log_map.emplace(msg_hash, std::make_pair(now_ms, 0));
     uint32_t elapsed_ms = 0;
@@ -429,8 +428,8 @@
 
         // Update state after logging (so next log shows "since this log")
         if (!happened) {
-            it->second.first = now_ms;  // Update timestamp
-            it->second.second = 0;      // Reset count (next occurrence will be "1 since this log")
+            it->second.first = now_ms; // Update timestamp
+            it->second.second = 0;     // Reset count (next occurrence will be "1 since this log")
         }
     }
 
