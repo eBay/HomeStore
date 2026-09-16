@@ -14,6 +14,8 @@
  *********************************************************************************/
 #pragma once
 
+#include <system_error>
+
 #include <homestore/replication/repl_decls.h>
 #include <homestore/logstore_service.hpp>
 
@@ -225,6 +227,8 @@ public:
     void set_last_durable_lsn(repl_lsn_t lsn);
 
 private:
+    void on_journal_write_failed(std::error_condition status, int64_t lsn);
+
     logstore_id_t m_logstore_id;
     logdev_id_t m_logdev_id;
     shared< HomeLogStore > m_log_store;

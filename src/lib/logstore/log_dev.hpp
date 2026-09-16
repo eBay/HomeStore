@@ -764,7 +764,7 @@ private:
      */
     void unreserve_store_id(logstore_id_t store_id);
 
-    void on_flush_completion(LogGroup* lg);
+    void on_flush_completion(LogGroup* lg, std::error_condition status = {});
     void on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb);
     void handle_unopened_log_stores(bool format);
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
