@@ -86,6 +86,12 @@ if (${io_tests})
     add_test(NAME IndexCrashRecovery COMMAND test_index_crash_recovery)
     set_property(TEST IndexCrashRecovery PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
 
+    set(TEST_RECOVERY_INDEX_SOURCE_FILES test_index_chunk_selector.cpp)
+    add_executable(test_index_chunk_selector ${TEST_RECOVERY_INDEX_SOURCE_FILES})
+    target_link_libraries(test_index_chunk_selector homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME IndexChunkSelector COMMAND test_index_chunk_selector)
+    set_property(TEST IndexChunkSelector PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
+
     add_executable(test_data_service)
     target_sources(test_data_service PRIVATE test_data_service.cpp)
     target_link_libraries(test_data_service homestore ${COMMON_TEST_DEPS} GTest::gmock)
@@ -167,3 +173,6 @@ if (${non_coverage_build})
     target_sources(index_btree_benchmark PRIVATE index_btree_benchmark.cpp)
     target_link_libraries(index_btree_benchmark homestore ${COMMON_TEST_DEPS} benchmark::benchmark)
 endif()
+
+target_compile_definitions(test_index_chunk_selector PRIVATE _PRERELEASE)
+
