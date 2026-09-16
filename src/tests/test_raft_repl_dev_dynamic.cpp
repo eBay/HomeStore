@@ -210,7 +210,7 @@ TEST_F(ReplDevDynamicTest, TwoMemberDown) {
         constexpr int max_retries = 3;
         bool succeeded = false;
         for (int i = 0; i < max_retries; ++i) {
-            auto result = detail::sync_get(hs()->repl_service().replace_member(
+            auto result = sisl::async::sync_get(hs()->repl_service().replace_member(
                 db->device()->group_id(), task_id, replica_member_info{g_helper->replica_id(member_out), ""},
                 replica_member_info{g_helper->replica_id(member_in), ""}, 1));
             if (result.has_value()) {

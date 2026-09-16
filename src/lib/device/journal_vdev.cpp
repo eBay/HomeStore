@@ -28,7 +28,7 @@
 #include "replication/repl_dev/raft_repl_dev.h"
 #include "device/chunk.h"
 #include "device/device.h"
-#include "common/coro_helpers.hpp" // detail::detach (fire-and-forget the journal-exceed CP flush)
+#include <sisl/async/coro.hpp>
 #include "device/physical_dev.hpp"
 #include "device/journal_vdev.hpp"
 #include "common/error.h"
@@ -59,7 +59,7 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
 
     resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         // either it is critical or non-critical, call cp_flush;
-        detail::detach(hs()->cp_mgr().trigger_cp_flush(false /* force */));
+        sisl::async::detach(hs()->cp_mgr().trigger_cp_flush(false /* force */));
 
         if (critical) {
             LOGINFO("Critical journal vdev size threshold reached. Triggering truncate.");

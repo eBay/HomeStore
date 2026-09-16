@@ -18,7 +18,7 @@
 #include <sisl/fds/utils.hpp>
 #include "common/homestore_assert.hpp"
 #include <homestore/homestore.hpp>
-#include "common/coro_helpers.hpp" // detail::detach_then / sync_get / await_value_ref
+#include <sisl/async/coro.hpp>
 #include <iomgr/iomgr_flip.hpp>
 
 using namespace homestore;
@@ -104,7 +104,7 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
         m_logstore_id = logstore_id;
         LOGDEBUGMOD(replication, "Opening existing home log_dev={} log_store={}", m_logdev_id, logstore_id);
         logstore_service().open_logdev(m_logdev_id, flush_mode_t::EXPLICIT);
-        detail::detach_then(
+        sisl::async::detach_then(
             logstore_service().open_log_store(m_logdev_id, logstore_id, true, log_found_cb, log_replay_done_cb),
             [this](auto log_store) {
                 m_log_store = std::move(log_store);
@@ -393,7 +393,9 @@ void HomeRaftLogStore::purge_all_logs() {
     m_log_store->truncate(last_lsn, false /* in_memory_truncate_only */);
 }
 
-void HomeRaftLogStore::wait_for_log_store_ready() { detail::sync_get(detail::await_value_ref(m_log_store_ready)); }
+void HomeRaftLogStore::wait_for_log_store_ready() {
+    sisl::async::sync_get(sisl::async::await_value_ref(m_log_store_ready));
+}
 
 void HomeRaftLogStore::set_last_durable_lsn(repl_lsn_t lsn) { m_last_durable_lsn = to_store_lsn(lsn); }
 

@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <sisl/fds/buffer.hpp>
-#include "bounded_mpmc_queue.hpp"
+#include <sisl/fds/bounded_mpmc_queue.hpp>
 
 #include "blk_cache.h"
 
@@ -75,7 +75,7 @@ public:
 
 private:
     blk_count_t m_slab_size; // Slab size in-terms of number of pages
-    std::vector< std::unique_ptr< BoundedMPMCQueue< blk_cache_entry > > > m_level_queues;
+    std::vector< std::unique_ptr< sisl::BoundedMPMCQueue< blk_cache_entry > > > m_level_queues;
     std::atomic< uint64_t > m_refill_session{0}; // Is a refill pending for this slab
     blk_num_t m_total_capacity{0};
     blk_num_t m_refill_threshold_limits; // For every level whats their threshold limit size

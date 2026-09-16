@@ -21,7 +21,7 @@
 #include <homestore/logstore_service.hpp>
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
-#include "common/coro_helpers.hpp"
+#include <sisl/async/coro.hpp>
 #include "replication/service/raft_repl_service.h"
 
 #include <latch>
@@ -395,7 +395,8 @@ async_result< shared< repl_dev > > RaftReplService::create_repl_dev(group_id_t g
     if (members.size() > 0) {
         // Create a new RAFT group and add all members. create_group() will call the create_state_mgr which will create
         // the repl_dev instance and add it to the map.
-        if (auto const status = detail::sync_get(m_msg_mgr->create_group(group_id, "homestore_replication")); !status) {
+        if (auto const status = sisl::async::sync_get(m_msg_mgr->create_group(group_id, "homestore_replication"));
+            !status) {
             return make_async_error< shared< repl_dev > >(to_repl_error(status.error()));
         }
 
@@ -407,7 +408,7 @@ async_result< shared< repl_dev > > RaftReplService::create_repl_dev(group_id_t g
             auto srv_config = nuraft::srv_config(nuraft_mesg::to_server_id(member), 0, boost::uuids::to_string(member),
                                                  "", false, follower_priority);
             // add_member retries config-changing internally now, so a single call settles it.
-            auto const result = detail::sync_get(m_msg_mgr->add_member(group_id, srv_config));
+            auto const result = sisl::async::sync_get(m_msg_mgr->add_member(group_id, srv_config));
             if (result) {
                 LOGINFOMOD(replication, "Groupid={}, new member={} added with priority={}",
                            boost::uuids::to_string(group_id), boost::uuids::to_string(member), follower_priority);

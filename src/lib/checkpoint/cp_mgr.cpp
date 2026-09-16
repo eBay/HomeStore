@@ -25,18 +25,13 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"
-#include "common/coro_helpers.hpp" // detail::detach (fire-and-forget the flush coroutine)
+#include <sisl/async/coro.hpp>
 #include "cp_internal.hpp"
 
 namespace homestore {
 thread_local std::stack< CP* > CPGuard::t_cp_stack;
 
 namespace {
-// trigger_cp_flush returns a task<bool> awaiting the CP's broadcast completion. do_trigger_cp_flush does its
-// switchover synchronously (callers fire-and-forget that side effect) and hands back one of these awaiters.
-sisl::async::task< bool > await_shared(std::shared_ptr< sisl::async::shared_awaitable< bool > > comp) {
-    co_return co_await *comp;
-}
 sisl::async::task< bool > ready_bool(bool v) { co_return v; }
 } // namespace
 
@@ -52,7 +47,7 @@ CPManager::CPManager() :
 
     resource_mgr().register_dirty_buf_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         LOGINFO("Dirty buffer exceeded count {} critical {}", dirty_buf_count, critical);
-        detail::detach(this->trigger_cp_flush(false /* force */));
+        sisl::async::detach(this->trigger_cp_flush(false /* force */));
     });
 
     start_timer_thread();
@@ -113,7 +108,7 @@ void CPManager::start_timer() {
         m_cp_timer_hdl = iomanager.schedule_thread_timer(
             usecs * 1000, true /* recurring */, nullptr /* cookie */, [this](void*, uint64_t exp_count) {
                 if (exp_count > 1) { LOGINFO("cp timer expired {} times, running once", exp_count); }
-                detail::detach(trigger_cp_flush(false));
+                sisl::async::detach(trigger_cp_flush(false));
             });
     });
 }
@@ -142,11 +137,11 @@ void CPManager::shutdown(bool require_extra_cp) {
     }
 
     LOGINFO("Trigger cp flush at CP shutdown");
-    auto success = detail::sync_get(do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */));
+    auto success = sisl::async::sync_get(do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */));
     HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
 
     if (require_extra_cp) {
-        success = detail::sync_get(do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */));
+        success = sisl::async::sync_get(do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */));
         HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
     }
 
@@ -201,7 +196,7 @@ void CPManager::cp_io_exit(CP* cp) {
     HS_DBG_ASSERT_NE(cp->m_cp_status, cp_status_t::cp_flushing);
     if (cp->m_enter_cnt.decrement_testz(1) && (cp->m_cp_status == cp_status_t::cp_flush_prepare)) {
         m_wd_cp->set_cp(cp);
-        detail::detach(cp_start_flush(cp)); // fire-and-forget the flush coroutine
+        sisl::async::detach(cp_start_flush(cp)); // fire-and-forget the flush coroutine
     }
 }
 
@@ -228,7 +223,7 @@ sisl::async::task< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_
             }
 
             // If multiple threads call trigger, they all await the same shared_awaitable (broadcast).
-            return await_shared(m_pending_trigger_cp_comp);
+            return sisl::async::await_shared(m_pending_trigger_cp_comp);
         } else {
             return ready_bool(false);
         }
@@ -281,7 +276,7 @@ sisl::async::task< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_
     lk.unlock();
 
     HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
-    return await_shared(comp);
+    return sisl::async::await_shared(comp);
 }
 
 sisl::async::task< void > CPManager::cp_start_flush(CP* cp) {
@@ -342,7 +337,7 @@ void CPManager::on_cp_flush_done(CP* cp) {
     if (trigger_back_2_back_cp) {
         HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
         COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
-        detail::detach(trigger_cp_flush(false));
+        sisl::async::detach(trigger_cp_flush(false));
     }
 }
 

@@ -170,8 +170,7 @@ if (!r) {
 }
 ```
 
-Bridges into non-coroutine code (`detail::detach_then`, `sync_get`, …) live in homestore's coroutine
-helpers; the underlying stdexec sender/receiver machinery is hidden - consumers never depend on stdexec
+the underlying stdexec sender/receiver machinery is hidden - consumers never depend on stdexec
 directly. Errors propagate as `std::error_condition`; exceptions are reserved for precondition bugs.
 
 ## 🖥️ Usage

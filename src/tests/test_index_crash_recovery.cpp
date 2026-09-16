@@ -358,7 +358,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         LOGINFO("Destroying index btree with uuid {} root id {}", boost::uuids::to_string(this->m_bt->uuid()),
                 this->m_bt->root_node_id());
         hs()->index_service().remove_index_table(this->m_bt);
-        homestore::detail::sync_get(this->m_bt->destroy());
+        sisl::async::sync_get(this->m_bt->destroy());
         this->trigger_cp(true);
         ASSERT_EQ(hs()->index_service().num_tables(), 0) << "After destroying the index table, some table still exists";
 
@@ -374,7 +374,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
     void destroy_btree() {
         hs()->index_service().remove_index_table(this->m_bt);
-        homestore::detail::sync_get(this->m_bt->destroy());
+        sisl::async::sync_get(this->m_bt->destroy());
         this->trigger_cp(true);
         this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
         this->m_shadow_map.save(m_shadow_filename);
@@ -1308,7 +1308,7 @@ TYPED_TEST(IndexCrashTest, DestroyTableWithPendingCpCrash) {
     // dirty list because free_buf only marks m_node_freed — it does not touch the list.
     LOGINFO("Step 4: Destroy index table — meta superblock removed from disk");
     hs()->index_service().remove_index_table(this->m_bt);
-    homestore::detail::sync_get(this->m_bt->destroy());
+    sisl::async::sync_get(this->m_bt->destroy());
 
     // Step 5: Trigger the CP (do not wait).  async_cp_flush will:
     //   (a) write the txn_journal to disk (entries include the destroyed table's ordinal),

@@ -5,11 +5,11 @@ from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake
 from conan.tools.files import copy
 from os.path import join
 
-required_conan_version = ">=1.60.0"
+required_conan_version = ">=2.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "8.2.0"
+    version = "8.3.0"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -53,7 +53,7 @@ class HomestoreConan(ConanFile):
 
     def requirements(self):
         self.requires("iomgr/[^13.0]@oss/dev", transitive_headers=True)
-        self.requires("sisl/[^14.5]@oss/dev", transitive_headers=True)
+        self.requires("sisl/[^14.9]@oss/dev", transitive_headers=True)
         self.requires("nuraft_mesg/[^5.0]@oss/dev", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
             self.requires("isa-l/[^2.30]", transitive_headers=True)
