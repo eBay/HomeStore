@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <iterator>
+#include <system_error>
 
 #include <sisl/fds/vector_pool.hpp>
 #include <iomgr/iomgr_flip.hpp>
@@ -528,11 +529,16 @@ bool LogDev::flush() {
         HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_records_distribution, lg->nrecords());
         HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
 
-        // TODO:: add logic to handle this error in upper layer
         auto error = m_vdev_jd->sync_pwritev(lg->iovecs().data(), int_cast(lg->iovecs().size()), lg->m_log_dev_offset);
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("simulate_log_flush_error")) {
+            error = std::make_error_code(std::errc::io_error);
+        }
+#endif
         if (error) {
             THIS_LOGDEV_LOG(ERROR, "Fail to sync write to journal vde , error code {} : {}", error.value(),
                             error.message());
+            on_flush_completion(lg, std::make_error_condition(std::errc::io_error));
             return false;
         }
 
@@ -542,17 +548,23 @@ bool LogDev::flush() {
     return true;
 }
 
-void LogDev::on_flush_completion(LogGroup* lg) {
+void LogDev::on_flush_completion(LogGroup* lg, std::error_condition status) {
     auto done_time = Clock::now();
     THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-
-    m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-    m_last_crc = lg->header()->cur_grp_crc;
-    std::unordered_map< logid_t, logstore_req* > req_map;
 
     auto from_indx = lg->m_flush_log_idx_from;
     auto upto_indx = lg->m_flush_log_idx_upto;
     auto dev_offset = lg->m_log_dev_offset;
+
+    // Collect every request in the flushed range first (single pass under the stream-tracker lock). A
+    // flush failure is terminal for this range: HomeLogStore::write_async()'s callback wrapper frees the
+    // logstore_req right after invoking it, so the records, LogGroup, and flush cursor (m_last_flush_idx)
+    // must retire together with the callback firing below -- otherwise the next prepare_flush() would
+    // walk back into this range (foreach_contiguous_active() only checks the active bit, not completion
+    // status) and hand already-freed requests to a new LogGroup. There is deliberately no internal retry:
+    // retrying would double-invoke a callback that may carry one-shot side effects (e.g.
+    // SoloReplDev::write_journal() drives repl_dev state from it).
+    std::unordered_map< logid_t, logstore_req* > req_map;
     for (auto idx = from_indx; idx <= upto_indx; ++idx) {
         logstore_req* req;
         logstore_id_t store_id;
@@ -576,12 +588,29 @@ void LogDev::on_flush_completion(LogGroup* lg) {
         home_log_store* log_store = req->log_store;
         HS_LOG_ASSERT_EQ(log_store->get_store_id(), store_id,
                          "Expecting store id in log store and flush completion to match");
-        HISTOGRAM_OBSERVE(logstore_service().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
 #ifdef _PRERELEASE
         HISTOGRAM_OBSERVE(logstore_service().m_metrics, logstore_stream_tracker_lock_latency, lock_latency);
 #endif
-        log_store->on_write_completion(req, logdev_key{idx, dev_offset}, logdev_key{from_indx, dev_offset});
         req_map[idx] = req;
+    }
+
+    // Retire this range's bookkeeping unconditionally -- success or failure -- since a failure is terminal
+    // (see the comment above): the record slots, the LogGroup, and the flush cursor must never be visited
+    // again regardless of outcome, or a future prepare_flush() would resurrect an already-freed request.
+    m_log_records->complete(from_indx, upto_indx);
+    if (!status) {
+        m_last_crc = lg->header()->cur_grp_crc;
+
+        // Must run in idx order (from_indx..upto_indx), not req_map's unspecified hash order:
+        // on_write_completion's m_tail_lsn/trunc_key bookkeeping is order-sensitive within a single log
+        // store when that store allows out-of-order lsn writes (unlike the callback-firing loop below,
+        // which is explicitly order-independent).
+        for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+            auto* req = req_map[idx];
+            HISTOGRAM_OBSERVE(logstore_service().m_metrics, logstore_append_latency,
+                              get_elapsed_time_us(req->start_time));
+            req->log_store->on_write_completion(req, logdev_key{idx, dev_offset}, logdev_key{from_indx, dev_offset});
+        }
     }
     HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_time_us,
                       get_elapsed_time_us(m_last_flush_time, done_time));
@@ -590,15 +619,18 @@ void LogDev::on_flush_completion(LogGroup* lg) {
     free_log_group(lg);
     m_log_records->truncate(upto_indx);
     m_last_flush_idx = upto_indx;
-    m_last_flush_ld_key = logdev_key{from_indx, dev_offset};
+    // Unlike m_last_flush_idx above (an in-memory "don't revisit this range" cursor), m_last_flush_ld_key is
+    // the on-disk replay/recovery boundary -- it must only ever point at a location that was actually
+    // written, so it stays put on failure.
+    if (!status) { m_last_flush_ld_key = logdev_key{from_indx, dev_offset}; }
 
     // since we support out-of-order lsn write, so no need to guarantee the order of logstore write completion
     for (auto const& [idx, req] : req_map) {
         m_pending_callback++;
-        auto callback_lambda = [this, dev_offset, idx, req]() {
+        auto callback_lambda = [this, dev_offset, idx, req, status]() {
             auto ld_key = logdev_key{idx, dev_offset};
             auto comp_cb = req->log_store->get_comp_cb();
-            (req->cb) ? req->cb(req, ld_key) : comp_cb(req, ld_key);
+            (req->cb) ? req->cb(req, ld_key, status) : comp_cb(req, ld_key, status);
             m_pending_callback--;
         };
 
