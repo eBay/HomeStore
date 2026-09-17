@@ -24,7 +24,7 @@
 #include "wb_cache.hpp"
 #include "index_cp.hpp"
 #include "device/virtual_dev.hpp"
-#include "common/coro_helpers.hpp" // detail::detach_then
+#include <sisl/async/coro.hpp>
 #include <sisl/async/when_all.hpp> // sisl::async::when_all (collectAllUnsafe replacement)
 #include "common/resource_mgr.hpp"
 
@@ -1018,15 +1018,15 @@ sisl::async::task< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
                     auto const buf = preflush_bufs.front();
                     LOGINFO("Simulating crash after partially preflushing root-transition node {}", buf->to_string());
                     // buf is captured by value in the completion so the node memory outlives the in-flight write.
-                    detail::detach_then(m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size,
-                                                            buf->m_blkid, true /* part_of_batch */),
-                                        [cp_ctx, buf](iomgr::io_result const& result) {
-                                            HS_REL_ASSERT(result,
-                                                          "Partial root-transition preflush failed with error={} ({})",
-                                                          result.error().value(), result.error().message());
-                                            hs()->crash_simulator().crash();
-                                            cp_ctx->complete(true);
-                                        });
+                    sisl::async::detach_then(
+                        m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid,
+                                            true /* part_of_batch */),
+                        [cp_ctx, buf](iomgr::io_result const& result) {
+                            HS_REL_ASSERT(result, "Partial root-transition preflush failed with error={} ({})",
+                                          result.error().value(), result.error().message());
+                            hs()->crash_simulator().crash();
+                            cp_ctx->complete(true);
+                        });
                     m_vdev->submit_batch();
                     return;
                 }
@@ -1035,7 +1035,7 @@ sisl::async::task< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
                 // SQE) synchronously before suspending on the fan-out latch, so every preflush write is already
                 // queued by the time detach() returns and submit_batch() rings the doorbell for all of them --
                 // the same start-then-submit order start_buffer_flush() uses.
-                detail::detach(preflush_root_nodes(cp_ctx, std::move(preflush_bufs)));
+                sisl::async::detach(preflush_root_nodes(cp_ctx, std::move(preflush_bufs)));
                 m_vdev->submit_batch();
             });
     }
@@ -1084,7 +1084,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
             LOGTRACEMOD(wbcache, "Flushing cp {} new node buf {} blkid {}", cp_ctx->id(), buf->to_string(),
                         buf->blkid().to_string());
         }
-        detail::detach_then(
+        sisl::async::detach_then(
             m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch),
             [buf, cp_ctx](iomgr::io_result const&) {
                 try {

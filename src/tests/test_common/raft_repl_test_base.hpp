@@ -277,8 +277,8 @@ public:
     void snapshot_obj_write(uint64_t data_size, uint64_t data_pattern, multi_blk_id& out_blkids) {
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         auto write_sgs = test_common::HSTestHelper::create_sgs(data_size, block_size, data_pattern);
-        [[maybe_unused]] auto const r =
-            detail::sync_get(homestore::data_service().async_alloc_write(write_sgs, blk_alloc_hints{}, out_blkids));
+        [[maybe_unused]] auto const r = sisl::async::sync_get(
+            homestore::data_service().async_alloc_write(write_sgs, blk_alloc_hints{}, out_blkids));
         for (auto const& iov : write_sgs.iovs) {
             iomanager.iobuf_free(uintptr_cast(iov.iov_base));
         }
@@ -437,20 +437,20 @@ public:
                 auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
                 auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
-                detail::detach_then(device()->async_read(v.blkid_, read_sgs, v.data_size_),
-                                    [read_sgs, k, v](iomgr::io_result const& r) {
-                                        LOGINFOMOD(replication, "Validating key={} value[blkid={} pattern={}]", k.id_,
-                                                   v.blkid_.to_string(), v.data_pattern_);
-                                        RELEASE_ASSERT(bool(r), "Read of blkid={} for key={} error={}",
-                                                       v.blkid_.to_string(), k.id_,
-                                                       r ? std::string{} : r.error().message());
-                                        for (auto const& iov : read_sgs.iovs) {
-                                            test_common::HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base),
-                                                                                         iov.iov_len, v.data_pattern_);
-                                            iomanager.iobuf_free(uintptr_cast(iov.iov_base));
-                                        }
-                                        g_helper->runner().next_task();
-                                    });
+                sisl::async::detach_then(device()->async_read(v.blkid_, read_sgs, v.data_size_),
+                                         [read_sgs, k, v](iomgr::io_result const& r) {
+                                             LOGINFOMOD(replication, "Validating key={} value[blkid={} pattern={}]",
+                                                        k.id_, v.blkid_.to_string(), v.data_pattern_);
+                                             RELEASE_ASSERT(bool(r), "Read of blkid={} for key={} error={}",
+                                                            v.blkid_.to_string(), k.id_,
+                                                            r ? std::string{} : r.error().message());
+                                             for (auto const& iov : read_sgs.iovs) {
+                                                 test_common::HSTestHelper::validate_data_buf(
+                                                     uintptr_cast(iov.iov_base), iov.iov_len, v.data_pattern_);
+                                                 iomanager.iobuf_free(uintptr_cast(iov.iov_base));
+                                             }
+                                             g_helper->runner().next_task();
+                                         });
             } else {
                 g_helper->runner().next_task();
             }
@@ -519,7 +519,7 @@ public:
         for (auto const& db : dbs_) {
             if (db->is_zombie()) { continue; }
             run_on_leader(db, [this, db]() {
-                auto err = detail::sync_get(hs()->repl_service().remove_repl_dev(db->device()->group_id()));
+                auto err = sisl::async::sync_get(hs()->repl_service().remove_repl_dev(db->device()->group_id()));
                 ASSERT_TRUE(err.has_value()) << "Error in destroying the group: " << (err ? "" : err.error().message());
             });
         }
@@ -586,7 +586,7 @@ public:
         if (g_helper->replica_num() == replica) {
             for (auto const& db : dbs_) {
                 do {
-                    auto result = detail::sync_get(db->device()->become_leader());
+                    auto result = sisl::async::sync_get(db->device()->become_leader());
                     if (!result) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                     } else {
@@ -732,7 +732,7 @@ public:
 
     void remove_db(std::shared_ptr< TestReplicatedDB > db, bool wait_for_removal) {
         this->run_on_leader(db, [this, db]() {
-            auto err = detail::sync_get(hs()->repl_service().remove_repl_dev(db->device()->group_id()));
+            auto err = sisl::async::sync_get(hs()->repl_service().remove_repl_dev(db->device()->group_id()));
             ASSERT_TRUE(err.has_value()) << "Error in destroying the group: " << (err ? "" : err.error().message());
         });
 
@@ -794,7 +794,7 @@ public:
                 boost::uuids::to_string(member_in));
         replica_member_info out{member_out, ""};
         replica_member_info in{member_in, ""};
-        auto result = detail::sync_get(
+        auto result = sisl::async::sync_get(
             hs()->repl_service().replace_member(db->device()->group_id(), task_id, out, in, commit_quorum));
         if (error == ReplServiceError::OK) {
             ASSERT_EQ(result.has_value(), true) << "Error in replacing member, err=" << result.error().message();
@@ -821,7 +821,7 @@ public:
             LOGINFO("remove member, member={}", boost::uuids::to_string(member_id));
             while (true) {
                 auto result =
-                    detail::sync_get(hs()->repl_service().remove_member(db->device()->group_id(), member_id, 0));
+                    sisl::async::sync_get(hs()->repl_service().remove_member(db->device()->group_id(), member_id, 0));
                 if (result.has_value() || result.error() == ReplServiceError::OK) {
                     LOGINFO("Member {} already removed", boost::uuids::to_string(member_id));
                     break;
@@ -839,8 +839,8 @@ public:
         replica_member_info member{member_id, ""};
         this->run_on_leader(db, [this, error, db, member, target]() {
             LOGINFO("flip learner to {}, member={}", target, boost::uuids::to_string(member.id));
-            auto result =
-                detail::sync_get(hs()->repl_service().flip_learner_flag(db->device()->group_id(), member, target, 0));
+            auto result = sisl::async::sync_get(
+                hs()->repl_service().flip_learner_flag(db->device()->group_id(), member, target, 0));
             if (error == ReplServiceError::OK) {
                 ASSERT_EQ(result.has_value(), true) << "Error in flip_learner, err=" << result.error().message();
             } else {
@@ -854,8 +854,8 @@ public:
                                    ReplServiceError error = ReplServiceError::OK) {
         this->run_on_leader(db, [this, error, db, task_id]() {
             LOGINFO("clean replace member task, task_id={}", task_id);
-            auto result =
-                detail::sync_get(hs()->repl_service().clean_replace_member_task(db->device()->group_id(), task_id, 0));
+            auto result = sisl::async::sync_get(
+                hs()->repl_service().clean_replace_member_task(db->device()->group_id(), task_id, 0));
             if (error == ReplServiceError::OK) {
                 ASSERT_EQ(result.has_value(), true)
                     << "Error in clean_replace_member_task, err=" << result.error().message();

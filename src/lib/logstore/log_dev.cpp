@@ -31,7 +31,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_utils.hpp"
-#include "common/coro_helpers.hpp" // detail::await_shared / await_value / sync_get
+#include <sisl/async/coro.hpp>
 #include "common/crash_simulator.hpp"
 #include "replication/service/generic_repl_svc.h"
 
@@ -172,7 +172,7 @@ void LogDev::stop() {
     // after we call stop, we need to do any pending device truncations
     truncate();
     m_id_logstore_map.clear();
-    if (allow_timer_flush()) { detail::sync_get(stop_timer()); }
+    if (allow_timer_flush()) { sisl::async::sync_get(stop_timer()); }
 }
 
 void LogDev::destroy() {
@@ -203,7 +203,7 @@ sisl::async::task< int > LogDev::stop_timer() {
         }
         aw->complete(0);
     });
-    return detail::await_value(std::move(aw));
+    return sisl::async::await_value(std::move(aw));
 }
 
 void LogDev::do_load(off_t device_cursor) {
@@ -765,7 +765,7 @@ sisl::async::task< shared< home_log_store > > LogDev::open_log_store(logstore_id
         }
         comp = it->second.promise;
     }
-    return detail::await_shared(std::move(comp));
+    return sisl::async::await_shared(std::move(comp));
 }
 
 bool LogDev::remove_log_store(logstore_id_t store_id) {

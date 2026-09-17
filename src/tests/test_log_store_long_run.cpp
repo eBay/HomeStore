@@ -44,7 +44,7 @@
 #include <gtest/gtest.h>
 
 #include <homestore/homestore.hpp>
-#include "common/coro_helpers.hpp" // detail::detach_then
+#include <sisl/async/coro.hpp>
 #include <homestore/logstore_service.hpp>
 
 #include "logstore/log_dev.hpp"
@@ -294,10 +294,9 @@ public:
                 for (uint32_t i{0}; i < n_log_stores; ++i) {
                     SampleLogStoreClient* client = m_log_store_clients[i].get();
                     logstore_service().open_logdev(client->m_logdev_id, flush_mode_t::EXPLICIT);
-                    homestore::detail::detach_then(
-                        logstore_service().open_log_store(client->m_logdev_id, client->m_store_id,
-                                                          false /* append_mode */),
-                        [i, this, client](auto log_store) { client->set_log_store(log_store); });
+                    sisl::async::detach_then(logstore_service().open_log_store(client->m_logdev_id, client->m_store_id,
+                                                                               false /* append_mode */),
+                                             [i, this, client](auto log_store) { client->set_log_store(log_store); });
                 }
             });
             m_helper.restart_homestore();

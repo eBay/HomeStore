@@ -303,7 +303,7 @@ SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< b
                                const float refill_pct, BlkAllocMetrics* parent_metrics) :
         m_slab_size{slab_size}, m_metrics{m_slab_size, this, parent_metrics} {
     for (auto& limit : level_limits) {
-        auto ptr{std::make_unique< BoundedMPMCQueue< blk_cache_entry > >(limit)};
+        auto ptr{std::make_unique< sisl::BoundedMPMCQueue< blk_cache_entry > >(limit)};
         m_level_queues.push_back(std::move(ptr));
         m_total_capacity += limit;
     }

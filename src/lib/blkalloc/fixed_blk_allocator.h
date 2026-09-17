@@ -14,8 +14,9 @@
  *********************************************************************************/
 #pragma once
 
+#include <sisl/fds/bounded_mpmc_queue.hpp>
+
 #include "bitmap_blk_allocator.h"
-#include "bounded_mpmc_queue.hpp"
 
 namespace homestore {
 /* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead
@@ -55,6 +56,6 @@ private:
     state_t m_state{state_t::RECOVERING};
     std::unordered_set< blk_num_t > m_reserved_blks; // Keep track of all blks which are reserved as allocated
     std::mutex m_reserve_blk_mtx;                    // Mutex used while removing marked_blks from blk_q
-    BoundedMPMCQueue< blk_num_t > m_free_blk_q;
+    sisl::BoundedMPMCQueue< blk_num_t > m_free_blk_q;
 };
 } // namespace homestore

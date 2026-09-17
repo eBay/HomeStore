@@ -26,7 +26,7 @@
 #include <iomgr/io_environment.hpp>
 #include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
-#include "common/coro_helpers.hpp" // detail::sync_get / detach_then
+#include <sisl/async/coro.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
@@ -362,9 +362,9 @@ public:
         };
 
         if (wait) {
-            on_complete(homestore::detail::sync_get(std::move(fut)));
+            on_complete(sisl::async::sync_get(std::move(fut)));
         } else {
-            homestore::detail::detach_then(std::move(fut), on_complete);
+            sisl::async::detach_then(std::move(fut), on_complete);
         }
     }
 

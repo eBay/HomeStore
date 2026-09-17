@@ -34,7 +34,7 @@
 
 #include "index/wb_cache.hpp"
 #include "common/homestore_utils.hpp"
-#include "common/coro_helpers.hpp" // detail::sync_get (block on the first-boot CP flush)
+#include <sisl/async/coro.hpp>
 #include <sisl/async/when_all.hpp> // sisl::async::when_all (concurrent vdev format)
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
@@ -266,7 +266,7 @@ void home_store::format_and_start(std::map< uint32_t, hs_format_params >&& forma
     }
 
     if (!futs.empty()) {
-        auto const results = detail::sync_get(sisl::async::when_all(std::move(futs)));
+        auto const results = sisl::async::sync_get(sisl::async::when_all(std::move(futs)));
         for (auto const& r : results) {
             HS_REL_ASSERT(bool(r), "IO error during format of vdev, error={}", r ? std::string{} : r.error().message());
         }
@@ -306,7 +306,7 @@ void home_store::do_start() {
     // boot going forward on next reboot.
     if (m_dev_mgr->is_first_time_boot()) {
         // Take the first CP after we have initialized all subsystems and wait for it to complete.
-        detail::sync_get(m_cp_mgr->trigger_cp_flush(true /* force */));
+        sisl::async::sync_get(m_cp_mgr->trigger_cp_flush(true /* force */));
         m_dev_mgr->commit_formatting();
     }
 

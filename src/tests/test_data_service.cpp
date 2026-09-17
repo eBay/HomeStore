@@ -154,23 +154,25 @@ public:
         // asserts that ordering. Both are detached; the read continuation does finish_and_notify.
         LOGINFO("Step 2a: inject read delay and read on blkid: {}", test_blkid_ptr->to_string());
         add_read_delay();
-        detail::detach_then(inst().async_read(*test_blkid_ptr, *sg_read_ptr, sg_read_ptr->size),
-                            [this, sg_read_ptr](iomgr::io_result const& r) {
-                                RELEASE_ASSERT(bool(r), "Read error");
+        sisl::async::detach_then(inst().async_read(*test_blkid_ptr, *sg_read_ptr, sg_read_ptr->size),
+                                 [this, sg_read_ptr](iomgr::io_result const& r) {
+                                     RELEASE_ASSERT(bool(r), "Read error");
 
-                                // if we are here, free_blk callback must have been called already, because data service
-                                // layer triggers the free_blk cb firstly then sends read complete cb back to caller;
-                                m_read_blk_done = true;
-                                LOGINFO("read completed;");
-                                HS_REL_ASSERT_EQ(m_free_blk_done.load(), true,
-                                                 "free blk callback should not be called before read blk completes");
+                                     // if we are here, free_blk callback must have been called already, because data
+                                     // service layer triggers the free_blk cb firstly then sends read complete cb back
+                                     // to caller;
+                                     m_read_blk_done = true;
+                                     LOGINFO("read completed;");
+                                     HS_REL_ASSERT_EQ(
+                                         m_free_blk_done.load(), true,
+                                         "free blk callback should not be called before read blk completes");
 
-                                free(*sg_read_ptr);
-                                this->finish_and_notify();
-                            });
+                                     free(*sg_read_ptr);
+                                     this->finish_and_notify();
+                                 });
 
         LOGINFO("Step 3: started async_free_blk: {}", test_blkid_ptr->to_string());
-        detail::detach_then(inst().async_free_blk(*test_blkid_ptr), [this](iomgr::io_result const& r) {
+        sisl::async::detach_then(inst().async_free_blk(*test_blkid_ptr), [this](iomgr::io_result const& r) {
             RELEASE_ASSERT(bool(r), "free_blk error");
             LOGINFO("completed async_free_blk");
             HS_REL_ASSERT_EQ(m_free_blk_done.load(), false, "Duplicate free blk completion");
@@ -275,24 +277,24 @@ public:
         auto sg_write_ptr1 = std::make_shared< sisl::sg_list >();
         hints.chunk_id_hint = chunk_in_living_pdev->chunk_id();
         ++m_outstanding_io_cnt;
-        detail::detach_then(write_sgs(io_size, sg_write_ptr1, 4, living_drive_blk, hints),
-                            [this](iomgr::io_result const& r) {
-                                RELEASE_ASSERT(bool(r), "Write error");
-                                // do not free , use it when test write
-                                --m_outstanding_io_cnt;
-                                ++m_total_io_comp_cnt;
-                            });
+        sisl::async::detach_then(write_sgs(io_size, sg_write_ptr1, 4, living_drive_blk, hints),
+                                 [this](iomgr::io_result const& r) {
+                                     RELEASE_ASSERT(bool(r), "Write error");
+                                     // do not free , use it when test write
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
 
         hints.chunk_id_hint = chunk_in_missing_pdev->chunk_id();
         auto sg_write_ptr2 = std::make_shared< sisl::sg_list >();
         ++m_outstanding_io_cnt;
-        detail::detach_then(write_sgs(io_size, sg_write_ptr2, 4, missing_drive_blk, hints),
-                            [this](iomgr::io_result const& r) {
-                                RELEASE_ASSERT(bool(r), "Write error");
-                                // free(*sg_write_ptr2); do not free , use it when test write
-                                --m_outstanding_io_cnt;
-                                ++m_total_io_comp_cnt;
-                            });
+        sisl::async::detach_then(write_sgs(io_size, sg_write_ptr2, 4, missing_drive_blk, hints),
+                                 [this](iomgr::io_result const& r) {
+                                     RELEASE_ASSERT(bool(r), "Write error");
+                                     // free(*sg_write_ptr2); do not free , use it when test write
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
 
         // Wait for write operations to complete
         wait_for_outstanding_io_done();
@@ -326,7 +328,7 @@ public:
         sg->iovs.push_back(iov);
 
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_read(missing_drive_blk, *sg, io_size), [this](iomgr::io_result const& r) {
+        sisl::async::detach_then(inst().async_read(missing_drive_blk, *sg, io_size), [this](iomgr::io_result const& r) {
             RELEASE_ASSERT_EQ(!r && r.error() == std::make_error_condition(std::errc::resource_unavailable_try_again),
                               true, "should not be able to read blk on missing drive");
             --m_outstanding_io_cnt;
@@ -335,28 +337,29 @@ public:
 
         ++m_outstanding_io_cnt;
         LOGINFO("Step 5: read the blk from living data drive");
-        detail::detach_then(inst().async_read(living_drive_blk, *sg, io_size), [this, sg](iomgr::io_result const& r) {
-            RELEASE_ASSERT(bool(r), "should be able to read blk on living drive");
-            free(*sg);
-            --m_outstanding_io_cnt;
-            ++m_total_io_comp_cnt;
-        });
+        sisl::async::detach_then(inst().async_read(living_drive_blk, *sg, io_size),
+                                 [this, sg](iomgr::io_result const& r) {
+                                     RELEASE_ASSERT(bool(r), "should be able to read blk on living drive");
+                                     free(*sg);
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
 
         wait_for_outstanding_io_done();
 
         LOGINFO("Step 6: write the blk to living data drive");
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_write(*(sg_write_ptr1.get()), living_drive_blk),
-                            [this, sg_write_ptr1](iomgr::io_result const& r) {
-                                RELEASE_ASSERT(bool(r), "should not be able to write blk on living drive");
-                                free(*sg_write_ptr1);
-                                --m_outstanding_io_cnt;
-                                ++m_total_io_comp_cnt;
-                            });
+        sisl::async::detach_then(inst().async_write(*(sg_write_ptr1.get()), living_drive_blk),
+                                 [this, sg_write_ptr1](iomgr::io_result const& r) {
+                                     RELEASE_ASSERT(bool(r), "should not be able to write blk on living drive");
+                                     free(*sg_write_ptr1);
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
 
         LOGINFO("Step 7: write the blk to missing data drive");
         ++m_outstanding_io_cnt;
-        detail::detach_then(
+        sisl::async::detach_then(
             inst().async_write(*(sg_write_ptr2.get()), missing_drive_blk),
             [this, sg_write_ptr2](iomgr::io_result const& r) {
                 RELEASE_ASSERT_EQ(!r &&
@@ -371,7 +374,7 @@ public:
 
         LOGINFO("Step 8: free the blk from missing data drive");
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_free_blk(missing_drive_blk), [this](iomgr::io_result const& r) {
+        sisl::async::detach_then(inst().async_free_blk(missing_drive_blk), [this](iomgr::io_result const& r) {
             RELEASE_ASSERT_EQ(!r && r.error() == std::make_error_condition(std::errc::resource_unavailable_try_again),
                               true, "should not be able to free blk on living drive");
             --m_outstanding_io_cnt;
@@ -380,7 +383,7 @@ public:
 
         LOGINFO("Step 9: free the blk from living data drive");
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_free_blk(living_drive_blk), [this](iomgr::io_result const& r) {
+        sisl::async::detach_then(inst().async_free_blk(living_drive_blk), [this](iomgr::io_result const& r) {
             RELEASE_ASSERT(bool(r), "should be able to free blk on living drive");
             --m_outstanding_io_cnt;
             ++m_total_io_comp_cnt;
@@ -419,12 +422,13 @@ public:
         auto out_bids = std::make_shared< multi_blk_id >();
         ++m_outstanding_io_cnt;
         // out_bids are populated by write_sgs before the write completes; read them in the continuation.
-        detail::detach_then(write_sgs(io_size, sg, num_iovs, *out_bids), [this, sg, out_bids](iomgr::io_result const&) {
-            cal_write_blk_crc(*sg, *out_bids);
-            free(*sg);
-            --m_outstanding_io_cnt;
-            ++m_total_io_comp_cnt;
-        });
+        sisl::async::detach_then(write_sgs(io_size, sg, num_iovs, *out_bids),
+                                 [this, sg, out_bids](iomgr::io_result const&) {
+                                     cal_write_blk_crc(*sg, *out_bids);
+                                     free(*sg);
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
     }
 
     // read_io has to process and send async_read all the blkids before it can exit and yielf to next io;
@@ -462,7 +466,7 @@ public:
         RELEASE_ASSERT(bid.is_valid(), "expecting valid bid and single blkid, is_valid: {}", bid.is_valid());
 
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_free_blk(bid), [this, bid](iomgr::io_result const& r) {
+        sisl::async::detach_then(inst().async_free_blk(bid), [this, bid](iomgr::io_result const& r) {
             RELEASE_ASSERT(bool(r), "Free error");
             LOGINFO("completed async_free_blks, bid freed: {}", bid.to_string());
             // remove from ouststanding free blk set and written blk crc map;
@@ -723,20 +727,20 @@ private:
         iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
         sg->iovs.push_back(iov);
         ++m_outstanding_io_cnt;
-        detail::detach_then(inst().async_read(bid, *sg, io_size),
-                            [this, bid, sg, read_crc_vec](iomgr::io_result const& r) {
-                                // if there is any pending free blk on this read, and if we arrive here, the free blk
-                                // callback has already been called;
-                                RELEASE_ASSERT(bool(r), "Read error");
-                                // LOGINFO("read completed, bid: {}", bid.to_string());
+        sisl::async::detach_then(inst().async_read(bid, *sg, io_size),
+                                 [this, bid, sg, read_crc_vec](iomgr::io_result const& r) {
+                                     // if there is any pending free blk on this read, and if we arrive here, the free
+                                     // blk callback has already been called;
+                                     RELEASE_ASSERT(bool(r), "Read error");
+                                     // LOGINFO("read completed, bid: {}", bid.to_string());
 
-                                // now verify read data crc equals which was previous saved on write;
-                                verify_read_blk_crc(*sg, *read_crc_vec);
+                                     // now verify read data crc equals which was previous saved on write;
+                                     verify_read_blk_crc(*sg, *read_crc_vec);
 
-                                free(*sg);
-                                --m_outstanding_io_cnt;
-                                ++m_total_io_comp_cnt;
-                            });
+                                     free(*sg);
+                                     --m_outstanding_io_cnt;
+                                     ++m_total_io_comp_cnt;
+                                 });
     }
 
     /**
@@ -830,7 +834,7 @@ TEST_F(BlkDataServiceTest, TestBasicWrite) {
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -845,7 +849,7 @@ TEST_F(BlkDataServiceTest, TestUsedCapacity) {
     // check initial capacity
     EXPECT_EQ(inst().get_used_capacity(), 0);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -870,7 +874,7 @@ TEST_F(BlkDataServiceTest, TestWriteMultiplePagesSingleIov) {
     const auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -884,7 +888,7 @@ TEST_F(BlkDataServiceTest, TestWriteMultiplePagesMultiIovs) {
     const auto num_iovs = 4;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, and {} iovs", io_size, num_iovs);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size, num_iovs]() { detail::detach(this->write_io(io_size, num_iovs)); });
+                            [this, io_size, num_iovs]() { sisl::async::detach(this->write_io(io_size, num_iovs)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -897,7 +901,7 @@ TEST_F(BlkDataServiceTest, TestWriteThenReadVerify) {
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io_verify(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io_verify(io_size)); });
 
     LOGINFO("Step 3: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -911,7 +915,7 @@ TEST_F(BlkDataServiceTest, TestWriteThenFreeBlk) {
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io_free_blk(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io_free_blk(io_size)); });
 
     LOGINFO("Step 3: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -927,7 +931,7 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBlkAfterReadComp) {
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: Run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_read_free_blk(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_read_free_blk(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -940,7 +944,7 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: Run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_free_blk_before_read_comp(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_free_blk_before_read_comp(io_size)); });
 
     LOGINFO("Step 4: Wait for I/O to complete.");
     wait_for_all_io_complete();

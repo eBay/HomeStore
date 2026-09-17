@@ -29,7 +29,7 @@
 
 #include <homestore/blk.hpp>
 #include <homestore/homestore.hpp>
-#include "common/coro_helpers.hpp" // detail::sync_get
+#include <sisl/async/coro.hpp>
 #include <homestore/homestore_decl.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.hpp>
@@ -186,8 +186,8 @@ public:
                .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}});
         m_uuid1 = hs_utils::gen_random_uuid();
         m_uuid2 = hs_utils::gen_random_uuid();
-        m_repl_dev1 = detail::sync_get(hs()->repl_service().create_repl_dev(m_uuid1, {})).value();
-        m_repl_dev2 = detail::sync_get(hs()->repl_service().create_repl_dev(m_uuid2, {})).value();
+        m_repl_dev1 = sisl::async::sync_get(hs()->repl_service().create_repl_dev(m_uuid1, {})).value();
+        m_repl_dev2 = sisl::async::sync_get(hs()->repl_service().create_repl_dev(m_uuid2, {})).value();
     }
 
     shared< repl_dev > repl_dev1() { return m_repl_dev1; }
@@ -264,7 +264,7 @@ public:
         RELEASE_ASSERT(err.has_value(), "Error during alloc_blks");
         RELEASE_ASSERT(!blkids.empty(), "Empty blkids");
 
-        detail::detach_then(
+        sisl::async::detach_then(
             rdev->async_write(blkids, req->write_sgs), [this, rdev, blkids, data_size, req](iomgr::io_result const& r) {
                 RELEASE_ASSERT(bool(r), "Error during async_write");
                 rdev->async_write_journal(blkids, *req->header, req->key ? *req->key : sisl::blob{}, data_size, req);
@@ -289,7 +289,7 @@ public:
                 auto read_sgs = HSTestHelper::create_sgs(size, size);
                 LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
                          blkid.to_string());
-                detail::detach_then(
+                sisl::async::detach_then(
                     rdev.async_read(blkid, read_sgs, size),
                     [this, io_count, total_io, hdr = *jhdr, read_sgs, lsn, blkid, &rdev](iomgr::io_result const& r) {
                         RELEASE_ASSERT(bool(r), "Error during async_read");
@@ -317,7 +317,7 @@ public:
         for (const auto& blkid : req->written_blkids) {
             uint32_t size = blkid.blk_count() * g_block_size;
             auto read_sgs = HSTestHelper::create_sgs(size, size);
-            auto r = detail::sync_get(rdev->async_read(blkid, read_sgs, size));
+            auto r = sisl::async::sync_get(rdev->async_read(blkid, read_sgs, size));
             RELEASE_ASSERT(bool(r), "Error during async_read");
             for (auto const& iov : read_sgs.iovs) {
                 HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr->data_pattern);
@@ -343,7 +343,7 @@ public:
 
                 auto sgs_size = blkid.blk_count() * g_block_size;
                 auto read_sgs = HSTestHelper::create_sgs(sgs_size, sgs_size);
-                detail::detach_then(
+                sisl::async::detach_then(
                     rdev.async_read(blkid, read_sgs, read_sgs.size),
                     [this, io_count, blkid, &rdev, sgs_size, read_sgs, req](iomgr::io_result const& r) {
                         RELEASE_ASSERT(bool(r), "Error during async_read");
@@ -369,9 +369,7 @@ public:
         }
     }
 
-    void trigger_cp_flush() {
-        homestore::detail::sync_get(homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */));
-    }
+    void trigger_cp_flush() { sisl::async::sync_get(homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */)); }
     void truncate_and_verify(shared< repl_dev > repl_dev) {
         auto solo_dev = std::dynamic_pointer_cast< SoloReplDev >(repl_dev);
         // Truncate and verify the CP LSN's

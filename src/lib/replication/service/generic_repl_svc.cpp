@@ -18,7 +18,7 @@
 #include <homestore/logstore_service.hpp>
 #include <boost/uuid/uuid.hpp>
 #include "common/homestore_assert.hpp"
-#include "common/coro_helpers.hpp" // detail::sync_get
+#include <sisl/async/coro.hpp>
 #include "replication/service/generic_repl_svc.h"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/solo_repl_dev.h"
@@ -232,7 +232,7 @@ ReplaceMemberStatus SoloReplService::get_replace_member_status(group_id_t group_
 }
 
 status SoloReplService::destroy_repl_dev(group_id_t group_id, uint64_t trace_id) {
-    return detail::sync_get(remove_repl_dev(group_id));
+    return sisl::async::sync_get(remove_repl_dev(group_id));
 }
 
 void SoloReplService::trigger_snapshot_creation(group_id_t group_id, repl_lsn_t compact_lsn, bool wait_for_commit) {}

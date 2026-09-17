@@ -307,7 +307,7 @@ public:
                 repl_groups_.insert({repl_group_id, std::move(listener)});
             }
 
-            auto v = homestore::detail::sync_get(hs()->repl_service().create_repl_dev(repl_group_id, members));
+            auto v = sisl::async::sync_get(hs()->repl_service().create_repl_dev(repl_group_id, members));
             ASSERT_EQ(v.has_value(), true)
                 << "Error in creating repl dev for group_id=" << boost::uuids::to_string(repl_group_id).c_str()
                 << ", err=" << v.error().message();

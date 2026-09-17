@@ -2,7 +2,7 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "replication/repl_dev/common.h"
-#include "common/coro_helpers.hpp" // detail::detach_then
+#include <sisl/async/coro.hpp>
 #include <sisl/async/when_all.hpp> // sisl::async::when_all
 #include <homestore/homestore.hpp>
 #include <homestore/blkdata_service.hpp>
@@ -21,7 +21,7 @@ SoloReplDev::SoloReplDev(superblk< solo_repl_dev_superblk >&& rd_sb, bool load_e
     if (load_existing) {
         m_logdev_id = m_rd_sb->logdev_id;
         logstore_service().open_logdev(m_rd_sb->logdev_id, flush_mode_t::TIMER | flush_mode_t::INLINE, gid);
-        detail::detach_then(
+        sisl::async::detach_then(
             logstore_service().open_log_store(m_rd_sb->logdev_id, m_rd_sb->logstore_id, true /* append_mode */),
             [this](auto log_store) {
                 m_data_journal = std::move(log_store);
@@ -56,11 +56,12 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         // they are sibling arguments to detach_then, whose evaluation order is unspecified, so moving rreq first
         // would null it before local_blkids() runs.
         auto const blkids = rreq->local_blkids();
-        detail::detach_then(data_service().async_write(value, blkids),
-                            [this, rreq = std::move(rreq)](iomgr::io_result const& r) mutable {
-                                HS_REL_ASSERT(bool(r), "Error in writing data"); // TODO: return error to the Listener
-                                write_journal(std::move(rreq));
-                            });
+        sisl::async::detach_then(data_service().async_write(value, blkids),
+                                 [this, rreq = std::move(rreq)](iomgr::io_result const& r) mutable {
+                                     HS_REL_ASSERT(bool(r),
+                                                   "Error in writing data"); // TODO: return error to the Listener
+                                     write_journal(std::move(rreq));
+                                 });
     } else {
         write_journal(std::move(rreq));
     }

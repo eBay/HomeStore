@@ -11,7 +11,7 @@
 #include <homestore/homestore.hpp>
 #include "common/homestore_config.hpp"
 #include "common/crash_simulator.hpp"
-#include "common/coro_helpers.hpp" // detail::sync_get (block on the DSN-flush CP trigger)
+#include <sisl/async/coro.hpp>
 
 SISL_LOGGING_DECL(replication)
 
@@ -416,7 +416,7 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
         // Nuraft will compact and truncate all logs when processeing the last obj.
         // Update the truncation upper limit here to ensure all stale logs are truncated.
         m_rd.m_truncation_upper_limit.exchange(s_cast< repl_lsn_t >(s.get_last_log_idx()));
-        detail::sync_get(hs()->cp_mgr().trigger_cp_flush(true)); // ensure DSN is flushed to disk
+        sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true)); // ensure DSN is flushed to disk
     }
 
     // Update the object offset.
@@ -439,7 +439,7 @@ bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
 
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto res = m_rd.m_listener->apply_snapshot(snp_ctx);
-    detail::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */));
+    sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */));
     return res;
 }
 

@@ -182,7 +182,7 @@ TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -195,7 +195,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenReadVerify) {
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io_verify(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io_verify(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -208,7 +208,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenFreeBlk) {
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io_free_blk(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io_free_blk(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -220,7 +220,7 @@ TEST_F(AppendBlkAllocatorTest, TestCPFlush) {
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -236,7 +236,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io_free_blk(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io_free_blk(io_size)); });
 
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
@@ -254,7 +254,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
 
     LOGINFO("Step 6: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                            [this, io_size]() { detail::detach(this->write_io(io_size)); });
+                            [this, io_size]() { sisl::async::detach(this->write_io(io_size)); });
 
     LOGINFO("Step 7: Wait for I/O to complete.");
     wait_for_all_io_complete();
