@@ -2369,8 +2369,8 @@ nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, 
 
         auto start_lsn = raft_req->get_last_log_idx() + 1;
         if (entries.size() == 0) {
-            RD_LOGT(NO_TRACE_ID, "Raft channel: Received no entry, leader committed lsn {}",
-                    raft_req->get_commit_idx());
+            RD_LOGT_EVERY_N(unmove(HS_DYNAMIC_CONFIG(consensus.received_no_entry_log_frequency)), NO_TRACE_ID,
+                            "Raft channel: Received no entry, leader committed lsn {}", raft_req->get_commit_idx());
             return ret;
         }
 
