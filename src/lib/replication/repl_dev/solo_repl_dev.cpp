@@ -1,7 +1,9 @@
 #include <latch>
+#include <system_error>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "replication/repl_dev/common.h"
+#include <homestore/fault_cmt_service.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
@@ -78,7 +80,25 @@ void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
 
     m_data_journal->append_async(
         sisl::io_blob{rreq->raw_journal_buf(), rreq->journal_entry_size(), false /* is_aligned */},
-        nullptr /* cookie */, [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, void*) mutable {
+        nullptr /* cookie */,
+        [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, std::error_condition status, void*) mutable {
+            // A flush failure means this entry was never durably written, so skip the commit-driving side
+            // effects below (they'd treat non-durable data as committed). Solo has no peer to fall back on
+            // and this lsn is a permanent hole, so there is no way to retry from here -- escalate the same
+            // way HomeRaftLogStore does.
+            if (status) {
+                auto const reason = fmt::format("group_id={} lsn={}: SoloReplDev journal write failed, error={}",
+                                                boost::uuids::to_string(m_group_id), lsn, status.message());
+                HS_LOG(ERROR, solorepl, "{}", reason);
+                if (hs()->has_fc_service()) {
+                    hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, static_cast< void* >(&m_group_id),
+                                                  reason);
+                } else {
+                    HS_REL_ASSERT(false, "{}", reason);
+                }
+                decr_pending_request_num();
+                return;
+            }
             rreq->set_lsn(lsn);
             m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 

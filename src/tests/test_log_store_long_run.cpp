@@ -32,6 +32,7 @@
 #include <random> // std::default_random_engine
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -123,17 +124,18 @@ public:
         for (const auto lsn : lsns) {
             bool io_memory{false};
             auto* d = prepare_data(lsn, io_memory);
-            m_log_store->write_async(
-                lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
-                [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
-                    assert(ld_key);
-                    if (io_memory) {
-                        iomanager.iobuf_free(uintptr_cast(d));
-                    } else {
-                        std::free(voidptr_cast(d));
-                    }
-                    m_comp_cb(m_logdev_id, seq_num, ld_key);
-                });
+            m_log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
+                                     [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b,
+                                                          logdev_key ld_key, std::error_condition status, void* ctx) {
+                                         assert(!status);
+                                         assert(ld_key);
+                                         if (io_memory) {
+                                             iomanager.iobuf_free(uintptr_cast(d));
+                                         } else {
+                                             std::free(voidptr_cast(d));
+                                         }
+                                         m_comp_cb(m_logdev_id, seq_num, ld_key);
+                                     });
         }
 
         // Because of restart in tests, we have torce the flush of log entries.

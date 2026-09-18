@@ -13,10 +13,13 @@
  *
  *********************************************************************************/
 
+#include <system_error>
+
 #include "home_raft_log_store.h"
 #include "storage_engine_buffer.h"
 #include <sisl/fds/utils.hpp>
 #include "common/homestore_assert.hpp"
+#include <homestore/fault_cmt_service.hpp>
 #include <homestore/homestore.hpp>
 #include <iomgr/iomgr_flip.hpp>
 
@@ -165,9 +168,11 @@ ulong HomeRaftLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     REPL_STORE_LOG(TRACE, "append entry term={}, log_val_type={} size={}", entry->get_term(),
                    static_cast< uint32_t >(entry->get_val_type()), entry->get_buf().size());
     auto buf = entry->serialize();
-    auto const next_seq =
-        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
-                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const next_seq = m_log_store->append_async(
+        sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */}, nullptr /* cookie */,
+        [this, buf](int64_t lsn, sisl::io_blob&, logdev_key, std::error_condition status, void*) {
+            if (status) { on_journal_write_failed(status, lsn); }
+        });
     ulong lsn = to_repl_lsn(next_seq);
 
     auto position_in_cache = lsn % m_log_entry_cache.size();
@@ -187,9 +192,11 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
     // calls, but it is dangerous to set higher number.
     m_last_durable_lsn = -1;
 
-    auto const appended_seq =
-        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
-                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const appended_seq = m_log_store->append_async(
+        sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */}, nullptr /* cookie */,
+        [this, buf](int64_t lsn, sisl::io_blob&, logdev_key, std::error_condition status, void*) {
+            if (status) { on_journal_write_failed(status, lsn); }
+        });
     HS_REL_ASSERT_EQ(to_repl_lsn(appended_seq), static_cast< repl_lsn_t >(index),
                      "write_at appended lsn mismatch: expected {} actual {}", index, to_repl_lsn(appended_seq));
 
@@ -373,10 +380,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
     return true;
 }
 
-bool HomeRaftLogStore::flush() {
-    m_log_store->flush();
-    return true;
-}
+bool HomeRaftLogStore::flush() { return m_log_store->flush(); }
 
 ulong HomeRaftLogStore::last_durable_index() {
     m_last_durable_lsn = m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn);
@@ -393,5 +397,23 @@ void HomeRaftLogStore::purge_all_logs() {
 void HomeRaftLogStore::wait_for_log_store_ready() { m_log_store_future.wait(); }
 
 void HomeRaftLogStore::set_last_durable_lsn(repl_lsn_t lsn) { m_last_durable_lsn = to_store_lsn(lsn); }
+
+void HomeRaftLogStore::on_journal_write_failed(std::error_condition status, int64_t lsn) {
+    auto const reason = fmt::format("logdev={} logstore={} lsn={}: journal flush failed, error={}", m_logdev_id,
+                                    m_logstore_id, lsn, status.message());
+    REPL_STORE_LOG(ERROR, "{}", reason);
+    // This lsn is a permanent hole (see LogDev::on_flush_completion()) -- there is no way to retry it from
+    // here, and letting NuRaft carry on treating this member as a healthy, fully-durable log holder would
+    // be unsafe. This runs on LogDev's flush thread (on_flush_completion's callback loop), not on any
+    // NuRaft call stack, so it's safe to call fc_service synchronously here.
+    if (hs()->has_fc_service()) {
+        // No per-group cookie available here (HomeRaftLogStore doesn't know its owning repl_dev's
+        // group_id) -- nullptr is the documented "no specific entity" case the embedder's callback
+        // already handles explicitly, rather than passing a value that only looks meaningful.
+        hs()->fc_service().trigger_fc(FaultContainmentEvent::ENTER, nullptr, reason);
+    } else {
+        HS_REL_ASSERT(false, "{}", reason);
+    }
+}
 
 } // namespace homestore
