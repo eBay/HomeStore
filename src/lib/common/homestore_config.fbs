@@ -324,6 +324,10 @@ table Consensus {
     // Log frequency for gc_repl_reqs messages (log every N times)
     // 60 * repl_dev_cleanup_interval_sec (60s) means every 1 hour we will log the gc repl reqs info.
     gc_repl_reqs_log_frequency: uint32 = 60 (hotswap);
+
+    // Log frequency for empty APPEND_ENTRIES (heartbeat) "Received no entry" messages (log every N times)
+    // 14400 * heartbeat_period_ms (250ms) means every 1 hour we will log an empty append.
+    received_no_entry_log_frequency: uint32 = 14400 (hotswap);
 }
 
 table HomeStoreSettings {
