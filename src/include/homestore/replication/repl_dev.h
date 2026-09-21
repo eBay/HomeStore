@@ -459,6 +459,10 @@ public:
 
     virtual void on_become_follower(const group_id_t& group_id) {};
 
+    /// @brief Called when nuraft hits a fatal error and invokes system_exit. Default is a no-op.
+    /// @param exit_code exit code passed by nuraft
+    virtual void on_system_exit(int exit_code) { (void)exit_code; };
+
 private:
     std::weak_ptr< ReplDev > m_repl_dev;
 };

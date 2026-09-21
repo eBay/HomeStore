@@ -469,7 +469,7 @@ protected:
     nuraft::ptr< nuraft::srv_state > read_state() override;
     nuraft::ptr< nuraft::log_store > load_log_store() override;
     int32_t server_id() override;
-    void system_exit(const int exit_code) override { LOGINFO("System exiting with code [{}]", exit_code); }
+    void system_exit(const int exit_code) override;
 
     //////////////// All nuraft_mesg::mesg_state_mgr overrides ///////////////////////
     uint32_t get_logstore_id() const override;

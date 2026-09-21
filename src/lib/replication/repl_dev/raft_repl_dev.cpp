@@ -2296,6 +2296,11 @@ nuraft::ptr< nuraft::log_store > RaftReplDev::load_log_store() { return m_data_j
 
 int32_t RaftReplDev::server_id() { return m_raft_server_id; }
 
+void RaftReplDev::system_exit(const int exit_code) {
+    LOGINFO("System exiting with code [{}]", exit_code);
+    if (m_listener) { m_listener->on_system_exit(exit_code); }
+}
+
 bool RaftReplDev::is_destroy_pending() const { return (*m_stage.access().get() == repl_dev_stage_t::DESTROYED); }
 bool RaftReplDev::is_destroyed() const { return (*m_stage.access().get() == repl_dev_stage_t::PERMANENT_DESTROYED); }
 
