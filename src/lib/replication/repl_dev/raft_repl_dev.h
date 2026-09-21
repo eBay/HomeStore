@@ -1,12 +1,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <libnuraft/ptr.hxx>
 #include <nuraft_mesg/nuraft_mesg.hpp>
 #include <nuraft_mesg/mesg_state_mgr.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/utils.hpp>
+#include <sisl/watchdog/watchdog_registry.hpp>
 #include <homestore/replication/repl_dev.h>
 #include <homestore/superblk_handler.hpp>
 #include <homestore/logstore/log_store.hpp>
@@ -225,6 +227,9 @@ private:
     std::atomic< bool > m_in_quiescence;
     // we can only accept lsn that smaller than latch_lsn
     std::atomic< int64_t > m_latch_lsn{INT64_MAX};
+
+    // Holds bark watchdogs registered on system_exit; kept alive until this RaftReplDev is destroyed.
+    std::vector< std::unique_ptr< sisl::BarkWatchdog > > m_system_exit_barks_;
 
 public:
     friend class RaftStateMachine;
@@ -469,7 +474,7 @@ protected:
     nuraft::ptr< nuraft::srv_state > read_state() override;
     nuraft::ptr< nuraft::log_store > load_log_store() override;
     int32_t server_id() override;
-    void system_exit(const int exit_code) override { LOGINFO("System exiting with code [{}]", exit_code); }
+    void system_exit(const int exit_code) override;
 
     //////////////// All nuraft_mesg::mesg_state_mgr overrides ///////////////////////
     uint32_t get_logstore_id() const override;
@@ -513,6 +518,7 @@ private:
     void propose_truncate_boundary();
 
     void report_blk_metrics_if_needed(repl_req_ptr_t rreq);
+
     ReplServiceError init_req_ctx(repl_req_ptr_t rreq, repl_key rkey, journal_type_t op_code, bool is_proposer,
                                   sisl::blob const& user_header, sisl::blob const& key, uint32_t data_size,
                                   cshared< ReplDevListener >& listener);
