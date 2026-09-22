@@ -1178,7 +1178,8 @@ TEST_F(LogStoreTest, FlushSync) {
 
     flip::FlipCondition dont_care_cond;
     fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
-    fc->inject_delay_flip("simulate_log_flush_delay", {dont_care_cond}, freq, 5000000); // Delay by 5seconds
+    fc->inject_delay_flip("simulate_log_flush_delay", std::array< flip::FlipCondition, 1 >{dont_care_cond}, freq,
+                          5000000); // Delay by 5seconds
 #endif
 
     LOGINFO("Step 8: Reissue sequential inserts with q depth of 10");

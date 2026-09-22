@@ -13,6 +13,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <array>
 #include <vector>
 #include <iostream>
 #include <filesystem>
@@ -389,7 +390,7 @@ public:
         flip::FlipFrequency freq;
         freq.set_count(2);
         freq.set_percent(100);
-        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        m_fc.inject_noreturn_flip(flip_name, std::array< flip::FlipCondition, 1 >{null_cond}, freq);
         LOGINFO("Flip {} set", flip_name);
     }
 #endif

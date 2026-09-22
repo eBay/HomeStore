@@ -572,8 +572,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                bufs.size());
 
 #ifdef _PRERELEASE
-    auto detailed_log = [this](std::map< blk_id, IndexBufferPtr > const& bufs,
-                               std::vector< IndexBufferPtr > const& pending_bufs) {
+    [[maybe_unused]] auto detailed_log = [this](std::map< blk_id, IndexBufferPtr > const& bufs,
+                                                std::vector< IndexBufferPtr > const& pending_bufs) {
         std::string log = fmt::format("\trecovered bufs (#of bufs = {})\n", bufs.size());
         for (auto const& [_, buf] : bufs) {
             load_buf(buf);

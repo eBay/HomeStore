@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <random>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -879,7 +880,7 @@ void alloc_var_scatter_direct_unirandsize(VarsizeBlkAllocatorTest* const block_t
     flip::FlipFrequency freq;
     freq.set_count(static_cast< uint32_t >(block_test_pointer->m_total_count) * 1000);
     freq.set_percent(100);
-    fc->inject_noreturn_flip("varsize_blkalloc_bypass_cache", {}, freq);
+    fc->inject_noreturn_flip("varsize_blkalloc_bypass_cache", std::span< const flip::FlipCondition >{}, freq);
 #endif
     const uint8_t prealloc_pct{90};
     const uint64_t preload_amount{static_cast< uint64_t >(block_test_pointer->m_total_count) * prealloc_pct / 100};
