@@ -13,6 +13,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <array>
 #include <vector>
 #include <iostream>
 #include <filesystem>
@@ -801,9 +802,9 @@ private:
 
         // Delay read op by 500ms
         fc->inject_delay_flip("simulate_drive_delay",
-                              {fc->create_condition("devname", flip::Operator::DONT_CARE, std::string("")),
-                               fc->create_condition("op_type", flip::Operator::EQUAL, std::string("READ")),
-                               fc->create_condition("reactor_id", flip::Operator::DONT_CARE, 0)},
+                              std::array{fc->create_condition("devname", flip::Operator::DONT_CARE, std::string("")),
+                                         fc->create_condition("op_type", flip::Operator::EQUAL, std::string("READ")),
+                                         fc->create_condition("reactor_id", flip::Operator::DONT_CARE, 0)},
                               freq, 500000);
 #endif
     }
@@ -1071,7 +1072,8 @@ TEST_F(BlkDataServiceAppendTest, TestResetCompletedBeforeCpFlush) {
 
     // Flip 1: After getting shared_ptr, wait for reset_block_allocator to complete
     fc->inject_callback_flip< void, uint16_t >(
-        "after_get_allocator_shared", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "after_get_allocator_shared", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             LOGINFO("Scenario 1: cp_flush got shared_ptr for chunk_id={}", cid);
             cp_flush_got_shared_ptr.store(true);
@@ -1086,7 +1088,8 @@ TEST_F(BlkDataServiceAppendTest, TestResetCompletedBeforeCpFlush) {
 
     // Flip 2: Before calling reset(), wait for cp_flush to get shared_ptr
     fc->inject_callback_flip< void, uint16_t >(
-        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "before_allocator_reset", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             for (int i = 0; i < 200 && !cp_flush_got_shared_ptr.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -1153,7 +1156,8 @@ TEST_F(BlkDataServiceAppendTest, TestResetDuringCpFlushHoldsSharedPtr) {
 
     // Flip 1: After getting shared_ptr, wait for old allocator reset to complete
     fc->inject_callback_flip< void, uint16_t >(
-        "after_get_allocator_shared", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "after_get_allocator_shared", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             LOGINFO("Scenario 2: cp_flush got shared_ptr for chunk_id={}", cid);
             cp_flush_got_shared_ptr.store(true);
@@ -1168,7 +1172,8 @@ TEST_F(BlkDataServiceAppendTest, TestResetDuringCpFlushHoldsSharedPtr) {
 
     // Flip 2: Before calling reset(), wait for cp_flush to get shared_ptr
     fc->inject_callback_flip< void, uint16_t >(
-        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "before_allocator_reset", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             for (int i = 0; i < 200 && !cp_flush_got_shared_ptr.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -1179,7 +1184,8 @@ TEST_F(BlkDataServiceAppendTest, TestResetDuringCpFlushHoldsSharedPtr) {
 
     // Flip 3: After old allocator reset completes, mark flag and wait for cp_flush to finish
     fc->inject_callback_flip< void, uint16_t >(
-        "after_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "after_allocator_reset", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             LOGINFO("Scenario 2: Old allocator reset() completed");
             old_allocator_reset.store(true);
@@ -1251,7 +1257,7 @@ TEST_F(BlkDataServiceAppendTest, TestCpFlushBlocksResetWithMutex) {
 
     // Flip 1: Inside cp_flush with lock held, give reset time to attempt acquiring lock
     fc->inject_callback_flip< void >(
-        "inside_append_cp_flush", {dont_care}, freq, std::function< void() >([&]() {
+        "inside_append_cp_flush", std::array< flip::FlipCondition, 1 >{dont_care}, freq, std::function< void() >([&]() {
             LOGINFO("Scenario 3: Inside cp_flush with lock held");
             cp_flush_inside.store(true);
 
@@ -1263,7 +1269,8 @@ TEST_F(BlkDataServiceAppendTest, TestCpFlushBlocksResetWithMutex) {
 
     // Flip 2: Before calling reset(), wait for cp_flush to be inside critical section
     fc->inject_callback_flip< void, uint16_t >(
-        "before_allocator_reset", {dont_care}, freq, std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
+        "before_allocator_reset", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
+        std::function< void(uint16_t) >([&, chunk_id](uint16_t cid) {
             if (cid != chunk_id) return;
             for (int i = 0; i < 200 && !cp_flush_inside.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));

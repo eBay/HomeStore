@@ -12,6 +12,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <array>
 #include "test_common/raft_repl_test_base.hpp"
 
 class RaftAppendBatchTest : public testing::Test {
@@ -40,7 +41,7 @@ protected:
             freq.set_count(10);
             freq.set_percent(100);
             fc->inject_callback_flip< void, nuraft::req_msg* >(
-                "raft_append_batch_received", {dont_care}, freq,
+                "raft_append_batch_received", std::array< flip::FlipCondition, 1 >{dont_care}, freq,
                 std::function< void(nuraft::req_msg*) >([this](nuraft::req_msg* req) { on_batch(req); }));
         }
 
@@ -315,7 +316,7 @@ TEST_F(RaftReplDevTest, Follower_Retry_Mixed_App_And_Config_Batch) {
     constexpr uint64_t first_key{1000001};
     constexpr uint64_t expected_app_log_count{4};
     auto db = pick_one_db();
-    auto local_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+    auto local_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->device());
     ASSERT_NE(local_rdev, nullptr);
 
     LOGINFO("Step 1: Wait for target follower={} to commit bootstrap config through lsn={}", target_follower,
@@ -341,7 +342,7 @@ TEST_F(RaftReplDevTest, Follower_Retry_Mixed_App_And_Config_Batch) {
 
     LOGINFO("Step 3: Build the A,A,A,C,A,C log sequence on the leader");
     run_on_leader(db, [&] {
-        auto leader_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+        auto leader_rdev = std::dynamic_pointer_cast< RaftReplDev >(db->device());
         ASSERT_NE(leader_rdev, nullptr);
 
         ASSERT_EQ(write_with_id(first_key), ReplServiceError::OK);
