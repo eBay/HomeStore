@@ -33,6 +33,7 @@
 #include <random> // std::default_random_engine
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -155,7 +156,9 @@ public:
                 auto* d = prepare_data(lsn, io_memory);
                 m_log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
                                          [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b,
-                                                              logdev_key ld_key, void* ctx) {
+                                                              logdev_key ld_key, std::error_condition status,
+                                                              void* ctx) {
+                                             assert(!status);
                                              assert(ld_key);
                                              if (io_memory) {
                                                  iomanager.iobuf_free(uintptr_cast(d));
@@ -1196,6 +1199,218 @@ TEST_F(LogStoreTest, FlushSync) {
     fc->remove_flip("simulate_log_flush_delay");
 #endif
 }
+
+#ifdef _PRERELEASE
+TEST_F(LogStoreTest, FlushIOErrorPropagatesToCallback) {
+    LOGINFO("Step 1: Reinit with no records -- this test issues its own single write directly");
+    this->init(0);
+
+    auto* log_store = this->raw_log_store(0);
+
+    LOGINFO("Step 2: Arm a flip to force the next flush's sync_pwritev to fail");
+    flip::FlipClient* fc = iomgr_flip::client_instance();
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_noreturn_flip("simulate_log_flush_error", {dont_care_cond}, freq);
+
+    LOGINFO("Step 3: Issue one write with a status-aware callback and force a flush");
+    bool io_memory{false};
+    const auto lsn = log_store->get_contiguous_issued_seq_num(-1) + 1;
+    auto* d = SampleLogStoreClient::prepare_data(lsn, io_memory);
+    std::promise< std::error_condition > status_promise;
+    auto status_future = status_promise.get_future();
+    log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
+                           [&status_promise, d, io_memory](logstore_seq_num_t, const sisl::io_blob&, logdev_key,
+                                                           std::error_condition status, void*) {
+                               if (io_memory) {
+                                   iomanager.iobuf_free(uintptr_cast(d));
+                               } else {
+                                   std::free(voidptr_cast(d));
+                               }
+                               status_promise.set_value(status);
+                           });
+    log_store->flush();
+
+    LOGINFO("Step 4: The callback must fire with a failure status -- pre-fix, it would never fire at all");
+    auto const wait_status = status_future.wait_for(std::chrono::seconds(30));
+    fc->remove_flip("simulate_log_flush_error");
+    ASSERT_EQ(wait_status, std::future_status::ready)
+        << "flush-failure completion callback was never invoked (would hang forever pre-fix)";
+    ASSERT_TRUE(bool(status_future.get())) << "expected a failure status on the callback, got success";
+
+    LOGINFO("Step 5: A flush failure is terminal for this write -- it is not silently retried internally "
+            "(retrying would double-invoke the already-notified callback and reuse the request object that "
+            "callback just freed), so it must never show up as completed, leaving a permanent hole at lsn");
+    ASSERT_EQ(log_store->get_contiguous_completed_seq_num(-1), lsn - 1)
+        << "a failed write must never be retried/completed internally";
+
+    LOGINFO("Step 6: Later writes must still go through normally -- one failed flush must not wedge the "
+            "log store -- but the hole at lsn must persist even once a later lsn is durably completed");
+    bool io_memory2{false};
+    const auto next_lsn = lsn + 1;
+    auto* d2 = SampleLogStoreClient::prepare_data(next_lsn, io_memory2);
+    std::promise< std::error_condition > next_status_promise;
+    auto next_status_future = next_status_promise.get_future();
+    log_store->write_async(next_lsn, {uintptr_cast(d2), d2->total_size(), false}, nullptr,
+                           [&next_status_promise, d2, io_memory2](logstore_seq_num_t, const sisl::io_blob&, logdev_key,
+                                                                  std::error_condition status, void*) {
+                               if (io_memory2) {
+                                   iomanager.iobuf_free(uintptr_cast(d2));
+                               } else {
+                                   std::free(voidptr_cast(d2));
+                               }
+                               next_status_promise.set_value(status);
+                           });
+    log_store->flush();
+    ASSERT_EQ(next_status_future.wait_for(std::chrono::seconds(30)), std::future_status::ready)
+        << "the write after a failed flush must still complete normally";
+    ASSERT_FALSE(bool(next_status_future.get())) << "expected success on the write after the failed flush";
+    ASSERT_EQ(log_store->get_contiguous_completed_seq_num(-1), lsn - 1)
+        << "the failed lsn is a permanent hole -- a later lsn completing must not paper over it";
+}
+
+// Regression test for LogDev::on_flush_completion()'s callback-firing loop: it iterates req_map (every
+// request collected for the failed range) unconditionally, so every one of them must be notified with the
+// failure status -- not just the first, and not only the one that happened to trigger the flush.
+TEST_F(LogStoreTest, FlushIOErrorPropagatesToEveryRequestInGroup) {
+    LOGINFO("Step 1: Reinit with no records -- this test issues its own writes directly");
+    this->init(0);
+
+    auto* log_store = this->raw_log_store(0);
+
+    LOGINFO("Step 2: Arm a flip to force the next flush's sync_pwritev to fail");
+    flip::FlipClient* fc = iomgr_flip::client_instance();
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_noreturn_flip("simulate_log_flush_error", {dont_care_cond}, freq);
+
+    LOGINFO("Step 3: Issue several writes without flushing in between, so a single flush() batches all of "
+            "them into one LogGroup, then force that one flush to fail");
+    static constexpr int nwrites = 5;
+    const auto start_lsn = log_store->get_contiguous_issued_seq_num(-1) + 1;
+    std::vector< std::promise< std::error_condition > > status_promises(nwrites);
+    std::vector< std::future< std::error_condition > > status_futures;
+    for (int i = 0; i < nwrites; ++i) {
+        status_futures.push_back(status_promises[i].get_future());
+        bool io_memory{false};
+        auto* d = SampleLogStoreClient::prepare_data(start_lsn + i, io_memory);
+        log_store->write_async(start_lsn + i, {uintptr_cast(d), d->total_size(), false}, nullptr,
+                               [&status_promises, i, d, io_memory](logstore_seq_num_t, const sisl::io_blob&, logdev_key,
+                                                                   std::error_condition status, void*) {
+                                   if (io_memory) {
+                                       iomanager.iobuf_free(uintptr_cast(d));
+                                   } else {
+                                       std::free(voidptr_cast(d));
+                                   }
+                                   status_promises[i].set_value(status);
+                               });
+    }
+    log_store->flush();
+
+    LOGINFO("Step 4: Every single one of the batched writes must be notified with a failure status");
+    fc->remove_flip("simulate_log_flush_error");
+    for (int i = 0; i < nwrites; ++i) {
+        auto const wait_status = status_futures[i].wait_for(std::chrono::seconds(30));
+        ASSERT_EQ(wait_status, std::future_status::ready)
+            << "write at index " << i << " in the failed group was never notified";
+        ASSERT_TRUE(bool(status_futures[i].get())) << "write at index " << i << " expected a failure status";
+    }
+}
+
+// Regression test for a gap in flush_if_necessary()'s lost-try_lock-race reschedule: it re-invokes
+// flush_if_necessary(), re-deriving flush_by_size/flush_by_time from scratch. LogDev::flush()
+// unconditionally resets m_last_flush_time at its start, so a concurrent flush that won the race can
+// reset the clock right as the retry runs -- if this write's own size never crosses threshold_size,
+// both conditions can read false and the retry silently drops.
+//
+// A real racer flush() can't isolate this: whoever holds the lock long enough for our write to lose
+// its try_lock will, once released, take a fresh snapshot that includes the write anyway (it was
+// appended while the lock was held) -- so releasing the racer completes the write regardless of the
+// fix. Instead this uses two test-only LogDev hooks:
+//  - test_acquire_flush_mtx(): grabs m_flush_mtx directly, bypassing flush() -- releasing it later
+//    triggers no snapshot/flush of its own.
+//  - test_touch_last_flush_time(): resets m_last_flush_time on demand (gated by the
+//    "test_touch_last_flush_time" flip) -- simulates just the clock-reset side effect of a concurrent
+//    flush, without actually flushing anything.
+//
+// Sequence: acquire the lock directly (m_last_flush_time starts infinitely stale on a fresh logdev, so
+// flush_by_time reads true) -> issue the write, whose flush_if_necessary() decides to flush but loses
+// the try_lock race, queuing the retry -> touch the clock (simulating the racing flush completing) and
+// hold the lock 200ms (with max_time_between_flush_us set far larger, so every retry in this window
+// sees a still-too-recent clock and a too-small pending size -- exactly the condition the fix targets)
+// -> release the lock via plain unlock (not flush()). Pre-fix, the retry dropped during that window is
+// gone for good and the write hangs; post-fix, force=true has kept retrying and now wins the lock.
+TEST_F(LogStoreTest, FlushIfNecessaryRetrySurvivesStaleClockReset) {
+    LOGINFO("Step 1: Reinit with no records -- this test issues its own write directly");
+    this->init(0);
+    auto* log_store = this->raw_log_store(0);
+    auto logdev = log_store->get_logdev();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.logstore.max_time_between_flush_us = 2000000ul; /* 2s -- see step 4 above */
+    });
+    HS_SETTINGS_FACTORY().save();
+    static constexpr int64_t threshold = 4096; // bigger than one small write, so flush_by_size alone
+                                               // can't save it -- flush_by_time must do the work.
+
+    LOGINFO("Step 2: Directly acquire the flush lock, bypassing flush() entirely");
+    auto flush_lock = logdev->test_acquire_flush_mtx();
+
+    LOGINFO("Step 3: Issue our target write and its own flush_if_necessary() call -- guaranteed to lose "
+            "the try_lock race since we hold the lock directly");
+    bool io_memory{false};
+    const auto lsn = log_store->get_contiguous_issued_seq_num(-1) + 1;
+    auto* d = SampleLogStoreClient::prepare_data(lsn, io_memory);
+    auto completed = std::make_shared< std::promise< void > >();
+    auto fut = completed->get_future();
+    log_store->write_async(
+        lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
+        [completed, d, io_memory](logstore_seq_num_t, const sisl::io_blob&, logdev_key, std::error_condition, void*) {
+            if (io_memory) {
+                iomanager.iobuf_free(uintptr_cast(d));
+            } else {
+                std::free(voidptr_cast(d));
+            }
+            completed->set_value();
+        });
+    logdev->flush_if_necessary(threshold);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50)); // let the try_lock fail and the retry
+                                                                // get queued before we touch the clock
+
+    LOGINFO("Step 4: Simulate a concurrent flush completing (clock reset, nothing else), then hold the "
+            "lock for 200ms -- long enough that no amount of retry-latency luck can save a non-robust "
+            "retry");
+    flip::FlipClient* fc = iomgr_flip::client_instance();
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_noreturn_flip("test_touch_last_flush_time", {dont_care_cond}, freq);
+    logdev->test_touch_last_flush_time();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    LOGINFO("Step 5: Release the lock directly (not via flush()) -- must not touch m_log_idx or complete "
+            "anything on its own");
+    flush_lock.unlock();
+
+    LOGINFO("Step 6: The write must still complete -- pre-fix, the retry silently drops during step 4's "
+            "window and never comes back");
+    auto status = fut.wait_for(std::chrono::seconds(10));
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.logstore.max_time_between_flush_us = 300ul; });
+    HS_SETTINGS_FACTORY().save();
+
+    ASSERT_EQ(status, std::future_status::ready)
+        << "write never completed -- lost-race reschedule was silently dropped by a stale clock reset";
+}
+#endif
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
     const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
