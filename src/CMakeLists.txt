@@ -66,3 +66,4 @@ add_library(homestore STATIC
     ${HOMESTORE_OBJECTS} 
 )
 target_link_libraries(homestore ${COMMON_DEPS})
+
