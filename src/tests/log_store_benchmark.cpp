@@ -23,6 +23,7 @@
 #include <mutex>
 #include <random>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <benchmark/benchmark.h>
@@ -114,7 +115,7 @@ private:
         DLOGDEBUG("Appending log entry for iteration_ind={} ind={}", iter_ind, ind);
         m_log_store->append_async(
             sisl::io_blob(uintptr_cast(m_data[iter_ind].data()), uint32_cast(m_data[iter_ind].size()), false), nullptr,
-            [this](logstore_seq_num_t, sisl::io_blob&, bool, void*) {
+            [this](logstore_seq_num_t, sisl::io_blob&, bool, std::error_condition, void*) {
                 if (m_outstanding.fetch_sub(1, std::memory_order_acq_rel) < int_cast(m_q_depth)) { issue_io(); };
             });
         return true;
