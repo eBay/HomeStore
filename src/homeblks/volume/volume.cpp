@@ -720,7 +720,7 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
             auto size = info.size;
             auto buf = info.buf;
             while (size != 0) {
-                const sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                const auto b = VolInterface::get_instance()->at_offset(buf, offset);
                 for (uint32_t size_read{0}; size_read < b.size && size != 0; size_read += get_page_size()) {
                     const uint16_t csum = crc16_t10dif(init_crc_16, b.bytes + size_read, get_page_size());
 
