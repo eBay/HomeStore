@@ -252,7 +252,7 @@ public:
 
     static uint8_t* get_physical(const SSDBtreeNode* const bn) {
         const wb_cache_buffer_t* const bbuf{static_cast< const wb_cache_buffer_t* >(bn)};
-        const sisl::blob b{bbuf->at_offset(0)};
+        const auto b{bbuf->at_offset(0)};
         return b.bytes;
     }
 
@@ -290,7 +290,7 @@ public:
     _init_node(SSDBtreeStore* store, auto& safe_buf, bool is_leaf, const BlkId& blkid,
                const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
         // Access the physical node buffer and initialize it
-        sisl::blob b = safe_buf->at_offset(0);
+        auto b = safe_buf->at_offset(0);
         HS_DBG_ASSERT_EQ(b.size, store->get_node_size());
         if (is_leaf) {
             bnodeid_t bid = blkid.to_integer();

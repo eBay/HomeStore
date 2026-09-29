@@ -37,6 +37,7 @@
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 
+#include "api/blob_view.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/hash/intrusive_hashset.hpp"
@@ -384,7 +385,7 @@ public:
         return m_mem;
     }
 
-    sisl::blob at_offset(const uint32_t offset) const {
+    blob_view at_offset(const uint32_t offset) const {
         boost::intrusive_ptr< homeds::MemVector > mv;
         uint32_t data_offset;
         {
@@ -392,10 +393,13 @@ public:
             mv = m_mem;
             data_offset = m_data_offset;
         }
-        sisl::blob b;
+        blob_view b;
         b.bytes = nullptr;
         b.size = 0;
         mv->get(&b, data_offset + offset);
+        // keep MemVector alive for as long as the caller holds this blob_view, not just
+        // for the duration of this accessor call (see api/blob_view.hpp)
+        b.m_holder = std::make_shared< boost::intrusive_ptr< homeds::MemVector > >(std::move(mv));
         return b;
     }
 
