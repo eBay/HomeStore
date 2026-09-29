@@ -291,6 +291,57 @@ public:
         return btree_status_t::success;
     }
 
+    /// @brief Put a sorted batch of discrete key/values into this node
+    ///
+    /// This method puts kvs[cur_idx, end_idx) into the node, advancing cur_idx past every entry it processes. The kvs
+    /// must be sorted in ascending key order and all of them must belong to this node's key range.
+    /// NOTE: The method is supported only for leaf nodes.
+    ///
+    /// @param kvs The sorted key/values to put.
+    /// @param cur_idx [in/out] Index of the first kv to put. On return, index of the first kv not processed.
+    /// @param end_idx Index one past the last kv to put into this node.
+    /// @param put_type The type of put operation. INSERT skips keys that exist, UPDATE skips keys that don't exist.
+    /// @param num_put [out] Incremented for every kv that modified the node (inserted, updated or removed by
+    /// filter_cb).
+    /// @param num_skipped [out] Incremented for every kv skipped because of put_type or filter_cb.
+    /// @param filter_cb [optional] Called for each kv whose key already exists in the node. If it returns:
+    ///     put_filter_decision::replace, the entry is updated with the new value.
+    ///     put_filter_decision::remove, the entry is removed from the node.
+    ///     put_filter_decision::keep, the entry is not modified.
+    /// @return btree_status_t::success if all kvs upto end_idx are processed, btree_status_t::has_more if the node ran
+    ///         out of space (cur_idx points to the kv that did not fit), any other status on error at cur_idx.
+    virtual btree_status_t bulk_put(std::vector< std::pair< K, V > > const& kvs, uint32_t& cur_idx, uint32_t end_idx,
+                                    btree_put_type put_type, uint32_t& num_put, uint32_t& num_skipped,
+                                    put_filter_cb_t const& filter_cb = nullptr) {
+        DEBUG_ASSERT_EQ(this->is_leaf(), true, "Bulk put entries on node are supported only for leaf nodes");
+
+        for (; cur_idx < end_idx; ++cur_idx) {
+            auto const& [key, val] = kvs[cur_idx];
+            if (!has_room_for_put(put_type, key.serialized_size(), val.serialized_size())) {
+                return btree_status_t::has_more;
+            }
+
+            auto const [found, idx] = find(key, nullptr, false);
+            auto const decision = bulk_put_decision(found, idx, key, val, put_type, filter_cb);
+            if (decision == put_filter_decision::replace) {
+                if (found) {
+                    update(idx, key, val);
+                } else {
+                    auto const ret = insert(idx, key, val);
+                    if (ret != btree_status_t::success) { return ret; }
+                }
+                ++num_put;
+            } else if (decision == put_filter_decision::remove) {
+                this->remove(idx);
+                ++num_put;
+            } else {
+                ++num_skipped;
+            }
+        }
+
+        return btree_status_t::success;
+    }
+
     ///////////////////////////////////////// Remove related APIs of the node /////////////////////////////////////////
     virtual uint32_t multi_remove(BtreeKeyRange< K > const& keys, remove_filter_cb_t const& filter_cb = nullptr,
                                   void* usr_ctx = nullptr) {
@@ -314,5 +365,17 @@ public:
         return ret;
     }
     virtual void on_update_phys_buf() override {};
+
+protected:
+    // Decides what bulk_put does with a kv, given whether its key was found in the node at idx
+    put_filter_decision bulk_put_decision(bool found, uint32_t idx, K const& key, V const& val, btree_put_type put_type,
+                                          put_filter_cb_t const& filter_cb) const {
+        if (!found) {
+            return (put_type == btree_put_type::UPDATE) ? put_filter_decision::keep : put_filter_decision::replace;
+        }
+        if (put_type == btree_put_type::INSERT) { return put_filter_decision::keep; }
+
+        return filter_cb ? filter_cb(key, get_nth_value(idx, false), val) : put_filter_decision::replace;
+    }
 };
 } // namespace homestore

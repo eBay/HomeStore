@@ -65,6 +65,7 @@ struct BtreeTestHelper {
         m_operations["put"] = std::bind(&BtreeTestHelper::put_random, this);
         m_operations["remove"] = std::bind(&BtreeTestHelper::remove_random, this);
         m_operations["range_put"] = std::bind(&BtreeTestHelper::range_put_random, this);
+        m_operations["bulk_put"] = std::bind(&BtreeTestHelper::bulk_put_random, this);
         m_operations["range_remove"] = std::bind(&BtreeTestHelper::range_remove_existing_random, this);
         m_operations["query"] = std::bind(&BtreeTestHelper::query_random, this);
     }
@@ -220,6 +221,59 @@ public:
             : m_shadow_map.pick_random_non_working_keys(s_rand_range_generator(m_re));
 
         range_put(start_k, end_k, V::generate_rand(), is_update);
+    }
+
+    // Bulk puts every stride-th key in [start_k, end_k]. For interval values with stride 1, values are contiguous so
+    // that the kvs share prefixes in the leaf, otherwise every kv gets a random value.
+    void bulk_put(uint32_t start_k, uint32_t end_k, btree_put_type put_type, uint32_t stride = 1) {
+        std::vector< std::pair< K, V > > kvs;
+        uint32_t expected_put{};
+        V val{V::generate_rand()};
+
+        for (uint64_t k{start_k}; k <= end_k; k += stride) {
+            if constexpr (std::is_same_v< V, TestIntervalValue >) {
+                if (kvs.empty()) {
+                    // First kv keeps the initial value
+                } else if (stride == 1) {
+                    val.shift(1, nullptr);
+                } else {
+                    val = V::generate_rand();
+                }
+            } else {
+                val = V::generate_rand();
+            }
+
+            K key{k};
+            bool const exists = m_shadow_map.exists(key);
+            if ((put_type == btree_put_type::UPSERT) || ((put_type == btree_put_type::INSERT) != exists)) {
+                ++expected_put;
+            }
+            kvs.emplace_back(std::move(key), val);
+        }
+
+        auto preq = BtreeBulkPutRequest< K, V >{&kvs, put_type};
+        preq.enable_route_tracing();
+        auto const ret = m_bt->put(preq);
+        ASSERT_EQ(ret, btree_status_t::success) << "bulk_put failed for " << start_k << "-" << end_k << " stride "
+                                                << stride << " failed_idx=" << preq.failed_idx();
+        ASSERT_EQ(preq.num_put(), expected_put) << "bulk_put num_put mismatch for " << start_k << "-" << end_k;
+        ASSERT_EQ(preq.num_put() + preq.num_skipped(), kvs.size());
+
+        for (auto const& [key, value] : kvs) {
+            bool const exists = m_shadow_map.exists(key);
+            if ((put_type == btree_put_type::UPSERT) || ((put_type == btree_put_type::INSERT) != exists)) {
+                m_shadow_map.force_put(key, value);
+            }
+        }
+        m_shadow_map.remove_keys_from_working(start_k, end_k);
+    }
+
+    void bulk_put_random() {
+        static thread_local std::uniform_int_distribution< uint32_t > s_rand_range_generator{1, 500};
+        static thread_local std::uniform_int_distribution< uint32_t > s_rand_stride_generator{1, 3};
+
+        auto const [start_k, end_k] = m_shadow_map.pick_random_non_working_keys(s_rand_range_generator(m_re));
+        bulk_put(start_k, end_k, btree_put_type::UPSERT, s_rand_stride_generator(m_re));
     }
 
     ////////////////////// All remove operation variants ///////////////////////////////
