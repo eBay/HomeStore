@@ -23,7 +23,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
+#include <folly/SharedMutex.h>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -216,7 +216,7 @@ public:
     bool recovered;
 #endif
     K m_key;                                         // Key to access this cache
-    mutable std::shared_mutex m_mem_mtx;              // protects m_mem and m_data_offset
+    mutable folly::SharedMutexReadPriority m_mem_mtx; // protects m_mem and m_data_offset (4 bytes vs 56 for std::shared_mutex)
     boost::intrusive_ptr< homeds::MemVector > m_mem; // Memory address which is what this buffer contained with
     sisl::atomic_counter< uint32_t > m_refcount;     // Refcount
     uint32_t m_data_offset;                          // offset in m_mem that it points to
@@ -314,7 +314,7 @@ public:
         boost::intrusive_ptr< homeds::MemVector > mv;
         uint32_t data_offset;
         {
-            std::shared_lock< std::shared_mutex > lk{m_mem_mtx};
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
             mv = m_mem;
             data_offset = m_data_offset;
         }
@@ -332,7 +332,7 @@ public:
         boost::intrusive_ptr< homeds::MemVector > mv;
         uint32_t data_offset;
         {
-            std::shared_lock< std::shared_mutex > lk{m_mem_mtx};
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
             mv = m_mem;
             data_offset = m_data_offset;
         }
@@ -357,7 +357,7 @@ public:
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
         HS_DBG_ASSERT_LE(size, UINT16_MAX);
-        std::unique_lock< std::shared_mutex > lk{m_mem_mtx};
+        std::unique_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
         m_mem = std::move(vec);
         m_data_offset = offset;
         m_cache_size = size;
@@ -389,7 +389,7 @@ public:
         boost::intrusive_ptr< homeds::MemVector > mv;
         uint32_t data_offset;
         {
-            std::shared_lock< std::shared_mutex > lk{m_mem_mtx};
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
             mv = m_mem;
             data_offset = m_data_offset;
         }
