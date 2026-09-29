@@ -442,8 +442,10 @@ bool LogDev::flush_if_necessary(int64_t threshold_size, bool force) {
     incr_pending_request_num();
     if (!can_flush_in_this_thread()) {
         iomanager.run_on_forget(logstore_service().flush_thread(),
-                                [this, threshold_size, force]() { flush_if_necessary(threshold_size, force); });
-        decr_pending_request_num();
+                                [this, threshold_size, force]() {
+                                    flush_if_necessary(threshold_size, force);
+                                    decr_pending_request_num();
+                                });
         return false;
     }
 
@@ -486,7 +488,11 @@ bool LogDev::flush_if_necessary(int64_t threshold_size, bool force) {
         // Routing through random_worker first forces a real queued hop, so the stack unwinds between
         // attempts no matter how many times try_lock fails.
         iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                                [this, threshold_size]() { flush_if_necessary(threshold_size, /* force = */ true); });
+                                [this, threshold_size]() {
+                                    flush_if_necessary(threshold_size, /* force = */ true);
+                                    decr_pending_request_num();
+                                });
+        return false;
     }
     decr_pending_request_num();
     return false;
