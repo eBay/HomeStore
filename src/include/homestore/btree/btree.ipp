@@ -84,8 +84,12 @@ std::pair< btree_status_t, uint64_t > Btree< K, V >::destroy_btree(void* context
 template < typename K, typename V >
 template < typename ReqT >
 btree_status_t Btree< K, V >::put(ReqT& put_req) {
-    static_assert(std::is_same_v< ReqT, BtreeSinglePutRequest > || std::is_same_v< ReqT, BtreeRangePutRequest< K > >,
+    static_assert(std::is_same_v< ReqT, BtreeSinglePutRequest > || std::is_same_v< ReqT, BtreeRangePutRequest< K > > ||
+                      std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >,
                   "put api is called with non put request type");
+    if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) {
+        if (put_req.is_done()) { return btree_status_t::success; }
+    }
     COUNTER_INCREMENT(m_metrics, btree_write_ops_count, 1);
     auto acq_lock = locktype_t::READ;
     bool is_leaf = false;
@@ -127,6 +131,7 @@ retry:
         acq_lock = locktype_t::WRITE;
         goto retry;
     } else {
+        if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) { put_req.reset_batch(); }
         ret = do_put(root, acq_lock, put_req);
         if ((ret == btree_status_t::retry) || (ret == btree_status_t::has_more)) {
             // Need to start from top down again, since there was a split or we have more to insert in case of range put

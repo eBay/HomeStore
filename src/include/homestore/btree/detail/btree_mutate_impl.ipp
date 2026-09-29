@@ -63,6 +63,10 @@ retry:
         auto const [found, idx] = my_node->find(req.key(), nullptr, true);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(found, idx, my_node);
         end_idx = start_idx = idx;
+    } else if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) {
+        auto const [found, idx] = my_node->find(req.cur_key(), nullptr, true);
+        ASSERT_IS_VALID_INTERIOR_CHILD_INDX(found, idx, my_node);
+        end_idx = start_idx = idx;
     }
 
     BT_NODE_DBG_ASSERT((curlock == locktype_t::READ || curlock == locktype_t::WRITE), my_node, "unexpected locktype {}",
@@ -125,6 +129,13 @@ retry:
                 BT_NODE_LOG(DEBUG, my_node, "Subrange:idx=[{}-{}],c={},working={}", start_idx, end_idx, curr_idx,
                             req.working_range().to_string());
             }
+        } else if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) {
+            if (child_node->is_leaf()) {
+                // Limit the batch to the kvs that fall within the leaf. Edge child has no upper bound.
+                if (curr_idx < my_node->total_entries()) { req.trim_batch(my_node->get_nth_key< K >(curr_idx, false)); }
+                BT_NODE_LOG(DEBUG, my_node, "Bulk put batch=[{}-{}) of {} for child idx={}", req.m_cur_idx,
+                            req.batch_end(), req.kvs().size(), curr_idx);
+            }
         }
 
 #ifndef NDEBUG
@@ -172,6 +183,7 @@ template < typename K, typename V >
 template < typename ReqT >
 btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node, ReqT& req) {
     btree_status_t ret = btree_status_t::success;
+    bool partially_modified{false}; // Node is modified even though the request failed
     if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
         K last_failed_key;
         ret = to_variant_node(my_node)->multi_put(req.working_range(), req.input_range().start_key(), *req.m_newval,
@@ -185,9 +197,18 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
         ret =
             to_variant_node(my_node)->put(req.key(), req.value(), req.m_put_type, req.m_existing_val, req.m_filter_cb);
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
+    } else if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) {
+        auto const prev_num_put = req.m_num_put;
+        ret = to_variant_node(my_node)->bulk_put(req.kvs(), req.m_cur_idx, req.batch_end(), req.m_put_type,
+                                                 req.m_num_put, req.m_num_skipped, req.m_filter_cb);
+        COUNTER_INCREMENT(m_metrics, btree_obj_count, req.m_num_put - prev_num_put);
+        partially_modified = (req.m_num_put != prev_num_put);
+
+        // Rest of the kvs belong to other leaves, walk down again from the root for them
+        if ((ret == btree_status_t::success) && !req.is_done()) { ret = btree_status_t::has_more; }
     }
 
-    if ((ret == btree_status_t::success) || (ret == btree_status_t::has_more)) {
+    if ((ret == btree_status_t::success) || (ret == btree_status_t::has_more) || partially_modified) {
         if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::MUTATE); }
         write_node(my_node, req.m_op_context);
     }
@@ -312,6 +333,9 @@ bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
         return !node->has_room_for_put(req.m_put_type, req.first_key_size(), req.m_newval->serialized_size());
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
         return !node->has_room_for_put(req.m_put_type, req.key().serialized_size(), req.value().serialized_size());
+    } else if constexpr (std::is_same_v< ReqT, BtreeBulkPutRequest< K, V > >) {
+        return !node->has_room_for_put(req.m_put_type, req.cur_key().serialized_size(),
+                                       req.cur_value().serialized_size());
     } else {
         return false;
     }

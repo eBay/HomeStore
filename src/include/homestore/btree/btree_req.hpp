@@ -14,6 +14,8 @@
  *
  *********************************************************************************/
 #pragma once
+#include <algorithm>
+#include <vector>
 #include <sisl/fds/buffer.hpp>
 #include <homestore/btree/btree_kv.hpp>
 
@@ -113,6 +115,60 @@ public:
     const btree_put_type m_put_type{btree_put_type::UPDATE};
     const BtreeValue* m_newval;
     put_filter_cb_t m_filter_cb;
+};
+
+// Puts a batch of discrete key/values in one request. Unlike BtreeRangePutRequest, keys need not be contiguous and
+// every key carries its own value. The kvs must be sorted in strictly ascending key order and must outlive the request.
+//
+// Each descent from the root puts all kvs that belong to the leaf it lands on, so the tree is traversed once per
+// touched leaf rather than once per key. Per-key outcomes that are not errors (INSERT on an existing key, UPDATE on a
+// missing key, filter_cb returning keep) are skipped and counted in num_skipped(). If the put fails with a hard error,
+// failed_idx() is the index of the kv that could not be put; kvs before it are already in the tree.
+template < typename K, typename V >
+struct BtreeBulkPutRequest : public BtreeRequest {
+public:
+    BtreeBulkPutRequest(std::vector< std::pair< K, V > > const* kvs, btree_put_type put_type,
+                        put_filter_cb_t filter_cb = nullptr, void* app_context = nullptr) :
+            BtreeRequest{app_context, nullptr},
+            m_kvs{kvs},
+            m_put_type{put_type},
+            m_filter_cb{std::move(filter_cb)},
+            m_batch_end{static_cast< uint32_t >(kvs->size())} {
+#ifndef NDEBUG
+        for (size_t i{1}; i < kvs->size(); ++i) {
+            DEBUG_ASSERT_LT((*kvs)[i - 1].first.compare((*kvs)[i].first), 0,
+                            "Bulk put kvs are not sorted in strictly ascending order at idx={}", i);
+        }
+#endif
+    }
+
+    std::vector< std::pair< K, V > > const& kvs() const { return *m_kvs; }
+    const K& cur_key() const { return (*m_kvs)[m_cur_idx].first; }
+    const V& cur_value() const { return (*m_kvs)[m_cur_idx].second; }
+    bool is_done() const { return m_cur_idx >= m_kvs->size(); }
+
+    uint32_t num_put() const { return m_num_put; }
+    uint32_t num_skipped() const { return m_num_skipped; }
+    uint32_t failed_idx() const { return m_cur_idx; }
+
+    // Batch is the subset [cur_idx, batch_end) of kvs that falls within the leaf currently being descended into
+    uint32_t batch_end() const { return m_batch_end; }
+    void reset_batch() { m_batch_end = static_cast< uint32_t >(m_kvs->size()); }
+
+    // Trim the batch to kvs whose key is <= leaf_end_key
+    void trim_batch(K const& leaf_end_key) {
+        auto const it = std::upper_bound(m_kvs->begin() + m_cur_idx, m_kvs->begin() + m_batch_end, leaf_end_key,
+                                         [](K const& k, auto const& kv) { return k.compare(kv.first) < 0; });
+        m_batch_end = static_cast< uint32_t >(it - m_kvs->begin());
+    }
+
+    std::vector< std::pair< K, V > > const* m_kvs;
+    const btree_put_type m_put_type;
+    put_filter_cb_t m_filter_cb;
+    uint32_t m_cur_idx{};
+    uint32_t m_batch_end;
+    uint32_t m_num_put{};
+    uint32_t m_num_skipped{};
 };
 
 /////////////////////////// 2: Remove Operations /////////////////////////////////////

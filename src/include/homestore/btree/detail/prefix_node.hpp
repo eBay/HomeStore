@@ -337,6 +337,66 @@ public:
         }
     }
 
+    /// @brief Puts a sorted batch of discrete key/values into a prefix node.
+    ///
+    /// Same contract as VariantNode::bulk_put. For interval keys/values, consecutive kvs sharing a common prefix (e.g.
+    /// adjacent lbas mapped to adjacent blkids) share one prefix slot instead of allocating a prefix per entry.
+    btree_status_t bulk_put(std::vector< std::pair< K, V > > const& kvs, uint32_t& cur_idx, uint32_t end_idx,
+                            btree_put_type put_type, uint32_t& num_put, uint32_t& num_skipped,
+                            put_filter_cb_t const& filter_cb = nullptr) override {
+        DEBUG_ASSERT_EQ(this->is_leaf(), true, "Bulk put entries on node are supported only for leaf nodes");
+        if constexpr (std::is_base_of_v< BtreeIntervalKey, K > && std::is_base_of_v< BtreeIntervalValue, V >) {
+            uint16_t prefix_slot{std::numeric_limits< uint16_t >::max()};
+            bool modified{false};
+            auto ret = btree_status_t::success;
+
+            for (; cur_idx < end_idx; ++cur_idx) {
+                auto const& [key, val] = kvs[cur_idx];
+                if (!has_room_for_put(put_type, 0u, 0u)) {
+                    ret = btree_status_t::has_more;
+                    break;
+                }
+
+                auto const [found, idx] = this->find(key, nullptr, false);
+                auto const decision = this->bulk_put_decision(found, idx, key, val, put_type, filter_cb);
+                if (decision == put_filter_decision::keep) {
+                    ++num_skipped;
+                    continue;
+                }
+
+                ++num_put;
+                modified = true;
+                if (decision == put_filter_decision::remove) {
+                    remove(idx);
+                    continue;
+                }
+
+                if (found) {
+                    deref_remove_prefix(get_suffix_entry_c(idx)->prefix_slot);
+                } else {
+                    std::memmove(get_suffix_entry(idx + 1), get_suffix_entry(idx),
+                                 (this->total_entries() - idx) * suffix_entry::size());
+                    this->inc_entries();
+                }
+
+                // Reuse the last prefix if it still exists (a deref above could have freed it) and matches this kv
+                if ((prefix_slot == std::numeric_limits< uint16_t >::max()) ||
+                    !prefix_bitset_.is_bit_set(prefix_slot) || get_prefix_entry_c(prefix_slot)->compare(key, val)) {
+                    prefix_slot = add_prefix(key, val);
+                }
+                write_suffix(idx, prefix_slot, key, val);
+            }
+
+            if (modified) { this->inc_gen(); }
+#ifndef NDEBUG
+            validate_sanity();
+#endif
+            return ret;
+        } else {
+            return VariantNode< K, V >::bulk_put(kvs, cur_idx, end_idx, put_type, num_put, num_skipped, filter_cb);
+        }
+    }
+
     ///////////////////////////// All overrides of BtreeNode ///////////////////////////////////
     void get_nth_key_internal(uint32_t idx, BtreeKey& out_key, bool) const override {
         DEBUG_ASSERT_LT(idx, this->total_entries(), "node={}", to_string());
