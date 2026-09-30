@@ -953,17 +953,23 @@ void RaftReplDev::propose_truncate_boundary() {
     auto repl_status = get_replication_status();
     repl_lsn_t leader_commit_idx = m_commit_upto_lsn.load();
     repl_lsn_t minimum_repl_idx = leader_commit_idx;
+    repl_lsn_t raft_logstore_reserve_threshold = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold);
+    repl_lsn_t truncation_reserve_count = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_truncation_reserve_count);
     for (auto p : repl_status) {
         if (p.id_ == m_my_repl_id) { continue; }
         RD_LOGD(NO_TRACE_ID, "peer_repl_idx={}, minimum_repl_idx={}", p.replication_idx_, minimum_repl_idx);
         minimum_repl_idx = std::min(minimum_repl_idx, static_cast< repl_lsn_t >(p.replication_idx_));
     }
-    repl_lsn_t raft_logstore_reserve_threshold = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold);
-    repl_lsn_t truncation_upper_limit = std::max(leader_commit_idx - raft_logstore_reserve_threshold, minimum_repl_idx);
+    repl_lsn_t reserved_minimum_repl_idx =
+        minimum_repl_idx > truncation_reserve_count ? minimum_repl_idx - truncation_reserve_count : repl_lsn_t{0};
+    repl_lsn_t truncation_upper_limit =
+        std::max(leader_commit_idx - raft_logstore_reserve_threshold, reserved_minimum_repl_idx);
     RD_LOGD(NO_TRACE_ID,
             "calculated truncation_upper_limit={}, "
-            "leader_commit_idx={}, raft_logstore_reserve_threshold={}, minimum_repl_idx={}",
-            truncation_upper_limit, leader_commit_idx, raft_logstore_reserve_threshold, minimum_repl_idx);
+            "leader_commit_idx={}, raft_logstore_reserve_threshold={}, truncation_reserve_count={}, "
+            "minimum_repl_idx={}, reserved_minimum_repl_idx={}",
+            truncation_upper_limit, leader_commit_idx, raft_logstore_reserve_threshold, truncation_reserve_count,
+            minimum_repl_idx, reserved_minimum_repl_idx);
     if (truncation_upper_limit > 0) {
         auto rreq = repl_req_ptr_t(new repl_req_ctx{});
         auto ctx = truncate_ctx(truncation_upper_limit);
