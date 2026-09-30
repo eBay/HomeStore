@@ -1,0 +1,35 @@
+name: Homestore 3.x Build
+
+# This file intentionally has no jobs of its own here on the default branch.
+#
+# GitHub only shows the "Run workflow" manual-dispatch button for a workflow
+# path if that path exists on the repo's default branch with a
+# `workflow_dispatch` trigger (see
+# https://docs.github.com/actions/using-workflows/manually-running-a-workflow).
+# The real "Homestore 3.x Build" workflow lives at this same path
+# (.github/workflows/merge_build_3x.yml) on the stable/v3.x-line branches
+# (e.g. stable/v3.7.x, stable/v3.8.x, stable/v6.x), where it builds
+# dependencies and refreshes the Conan/IOMgr caches those branches rely on.
+#
+# This stub exists purely to register that path for manual dispatch. To
+# actually run/refresh the cache for one of those branches, open this
+# workflow's Actions page, click "Run workflow", and pick the target branch
+# (e.g. stable/v3.8.x) from the "Use workflow from" dropdown. GitHub will run
+# that branch's own copy of this file, not this stub, and does not require
+# repo maintainer/admin rights -- any collaborator with Write access can do
+# this self-service, instead of needing someone to push/merge to the branch
+# to naturally trigger the push-based cache refresh.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Explain
+        run: |
+          echo "This is a dispatch-registration stub on the default branch."
+          echo "Re-run this workflow with 'Use workflow from' set to a"
+          echo "stable/v3.x-line branch (e.g. stable/v3.8.x) to run the real"
+          echo "3.x build/cache-refresh workflow defined on that branch."
