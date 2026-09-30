@@ -751,9 +751,13 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     g_helper->sync_for_test_start();
 
     auto pre_raft_logstore_reserve_threshold = 0;
-    HS_SETTINGS_FACTORY().modifiable_settings([&pre_raft_logstore_reserve_threshold](auto& s) {
+    auto pre_raft_logstore_truncation_reserve_count = 0;
+    HS_SETTINGS_FACTORY().modifiable_settings([&pre_raft_logstore_reserve_threshold,
+                                               &pre_raft_logstore_truncation_reserve_count](auto& s) {
         pre_raft_logstore_reserve_threshold = s.resource_limits.raft_logstore_reserve_threshold;
+        pre_raft_logstore_truncation_reserve_count = s.resource_limits.raft_logstore_truncation_reserve_count;
         s.resource_limits.raft_logstore_reserve_threshold = 200;
+        s.resource_limits.raft_logstore_truncation_reserve_count = 1;
     });
     HS_SETTINGS_FACTORY().save();
 
@@ -768,8 +772,7 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     test_common::HSTestHelper::trigger_cp(true /* wait */);
     g_helper->sync_for_verify_start();
 
-    // trigger snapshot to update log truncation upper limit
-    // sleep 1s to ensure the new truncation upper limit is updated
+    // Trigger snapshot to update log truncation upper limit.
     this->create_snapshot();
     std::this_thread::sleep_for(std::chrono::seconds{1});
     ASSERT_GT(this->get_truncation_upper_limit(), 0);
@@ -818,10 +821,10 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     g_helper->sync_for_verify_start();
 
     // trigger snapshot and check the truncation upper limit
-    // it should no less than 250 on because all replicas has committed upto 250
+    // It should be no less than 249 because all replicas have logs up to 250, and 1 log should be reserved.
     this->create_snapshot();
     std::this_thread::sleep_for(std::chrono::seconds{1});
-    ASSERT_GE(this->get_truncation_upper_limit(), 250);
+    ASSERT_GE(this->get_truncation_upper_limit(), 249);
     LOGINFO("After another 50 entries written, truncation upper limit became {}", this->get_truncation_upper_limit());
 
     // wait all members sync and test raft_logstore_reserve_threshold limitation
@@ -845,7 +848,7 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     total_entires += entries_per_attempt;
 
     // trigger snapshot and check the truncation upper limit on leader
-    // this time leader will use its commit_idx - resource_limits.raft_logstore_reserve_threshold >= 550 - 200 = 350
+    // This time leader will use commit_idx - resource_limits.raft_logstore_reserve_threshold >= 550 - 200 = 350.
     if (g_helper->replica_num() == 0) {
         this->create_snapshot();
         std::this_thread::sleep_for(std::chrono::seconds{1});
@@ -867,9 +870,12 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     this->validate_data();
 
     // set the settings back and save.
-    LOGINFO("Set the raft_logstore_reserve_threshold back to previous value={}", pre_raft_logstore_reserve_threshold);
-    HS_SETTINGS_FACTORY().modifiable_settings([pre_raft_logstore_reserve_threshold](auto& s) {
+    LOGINFO("Set raft logstore truncation settings back to previous values, reserve_threshold={}, reserve_count={}",
+            pre_raft_logstore_reserve_threshold, pre_raft_logstore_truncation_reserve_count);
+    HS_SETTINGS_FACTORY().modifiable_settings([pre_raft_logstore_reserve_threshold,
+                                               pre_raft_logstore_truncation_reserve_count](auto& s) {
         s.resource_limits.raft_logstore_reserve_threshold = pre_raft_logstore_reserve_threshold;
+        s.resource_limits.raft_logstore_truncation_reserve_count = pre_raft_logstore_truncation_reserve_count;
     });
     HS_SETTINGS_FACTORY().save();
 
