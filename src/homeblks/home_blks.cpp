@@ -299,7 +299,7 @@ const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
-sisl::blob HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
+blob_view HomeBlks::at_offset(const blk_buf_t& buf, uint32_t offset) { return (buf->at_offset(offset)); }
 
 /* this function can be called during recovery also */
 void HomeBlks::create_volume(VolumePtr vol) {

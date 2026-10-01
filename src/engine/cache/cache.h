@@ -23,6 +23,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <folly/SharedMutex.h>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -36,6 +37,7 @@
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 
+#include "api/blob_view.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/hash/intrusive_hashset.hpp"
@@ -44,6 +46,12 @@
 #include "lru_eviction.hpp"
 
 SISL_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
+
+#ifdef _PRERELEASE
+#include <chrono>
+#include <thread>
+#include "engine/common/homestore_flip.hpp"
+#endif
 
 namespace homestore {
 
@@ -208,6 +216,7 @@ public:
     bool recovered;
 #endif
     K m_key;                                         // Key to access this cache
+    mutable folly::SharedMutexReadPriority m_mem_mtx; // protects m_mem and m_data_offset (4 bytes vs 56 for std::shared_mutex)
     boost::intrusive_ptr< homeds::MemVector > m_mem; // Memory address which is what this buffer contained with
     sisl::atomic_counter< uint32_t > m_refcount;     // Refcount
     uint32_t m_data_offset;                          // offset in m_mem that it points to
@@ -302,18 +311,41 @@ public:
     uint32_t get_data_offset() const { return m_data_offset; }
 
     bool update_missing_piece(const uint32_t offset, const uint32_t size, uint8_t* const ptr) {
-        const bool inserted{get_memvec().update_missing_piece(m_data_offset + offset, size, ptr, [this]() { init(); })};
+        boost::intrusive_ptr< homeds::MemVector > mv;
+        uint32_t data_offset;
+        {
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
+            mv = m_mem;
+            data_offset = m_data_offset;
+        }
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("cache_buf_update_before_use")) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+#endif
+        const bool inserted{mv->update_missing_piece(data_offset + offset, size, ptr, [this]() { init(); })};
         return inserted;
     }
 
     uint32_t insert_missing_pieces(const uint32_t offset, const uint32_t size_to_read,
                                    std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
-        const uint32_t inserted_size{
-            get_memvec().insert_missing_pieces(m_data_offset + offset, size_to_read, missing_mp)};
+        boost::intrusive_ptr< homeds::MemVector > mv;
+        uint32_t data_offset;
+        {
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
+            mv = m_mem;
+            data_offset = m_data_offset;
+        }
+#ifdef _PRERELEASE
+        if (homestore_flip->test_flip("wb_cache_get_memvec_before_use")) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+#endif
+        const uint32_t inserted_size{mv->insert_missing_pieces(data_offset + offset, size_to_read, missing_mp)};
         /* it should return a relative offset */
-        for (auto& missing_mp : missing_mp) {
-            assert(missing_mp.first >= m_data_offset);
-            missing_mp.first -= m_data_offset;
+        for (auto& mp : missing_mp) {
+            assert(mp.first >= data_offset);
+            mp.first -= data_offset;
         }
 
         return inserted_size;
@@ -325,6 +357,7 @@ public:
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
         HS_DBG_ASSERT_LE(size, UINT16_MAX);
+        std::unique_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
         m_mem = std::move(vec);
         m_data_offset = offset;
         m_cache_size = size;
@@ -352,11 +385,21 @@ public:
         return m_mem;
     }
 
-    sisl::blob at_offset(const uint32_t offset) const {
-        sisl::blob b;
+    blob_view at_offset(const uint32_t offset) const {
+        boost::intrusive_ptr< homeds::MemVector > mv;
+        uint32_t data_offset;
+        {
+            std::shared_lock< folly::SharedMutexReadPriority > lk{m_mem_mtx};
+            mv = m_mem;
+            data_offset = m_data_offset;
+        }
+        blob_view b;
         b.bytes = nullptr;
         b.size = 0;
-        get_memvec().get(&b, m_data_offset + offset);
+        mv->get(&b, data_offset + offset);
+        // keep MemVector alive for as long as the caller holds this blob_view, not just
+        // for the duration of this accessor call (see api/blob_view.hpp)
+        b.m_holder = std::make_shared< boost::intrusive_ptr< homeds::MemVector > >(std::move(mv));
         return b;
     }
 

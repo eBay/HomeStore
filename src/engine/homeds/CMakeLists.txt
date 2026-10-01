@@ -34,6 +34,15 @@ if (${non_io_tests})
     target_sources(test_btree_crud PRIVATE tests/test_btree_crud.cpp)
     target_link_libraries(test_btree_crud homestore ${COMMON_TEST_DEPS})
 
+    add_executable(test_wb_cache_race)
+    target_sources(test_wb_cache_race PRIVATE tests/test_wb_cache_race.cpp)
+    target_link_libraries(test_wb_cache_race homestore ${COMMON_TEST_DEPS})
+    # SIMULATE_WB_MEM_RACE=ON: activates the unfixed wb_req->m_mem code path (no mutex) for Race B reproduction.
+    option(SIMULATE_WB_MEM_RACE "Activate unfixed wb_req->m_mem path (no mutex) for Race B reproduction" OFF)
+    if(SIMULATE_WB_MEM_RACE)
+        target_compile_definitions(test_wb_cache_race PRIVATE SIMULATE_WB_MEM_RACE)
+    endif()
+
     add_executable(test_hash)
     target_sources(test_hash PRIVATE tests/test_hashset.cpp)
     target_link_libraries(test_hash ${COMMON_TEST_DEPS} benchmark::benchmark)
@@ -50,6 +59,10 @@ if (${non_io_tests})
     target_compile_options(test_load PRIVATE -Wno-deprecated)
     target_link_libraries(test_load homeblks ${COMMON_TEST_DEPS})
 
+    add_executable(test_wb_cache_integration)
+    target_sources(test_wb_cache_integration PRIVATE tests/test_wb_cache_integration.cpp)
+    target_link_libraries(test_wb_cache_integration homeblks ${COMMON_TEST_DEPS})
+
     add_executable(test_iomgr_exec)
     target_sources(test_iomgr_exec PRIVATE
           tests/test_iomgr_executor.cpp
@@ -62,6 +75,8 @@ if (${non_io_tests})
         target_sources(test_threadpool PRIVATE tests/test_thread_pool.cpp)
         target_link_libraries(test_threadpool ${COMMON_TEST_DEPS})
     endif()
+    add_test(NAME WbCacheRace COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_wb_cache_race)
+    add_test(NAME WbCacheIntegration COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_wb_cache_integration)
     add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
     add_test(NAME Hash COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_hash)
     add_test(NAME Avector COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_avector)

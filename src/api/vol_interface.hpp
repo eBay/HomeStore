@@ -48,6 +48,8 @@
 #include <engine/common/homestore_header.hpp>
 #include <engine/device/device.h>
 
+#include "blob_view.hpp"
+
 namespace homestore {
 class Volume;
 class Snapshot;
@@ -319,7 +321,7 @@ public:
     virtual std::map< boost::uuids::uuid, uint64_t > get_used_size(const VolumePtr& vol) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
-    virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
+    virtual blob_view at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
     virtual VolumePtr create_volume(const vol_params& params) = 0;
     virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid,
                                                const hs_comp_callback& shutdown_done_cb = nullptr) = 0;

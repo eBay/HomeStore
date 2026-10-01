@@ -172,9 +172,10 @@ void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key
     // Update the maximum lsn we have seen for this batch for this store, it is needed to create truncation barrier
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
+    const auto seq_num{req->seq_num};
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 
-    if (m_sync_flush_waiter_lsn.load() == req->seq_num) {
+    if (m_sync_flush_waiter_lsn.load() == seq_num) {
         // Sync flush is waiting for this lsn to be completed, wake up the sync flush cv
         m_sync_flush_cv.notify_one();
     }

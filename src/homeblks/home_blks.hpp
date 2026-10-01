@@ -235,7 +235,7 @@ public:
     virtual uint64_t get_size(const VolumePtr& vol) override;
     virtual std::map< boost::uuids::uuid, uint64_t > get_used_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
-    virtual sisl::blob at_offset(const blk_buf_t& buf, uint32_t offset) override;
+    virtual blob_view at_offset(const blk_buf_t& buf, uint32_t offset) override;
 
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) override;
 

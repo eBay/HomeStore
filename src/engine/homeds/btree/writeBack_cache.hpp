@@ -427,6 +427,11 @@ public:
         auto shared_this = this->shared_from_this();
         queue_flush_buffers([shared_this, cp_id, it = m_req_list[cp_id]->begin(true /* latest */),
                              bt_cp_id = bcp->cp_id, cbq_id = s_cbq_id]() mutable -> bool {
+#ifdef _PRERELEASE
+            if (homestore_flip->test_flip("wb_flush_delay_before_write")) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+#endif
             size_t write_count{0};
             size_t dep_wait_count{0};
 
