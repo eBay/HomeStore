@@ -166,7 +166,9 @@ protected:
 
     void btree_put(uint64_t key_id) {
         MappingKey k{static_cast< lba_t >(key_id), 1};
-        MappingValue v;
+        // MappingValue() leaves m_earr uninitialized; alloc_element is only called from
+        // the parameterized constructors. Use a placeholder BlkId so the value is valid.
+        MappingValue v{static_cast< seq_id_t >(0), BlkId{blk_num_t{1}, blk_count_t{1}}};
         m_btree->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, &v, m_bcp);
     }
 
