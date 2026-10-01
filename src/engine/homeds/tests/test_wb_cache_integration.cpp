@@ -229,31 +229,34 @@ bool WbCacheIntegrationTest::s_init_failed{false};
 TEST_F(WbCacheIntegrationTest, ConcurrentWriteAndFlushIsRaceFree) {
     constexpr int kNumKeys{20000};    // large enough to force many btree node splits
     constexpr int kNumIterations{3};  // each iteration: write burst + CP + write-again burst
+    constexpr int kWriteThreads{4};
 
     for (int iter = 0; iter < kNumIterations; ++iter) {
+        // Each iteration uses a fresh non-overlapping key band so no key is ever
+        // inserted twice.  VAR_VALUE btree nodes assert in estimate_size_after_append
+        // when an existing key is updated via REPLACE_IF_EXISTS_ELSE_INSERT; we do
+        // not need same-key writes to fire the wb_cache else-branch (any write to a
+        // node that already has a wb_req for the current CP suffices).
+        const uint64_t base =
+            static_cast< uint64_t >(iter) * static_cast< uint64_t >(kWriteThreads + 1) * kNumKeys;
+
         // Phase 1: initial write pass — creates wb_req for current CP for each key
         for (int k = 0; k < kNumKeys; ++k) {
-            btree_put(static_cast< uint64_t >(k));
+            btree_put(base + static_cast< uint64_t >(k));
         }
 
-        // Phase 2: trigger CP flush in a background thread while concurrently
-        //          re-writing the same keys (else-branch of WriteBackCache::write()).
-        //
-        // The flush thread will read wb_req->m_mem (under wb_req->mtx with fix).
-        // The write threads will update wb_req->m_mem (under wb_req->mtx with fix).
-        // Without the fix these two accesses are concurrent and unsynchronised.
+        // Phase 2: trigger CP flush in a background thread while concurrently writing
+        // new keys adjacent to the Phase 1 range.  Those keys land in the last Phase 1
+        // leaf nodes (which already have a wb_req) → else-branch of
+        // WriteBackCache::write() fires, racing with flush_buffers() reading m_mem.
         std::thread flusher{[this] { flush_cp(); }};
 
-        // Write the same keys again from multiple threads while flush runs.
-        // Small key space forces reuse of btree leaf nodes → else-branch fires.
-        constexpr int kWriteThreads{4};
         std::vector< std::thread > writers;
         writers.reserve(kWriteThreads);
         for (int t = 0; t < kWriteThreads; ++t) {
-            writers.emplace_back([this, t] {
+            writers.emplace_back([this, t, base] {
                 for (int k = 0; k < kNumKeys; ++k) {
-                    btree_put(static_cast< uint64_t >(k + t * 1000));
-                    btree_put(static_cast< uint64_t >(k)); // same key → same node → else-branch
+                    btree_put(base + static_cast< uint64_t >(t + 1) * kNumKeys + k);
                 }
             });
         }
@@ -282,9 +285,13 @@ TEST_F(WbCacheIntegrationTest, ConcurrentWriteAndFlushIsRaceFree) {
 #ifdef _PRERELEASE
 TEST_F(WbCacheIntegrationTest, CrossCpMemvecRaceDetectedByFlip) {
     constexpr int kNumKeys = 500;
+    constexpr int kWriteThreads = 4;
 
-    // Phase 1: populate CP0 — each leaf node gets bn->bcp = CP0, bn->m_mem = MV1.
-    for (int k = 0; k < kNumKeys; ++k) btree_put(static_cast< uint64_t >(k));
+    // Phase 1: populate CP0 with stride-(kWriteThreads+1) keys so each Phase 2 thread
+    // can later insert unique interleaved keys into the same nodes without collisions.
+    // VAR_VALUE nodes assert in estimate_size_after_append on same-key updates.
+    for (int k = 0; k < kNumKeys; ++k)
+        btree_put(static_cast< uint64_t >(k) * (kWriteThreads + 1));
 
     // Advance to CP1 so subsequent writes trigger refresh_buf's cross-CP COW path.
     auto old_bcp = advance_cp();
@@ -327,15 +334,17 @@ TEST_F(WbCacheIntegrationTest, CrossCpMemvecRaceDetectedByFlip) {
         cp0_cv.notify_one();
     });
 
-    // Phase 2: concurrent CP1 writes to the same key range → same leaf nodes.
-    // Without fix: Thread A's FLIP fires (no lock), Thread B gets write lock →
-    // set_memvec(MV2) → MV1 freed by CP0 flush → Thread A crashes on resume.
-    constexpr int kWriteThreads = 4;
+    // Phase 2: concurrent CP1 writes using interleaved keys (offset t+1 within each
+    // stride block) → all land in Phase 1 leaf nodes → refresh_buf fires for each
+    // write, creating the cross-CP race window.  No key is written twice so
+    // estimate_size_after_append (which asserts false in MappingValue) is never reached.
     std::vector< std::thread > writers;
     writers.reserve(kWriteThreads);
     for (int t = 0; t < kWriteThreads; ++t) {
-        writers.emplace_back([this, kNumKeys] {
-            for (int k = 0; k < kNumKeys; ++k) btree_put(static_cast< uint64_t >(k));
+        writers.emplace_back([this, t, kNumKeys] {
+            for (int k = 0; k < kNumKeys; ++k)
+                btree_put(static_cast< uint64_t >(k) * (kWriteThreads + 1) +
+                          static_cast< uint64_t >(t + 1));
         });
     }
     for (auto& w : writers) w.join();
