@@ -63,11 +63,8 @@
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/index/indx_mgr.hpp"
 #include "homeblks/home_blks.hpp"
+#include "homeblks/volume/mapping.hpp"
 #include "test_common/homestore_test_common.hpp"
-
-// Reuse the key/value types already used by test_load's SSDBtreeTest
-#include "homeds/tests/loadgen_tests/keyspecs/simple_key_spec.hpp"
-#include "homeds/tests/loadgen_tests/valuespecs/fixedbyte_value_spec.hpp"
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging)
@@ -76,7 +73,6 @@ RCU_REGISTER_INIT
 
 using namespace homestore;
 using namespace homeds::btree;
-using namespace homeds::loadgen;
 
 namespace fs = std::filesystem;
 
@@ -84,10 +80,10 @@ namespace fs = std::filesystem;
 // Types
 // ============================================================================
 
-using WbTestKey = SimpleNumberKey;
-using WbTestVal = FixedBytesValue< 64 >;
-using WbTestBtree = Btree< btree_store_type::SSD_BTREE, WbTestKey, WbTestVal,
-                           btree_node_type::SIMPLE, btree_node_type::SIMPLE >;
+// Must match BLKSTORE_BUFFER_TYPE used by the index blkstore so that
+// dynamic_pointer_cast in blkstore's process_completions succeeds.
+using WbTestBtree = Btree< btree_store_type::SSD_BTREE, MappingKey, MappingValue,
+                           btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >;
 
 static constexpr uint64_t DISK_SIZE{2 * 1024 * 1024 * 1024ULL}; // 2 GiB
 static const std::string DISK_FILE{"wbcache_integration_test_disk"};
@@ -147,8 +143,8 @@ protected:
         // directly in TearDown to drain dirty wb_cache buffers.
         BtreeConfig cfg{4096};
         cfg.set_max_objs(100000);
-        cfg.set_max_key_size(WbTestKey::get_max_size());
-        cfg.set_max_value_size(WbTestVal::get_max_size());
+        cfg.set_max_key_size(sizeof(uint32_t));
+        cfg.set_max_value_size(4096);
         cfg.blkstore = HomeBlks::instance()->get_index_blkstore();
         m_btree = std::unique_ptr< WbTestBtree >(WbTestBtree::create_btree(cfg));
         m_bcp = m_btree->attach_prepare_cp(nullptr, false, false);
@@ -169,8 +165,8 @@ protected:
     }
 
     void btree_put(uint64_t key_id) {
-        WbTestKey k{key_id};
-        WbTestVal v;
+        MappingKey k{static_cast< lba_t >(key_id), 1};
+        MappingValue v;
         m_btree->put(k, v, btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT, &v, m_bcp);
     }
 
