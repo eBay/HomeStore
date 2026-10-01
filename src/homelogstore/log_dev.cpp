@@ -218,12 +218,17 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* cb_context) {
-    auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
+    // Capture data.size before create() — once the record is marked active another thread can flush it and fire
+    // the completion callback which frees the logstore_req (and thus the 'data' reference).  Reading data.size
+    // after create() returns would be a heap-use-after-free.
+    const uint32_t data_size{data.size};
+    auto prev_size = m_pending_flush_size.fetch_add(data_size, std::memory_order_relaxed);
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
+    // 'data' must not be accessed after this point — it may point into a freed logstore_req.
 
-    if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) &&
+    if (prev_size < threshold_size && ((prev_size + data_size) >= threshold_size) &&
         !m_is_flushing.load(std::memory_order_relaxed)) {
         if (flush_in_current_thread()) {
             flush_if_needed();
