@@ -63,8 +63,9 @@ class HomestoreConan(ConanFile):
         self.requires("farmhash/cci.20190513@")
         self.requires("folly/2022.01.31.00")
         self.requires("isa-l/2.30.0")
-        self.requires("nlohmann_json/3.12.0")
+        self.requires("nlohmann_json/[^3.11]")
         self.requires("spdk/nbi.21.07.y")
+        self.requires("openssl/1.1.1w", override=True)
 
     def build(self):
         cmake = CMake(self)
