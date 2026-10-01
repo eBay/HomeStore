@@ -752,13 +752,13 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
 
     auto pre_raft_logstore_reserve_threshold = 0;
     auto pre_raft_logstore_truncation_reserve_count = 0;
-    HS_SETTINGS_FACTORY().modifiable_settings([&pre_raft_logstore_reserve_threshold,
-                                               &pre_raft_logstore_truncation_reserve_count](auto& s) {
-        pre_raft_logstore_reserve_threshold = s.resource_limits.raft_logstore_reserve_threshold;
-        pre_raft_logstore_truncation_reserve_count = s.resource_limits.raft_logstore_truncation_reserve_count;
-        s.resource_limits.raft_logstore_reserve_threshold = 200;
-        s.resource_limits.raft_logstore_truncation_reserve_count = 1;
-    });
+    HS_SETTINGS_FACTORY().modifiable_settings(
+        [&pre_raft_logstore_reserve_threshold, &pre_raft_logstore_truncation_reserve_count](auto& s) {
+            pre_raft_logstore_reserve_threshold = s.resource_limits.raft_logstore_reserve_threshold;
+            pre_raft_logstore_truncation_reserve_count = s.resource_limits.raft_logstore_truncation_reserve_count;
+            s.resource_limits.raft_logstore_reserve_threshold = 200;
+            s.resource_limits.raft_logstore_truncation_reserve_count = 1;
+        });
     HS_SETTINGS_FACTORY().save();
 
     uint64_t entries_per_attempt = 100;
@@ -872,11 +872,11 @@ TEST_F(RaftReplDevTest, RaftLogTruncationTest) {
     // set the settings back and save.
     LOGINFO("Set raft logstore truncation settings back to previous values, reserve_threshold={}, reserve_count={}",
             pre_raft_logstore_reserve_threshold, pre_raft_logstore_truncation_reserve_count);
-    HS_SETTINGS_FACTORY().modifiable_settings([pre_raft_logstore_reserve_threshold,
-                                               pre_raft_logstore_truncation_reserve_count](auto& s) {
-        s.resource_limits.raft_logstore_reserve_threshold = pre_raft_logstore_reserve_threshold;
-        s.resource_limits.raft_logstore_truncation_reserve_count = pre_raft_logstore_truncation_reserve_count;
-    });
+    HS_SETTINGS_FACTORY().modifiable_settings(
+        [pre_raft_logstore_reserve_threshold, pre_raft_logstore_truncation_reserve_count](auto& s) {
+            s.resource_limits.raft_logstore_reserve_threshold = pre_raft_logstore_reserve_threshold;
+            s.resource_limits.raft_logstore_truncation_reserve_count = pre_raft_logstore_truncation_reserve_count;
+        });
     HS_SETTINGS_FACTORY().save();
 
     g_helper->sync_for_cleanup_start();

@@ -79,7 +79,7 @@ hs_stats GenericReplService::get_cap_stats() const {
 
 ///////////////////// SoloReplService specializations and CP Callbacks /////////////////////////////
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
-SoloReplService::~SoloReplService() {};
+SoloReplService::~SoloReplService(){};
 
 void SoloReplService::start() {
     for (auto const& [buf, mblk] : m_sb_bufs) {
@@ -151,23 +151,19 @@ folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_
 
     auto rdev_ptr = rdev.value();
 
-    // 1. Firstly stop the repl dev which waits for any outstanding requests to finish
+    // 1. Stop: wait for outstanding requests
     rdev_ptr->stop();
 
-    // 2. Destroy the repl dev which will remove the logstore and free the memory;
-    dp_cast< SoloReplDev >(rdev_ptr)->destroy();
-
-    // 3. detaches both ways:
-    // detach rdev from its listener and listener from rdev;
-    rdev_ptr->detach_listener();
+    // 2. Remove from rd map first so CP flush/cleanup can no longer see this rdev.
+    // Taking the unique lock also waits out any in-flight iterate_repl_devs().
     {
-        // 4. remove from rd map which finally call SoloReplDev's destructor because this is the last one holding ref to
-        // this instance;
         std::unique_lock lg(m_rd_map_mtx);
         m_rd_map.erase(group_id);
     }
 
-    // 5. now destroy the upper layer's listener instance;
+    // 3. Now it is safe to destroy logstore/logdev and the superblk
+    dp_cast< SoloReplDev >(rdev_ptr)->destroy();
+    rdev_ptr->detach_listener();
     m_repl_app->destroy_repl_dev_listener(group_id);
 
     return folly::makeSemiFuture(ReplServiceError::OK);
