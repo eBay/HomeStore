@@ -138,11 +138,7 @@ public:
         ASSERT_FALSE(s_init_failed) << "homestore init failed";
     }
 
-    static void TearDownTestSuite() {
-        VolInterface::shutdown(true /* wait */);
-        iomanager.stop();
-        fs::remove(DISK_FILE);
-    }
+    static void TearDownTestSuite() { fs::remove(DISK_FILE); }
 
 protected:
     void SetUp() override {
@@ -362,5 +358,8 @@ int main(int argc, char** argv) {
     SISL_OPTIONS_LOAD(argc, argv, logging);
     sisl::logging::SetLogger("test_wb_cache_integration");
     sisl::logging::install_crash_handler();
-    return RUN_ALL_TESTS();
+    const int ret{RUN_ALL_TESTS()};
+    VolInterface::shutdown(true /* wait */);
+    iomanager.stop();
+    return ret;
 }
