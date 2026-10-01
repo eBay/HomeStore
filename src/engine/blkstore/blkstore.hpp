@@ -116,7 +116,7 @@ public:
         }
     };
 
-    static auto to_blkstore_req(auto& req) { return boost::static_pointer_cast< blkstore_req< Buffer > >(req); }
+    static auto to_blkstore_req(auto& req) { return boost::dynamic_pointer_cast< blkstore_req< Buffer > >(req); }
 
     static boost::intrusive_ptr< blkstore_req< Buffer > > make_request() {
         return boost::intrusive_ptr< blkstore_req< Buffer > >(
