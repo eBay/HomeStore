@@ -2,7 +2,7 @@
  "graph_lock": {
   "nodes": {
    "0": {
-    "ref": "homestore/3.8.7",
+    "ref": "homestore/3.8.8",
     "requires": [
      "1",
      "2",
@@ -21,7 +21,7 @@
     "context": "host"
    },
    "1": {
-    "ref": "iomgr/8.8.4#8b6efbb0f5a6dbfa21d54d333d4c85f7",
+    "ref": "iomgr/8.8.7#a8b556d68402d7704b82287b1a8c9b72",
     "requires": [
      "2",
      "3",
@@ -37,7 +37,7 @@
     "context": "host"
    },
    "2": {
-    "ref": "sisl/8.9.6#8ad5a667b06c1a75d1f8efab55a840ce",
+    "ref": "sisl/8.9.8#85065452eb527275f3a889e2918d4881",
     "requires": [
      "3",
      "7",
@@ -70,11 +70,11 @@
     "context": "host"
    },
    "5": {
-    "ref": "bzip2/1.0.8#411fc05e80d47a89045edc1ee6f23c1d",
+    "ref": "bzip2/1.0.8#8779e3ee0cf27649212cd3fc0db4438b",
     "context": "host"
    },
    "6": {
-    "ref": "libbacktrace/cci.20210118#ec1aa63bbc10145c6a299e68e711670c",
+    "ref": "libbacktrace/cci.20210118#f5d18dee9942ec36058b965afa867e7b",
     "context": "host"
    },
    "7": {
@@ -105,10 +105,7 @@
     "context": "host"
    },
    "11": {
-    "ref": "openssl/3.6.0#89e8af1d4a21afcac0557079d23d8890",
-    "requires": [
-     "4"
-    ],
+    "ref": "openssl/1.1.1w#c5ede42cc8ea41086b99aa237ad138d2",
     "context": "host"
    },
    "12": {
@@ -143,11 +140,11 @@
     "context": "host"
    },
    "15": {
-    "ref": "double-conversion/3.2.0#dba4f6ac0cfbfb3ab6f0b6bd4130af55",
+    "ref": "double-conversion/3.2.0#640e35791a4bac95b0545e2f54b7aceb",
     "context": "host"
    },
    "16": {
-    "ref": "gflags/2.2.2#48d1262ffac8d30c3224befb8275a533",
+    "ref": "gflags/2.2.2#b15c28c567c7ade7449cf994168a559f",
     "context": "host"
    },
    "17": {
@@ -167,7 +164,7 @@
     "context": "host"
    },
    "19": {
-    "ref": "xz_utils/5.2.5#774a53815bc66047a56ef8470a144a91",
+    "ref": "xz_utils/5.2.5#a6d90890193dc851fa0d470163271c7a",
     "context": "host"
    },
    "20": {
@@ -202,11 +199,11 @@
     "context": "host"
    },
    "26": {
-    "ref": "libsodium/1.0.18#9e310e52ed60084484c5f640ab88883a",
+    "ref": "libsodium/1.0.18#7429a9e5351cc67bea3537229921714d",
     "context": "host"
    },
    "27": {
-    "ref": "libiberty/9.1.0#a6a0b042484db9cefa233a8aa31a33c5",
+    "ref": "libiberty/9.1.0#3060045a116b0fff6d4937b0fc9cfc0e",
     "context": "host"
    },
    "28": {
