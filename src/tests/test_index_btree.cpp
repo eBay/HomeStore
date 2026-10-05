@@ -303,6 +303,31 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
     LOGINFO("RangeUpdate test end");
 }
 
+TYPED_TEST(BtreeTest, BulkPut) {
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    LOGINFO("Step 1: Bulk insert every other key of {} entries", num_entries);
+    this->bulk_put(0, num_entries - 1, btree_put_type::INSERT, 2 /* stride */);
+    this->do_query(0, num_entries - 1, 75);
+
+    LOGINFO("Step 2: Bulk update all keys, only existing keys are expected to be updated");
+    this->bulk_put(0, num_entries - 1, btree_put_type::UPDATE);
+
+    LOGINFO("Step 3: Bulk upsert all keys, missing keys are expected to be inserted");
+    this->bulk_put(0, num_entries - 1, btree_put_type::UPSERT);
+
+    LOGINFO("Step 4: Bulk insert all keys again, all are expected to be skipped");
+    this->bulk_put(0, num_entries - 1, btree_put_type::INSERT);
+
+    LOGINFO("Step 5: Do bulk upsert of random key ranges between [1-500] for 100 times");
+    for (uint32_t i{}; i < 100; ++i) {
+        this->bulk_put_random();
+    }
+
+    LOGINFO("Step 6: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->do_query(0, num_entries - 1, 75);
+    this->get_all();
+}
+
 TYPED_TEST(BtreeTest, CpFlush) {
     LOGINFO("CpFlush test start");
 

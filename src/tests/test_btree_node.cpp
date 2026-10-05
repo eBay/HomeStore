@@ -140,6 +140,51 @@ struct NodeTest : public testing::Test {
         }
     }
 
+    // Bulk puts the given sorted keys into node1 and validates the put/skipped counts against the shadow map. If
+    // contiguous_vals is set, interval values are shifted along with the key so that they share a common prefix.
+    btree_status_t bulk_put(std::vector< uint32_t > const& keys, btree_put_type put_type,
+                            bool contiguous_vals = false) {
+        std::vector< std::pair< K, V > > kvs;
+        kvs.reserve(keys.size());
+        V const first_val{V::generate_rand()};
+
+        for (uint32_t i{}; i < keys.size(); ++i) {
+            V val{contiguous_vals ? first_val : V::generate_rand()};
+            if constexpr (std::is_same_v< V, TestIntervalValue >) {
+                if (contiguous_vals) { val.shift(i, nullptr); }
+            }
+            kvs.emplace_back(K{keys[i]}, std::move(val));
+        }
+
+        uint32_t cur_idx{};
+        uint32_t num_put{};
+        uint32_t num_skipped{};
+        auto const ret =
+            m_node1->bulk_put(kvs, cur_idx, static_cast< uint32_t >(kvs.size()), put_type, num_put, num_skipped);
+        EXPECT_TRUE((ret == btree_status_t::success) || (ret == btree_status_t::has_more))
+            << "Unexpected bulk put status " << enum_name(ret);
+        if (ret == btree_status_t::success) { EXPECT_EQ(cur_idx, kvs.size()) << "Bulk put didn't process all kvs"; }
+
+        uint32_t expected_put{};
+        uint32_t expected_skipped{};
+        for (uint32_t i{}; i < cur_idx; ++i) {
+            bool const exists = m_shadow_map.contains(kvs[i].first);
+            bool const apply = (put_type == btree_put_type::INSERT) ? !exists
+                : (put_type == btree_put_type::UPDATE)              ? exists
+                                                                    : true;
+            if (apply) {
+                m_shadow_map.insert_or_assign(kvs[i].first, kvs[i].second);
+                ++expected_put;
+            } else {
+                ++expected_skipped;
+            }
+        }
+        EXPECT_EQ(num_put, expected_put) << "Bulk put num_put mismatch";
+        EXPECT_EQ(num_skipped, expected_skipped) << "Bulk put num_skipped mismatch";
+
+        return ret;
+    }
+
     void update(uint32_t k, bool validate_update = true) {
         K key{k};
         V value{V::generate_rand()};
@@ -414,6 +459,98 @@ TYPED_TEST(NodeTest, RangePutGet) {
     }
 
     this->validate_get_all();
+}
+
+TYPED_TEST(NodeTest, BulkPut) {
+    std::vector< uint32_t > even_keys;
+    std::vector< uint32_t > all_keys;
+    for (uint32_t i{}; i < 12; ++i) { // Small enough to fit in one node even with max size var len kvs
+        all_keys.push_back(i);
+        if (i % 2 == 0) { even_keys.push_back(i); }
+    }
+
+    ASSERT_EQ(this->bulk_put(even_keys, btree_put_type::INSERT), btree_status_t::success);
+    this->validate_get_all();
+
+    // Insert of existing keys and update of missing keys are skipped
+    ASSERT_EQ(this->bulk_put(even_keys, btree_put_type::INSERT), btree_status_t::success);
+    ASSERT_EQ(this->bulk_put(all_keys, btree_put_type::UPDATE), btree_status_t::success);
+    this->validate_get_all();
+
+    ASSERT_EQ(this->bulk_put(all_keys, btree_put_type::UPSERT), btree_status_t::success);
+    ASSERT_EQ(this->m_node1->total_entries(), all_keys.size());
+    this->validate_get_all();
+    this->validate_key_order();
+}
+
+TYPED_TEST(NodeTest, BulkPutFilter) {
+    std::vector< uint32_t > keys{1, 3, 5, 7, 9, 11};
+    ASSERT_EQ(this->bulk_put(keys, btree_put_type::INSERT), btree_status_t::success);
+
+    // Remove keys < 5, keep 5, replace the rest
+    std::vector< std::pair< typename TestFixture::K, typename TestFixture::V > > kvs;
+    for (auto k : keys) {
+        kvs.emplace_back(typename TestFixture::K{k}, TestFixture::V::generate_rand());
+    }
+    put_filter_cb_t filter_cb = [](BtreeKey const& key, BtreeValue const&, BtreeValue const&) {
+        auto const x = key.compare(typename TestFixture::K{5u});
+        return (x < 0) ? put_filter_decision::remove
+            : (x == 0) ? put_filter_decision::keep
+                       : put_filter_decision::replace;
+    };
+    uint32_t cur_idx{};
+    uint32_t num_put{};
+    uint32_t num_skipped{};
+    ASSERT_EQ(this->m_node1->bulk_put(kvs, cur_idx, static_cast< uint32_t >(kvs.size()), btree_put_type::UPSERT,
+                                      num_put, num_skipped, filter_cb),
+              btree_status_t::success);
+    ASSERT_EQ(num_put, 5u);
+    ASSERT_EQ(num_skipped, 1u);
+
+    this->m_shadow_map.erase(typename TestFixture::K{1u});
+    this->m_shadow_map.erase(typename TestFixture::K{3u});
+    for (uint32_t i{3}; i < kvs.size(); ++i) {
+        this->m_shadow_map.insert_or_assign(kvs[i].first, kvs[i].second);
+    }
+    this->validate_get_all();
+    this->validate_key_order();
+}
+
+TYPED_TEST(NodeTest, BulkPutTillFull) {
+    // Put far more than a node can take, it should stop at the first kv that doesn't fit
+    std::vector< uint32_t > keys;
+    for (uint32_t i{}; i < g_max_keys / 2; ++i) {
+        keys.push_back(i * 2);
+    }
+    ASSERT_EQ(this->bulk_put(keys, btree_put_type::UPSERT), btree_status_t::has_more);
+    ASSERT_GT(this->m_node1->total_entries(), 0u);
+    this->validate_get_all();
+    this->validate_key_order();
+}
+
+TYPED_TEST(NodeTest, BulkPutSharesPrefix) {
+    if constexpr (std::is_same_v< TypeParam, PrefixIntervalBtreeTest >) {
+        std::vector< uint32_t > keys;
+        for (uint32_t i{}; i < 50; ++i) {
+            keys.push_back(i);
+        }
+        ASSERT_EQ(this->bulk_put(keys, btree_put_type::INSERT, true /* contiguous_vals */), btree_status_t::success);
+        ASSERT_EQ(this->m_node1->get_nth_prefix_ref_count(0), keys.size())
+            << "Contiguous kvs are expected to share a single prefix";
+        this->validate_get_all();
+
+        // Overwrite the middle with a new contiguous run, the old prefix must stay intact for the remaining entries
+        std::vector< uint32_t > mid_keys;
+        for (uint32_t i{10}; i < 20; ++i) {
+            mid_keys.push_back(i);
+        }
+        ASSERT_EQ(this->bulk_put(mid_keys, btree_put_type::UPSERT, true /* contiguous_vals */),
+                  btree_status_t::success);
+        ASSERT_EQ(this->m_node1->get_nth_prefix_ref_count(0), keys.size() - mid_keys.size());
+        ASSERT_EQ(this->m_node1->get_nth_prefix_ref_count(10), mid_keys.size());
+        this->validate_get_all();
+        this->validate_key_order();
+    }
 }
 
 TYPED_TEST(NodeTest, RemoveRangeIndex) {
