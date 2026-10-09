@@ -328,7 +328,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-bool HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
+bool HomeLogStore::foreach(int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
     if (is_stopping()) return false;
     incr_pending_request_num();
     m_records.foreach_all_completed(start_idx, [&](int64_t cur_idx, homestore::logstore_record& record) -> bool {

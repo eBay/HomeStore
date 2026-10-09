@@ -1254,6 +1254,66 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
     }
 }
 
+// Regression test for the bug (SDSTOR-25815-class): repair_links() used to stop rebuilding a parent as soon
+// as it hit an empty child that was not one of the parent's original children - even when a *later* child
+// further down the very same leaf chain was still a valid, non-empty member of this parent, as the pre-scan
+// earlier in repair_links() had already proven.
+//
+// This happens when a long run of removes causes several leaves under the same parent to cascade-merge in a
+// single CP: one "in-place" leaf (keeps its original node id, so it is still tracked by the parent) ends up
+// with zero entries, while right next to it a *newly allocated* leaf (never tracked by the parent) also ends
+// up with zero entries. If the crash lands before the parent-level commit, recovery's repair_links() used to
+// treat that second empty leaf as "end of this parent" and silently drop every real child beyond it from the
+// repaired parent, corrupting the parent/sibling boundary and failing the post-recovery sanity check
+// (validate_next_node_relation) on restart.
+//
+// Reproducing one exact merge shape deterministically isn't practical here (the field incident needed a long
+// running randomized workload to hit it), so instead this test removes a bounded interior range of a large tree
+// in one shot before triggering a CP. That piles up many cascading merges - each one an independent chance at
+// producing the "retained empty original child followed by a new empty child" pattern - into a single CP's
+// dirty buffer set. Keeping most of the tree on both sides of the removed range is important: removing almost the
+// entire tree also exercises root collapse and same-CP created/freed-node recovery, which is unrelated to this
+// parent-boundary regression and can result in duplicate allocator frees. Crashing on the first merge's parent
+// flush (crash_flush_on_merge_at_parent) leaves the other pending parent commits unflushed, so recovery has to run
+// repair_links() on multiple parents.
+//
+// Without the fix: recovery's sanity check can fail / abort on restart.
+// With the fix: recovery completes and every surviving key is still reachable.
+TYPED_TEST(IndexCrashTest, MergeRemoveManyEmptyChildren) {
+    auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+
+    // Step 1: Populate the full key range and flush a clean baseline CP.
+    LOGINFO("Step 1: Populate {} keys and flush baseline CP", num_entries);
+    for (auto k = 0u; k < num_entries; ++k) {
+        this->put(k, btree_put_type::INSERT, true /* expect_success */);
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+    this->m_shadow_map.save(this->m_shadow_filename);
+
+    // Step 2: Remove the middle quarter without an intervening CP. This is large enough to accumulate many pending
+    // merges while leaving enough persisted structure on both sides to avoid turning this into a root-collapse test.
+    if (num_entries < 4 * this->m_cfg.m_max_keys_in_node) {
+        GTEST_SKIP() << "MergeRemoveManyEmptyChildren requires a multi-level tree";
+    }
+    uint32_t const remove_begin = num_entries / 2;
+    uint32_t const remove_end = remove_begin + num_entries / 4;
+    OperationList ops;
+    for (auto k = remove_begin; k < remove_end; ++k) {
+        ops.emplace_back(k, OperationType::Remove);
+    }
+
+    std::string flip = "crash_flush_on_merge_at_parent";
+    LOGINFO("Step 2: Set crash flag {} and remove {} keys without an intervening CP", flip, ops.size());
+    this->set_basic_flip(flip);
+    for (auto [k, _] : ops) {
+        this->remove_one(k, true);
+    }
+
+    // Step 3: Trigger CP to crash on the flagged merge, then recover and verify the tree is consistent.
+    LOGINFO("Step 3: Trigger cp to crash and recover");
+    this->crash_and_recover(flip, ops);
+}
+
 // Regression test for the bug: when an index table is destroyed concurrently with a CP flush,
 // the txn_journal (written at the START of the flush) can contain entries for the destroyed
 // table's ordinal while the table's meta superblock is already gone.  On recovery the journal
