@@ -41,6 +41,7 @@
 #define private public
 #include "blkalloc/blk_allocator.h"
 #include "blkalloc/append_blk_allocator.h"
+#include "blkalloc/bitmap_blk_allocator.h"
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
 
@@ -1021,6 +1022,42 @@ TEST_F(BlkDataServiceTest, TestRestartWithMissingDrive) {
     LOGINFO("Step 10: wait for read and verify done.");
     wait_for_outstanding_io_done();
     LOGINFO("Step 11: I/O completed, do shutdown.");
+}
+
+// reset_block_allocator() removes the chunk's persisted bitmap right away, while the new allocator's empty bitmap is
+// only written on the next CP. A crash in between leaves no bitmap for the chunk on disk; after restart the chunk must
+// come back empty and usable.
+TEST_F(BlkDataServiceTest, TestRestartAfterResetBeforeCpFlush) {
+    LOGINFO("Step 1: allocate and commit blks, then flush them to the chunk's persisted bitmap");
+    auto bids = inst().alloc_blks(64 * Ki, blk_alloc_hints{});
+    ASSERT_TRUE(bids.has_value());
+    (void)inst().commit_blk(bids.value());
+    ASSERT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+
+    auto const chunk_id = bids.value().chunk_num();
+    auto* chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_LT(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks());
+
+    LOGINFO("Step 2: reset chunk {} and simulate a crash before the next CP writes its new bitmap", chunk_id);
+    chunk->reset_block_allocator();
+    static_cast< BitmapBlkAllocator* >(chunk->blk_allocator_mutable())->m_is_disk_bm_dirty.store(false);
+
+    LOGINFO("Step 3: restart; the chunk has no persisted bitmap now");
+    m_helper.restart_homestore();
+
+    chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
+    ASSERT_NE(chunk, nullptr);
+    EXPECT_EQ(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks());
+
+    LOGINFO("Step 4: CP flush and allocation work on the chunk");
+    ASSERT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+    blk_alloc_hints hints;
+    hints.chunk_id_hint = chunk_id;
+    auto new_bids = inst().alloc_blks(64 * Ki, hints);
+    ASSERT_TRUE(new_bids.has_value());
+    EXPECT_EQ(new_bids.value().chunk_num(), chunk_id);
+    (void)inst().commit_blk(new_bids.value());
 }
 
 // Separate test fixture for tests requiring append allocator
