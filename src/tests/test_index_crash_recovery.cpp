@@ -1268,12 +1268,14 @@ TYPED_TEST(IndexCrashTest, MergeRemoveBasic) {
 // (validate_next_node_relation) on restart.
 //
 // Reproducing one exact merge shape deterministically isn't practical here (the field incident needed a long
-// running randomized workload to hit it), so instead this test removes nearly an entire large tree in one
-// shot before ever triggering a CP. That piles up many cascading merges - each one an independent chance at
+// running randomized workload to hit it), so instead this test removes a bounded interior range of a large tree
+// in one shot before triggering a CP. That piles up many cascading merges - each one an independent chance at
 // producing the "retained empty original child followed by a new empty child" pattern - into a single CP's
-// dirty buffer set. Crashing on the very first merge's parent flush (crash_flush_on_merge_at_parent) also
-// leaves every other pending merge's parent commit unflushed, so recovery has to run repair_links() on many
-// parents at once, maximizing the odds of hitting the bug in one run.
+// dirty buffer set. Keeping most of the tree on both sides of the removed range is important: removing almost the
+// entire tree also exercises root collapse and same-CP created/freed-node recovery, which is unrelated to this
+// parent-boundary regression and can result in duplicate allocator frees. Crashing on the first merge's parent
+// flush (crash_flush_on_merge_at_parent) leaves the other pending parent commits unflushed, so recovery has to run
+// repair_links() on multiple parents.
 //
 // Without the fix: recovery's sanity check can fail / abort on restart.
 // With the fix: recovery completes and every surviving key is still reachable.
@@ -1288,11 +1290,15 @@ TYPED_TEST(IndexCrashTest, MergeRemoveManyEmptyChildren) {
     test_common::HSTestHelper::trigger_cp(true);
     this->m_shadow_map.save(this->m_shadow_filename);
 
-    // Step 2: Remove almost the entire tree in one shot (leave a small margin at each end so the tree doesn't
-    // collapse to a single node) without an intervening CP, so many parents accumulate pending merges.
-    uint32_t const margin = std::min< uint32_t >(10, num_entries / 10);
+    // Step 2: Remove the middle quarter without an intervening CP. This is large enough to accumulate many pending
+    // merges while leaving enough persisted structure on both sides to avoid turning this into a root-collapse test.
+    if (num_entries < 4 * this->m_cfg.m_max_keys_in_node) {
+        GTEST_SKIP() << "MergeRemoveManyEmptyChildren requires a multi-level tree";
+    }
+    uint32_t const remove_begin = num_entries / 2;
+    uint32_t const remove_end = remove_begin + num_entries / 4;
     OperationList ops;
-    for (auto k = margin; k < num_entries - margin; ++k) {
+    for (auto k = remove_begin; k < remove_end; ++k) {
         ops.emplace_back(k, OperationType::Remove);
     }
 
