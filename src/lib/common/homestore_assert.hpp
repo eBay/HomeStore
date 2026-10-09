@@ -273,9 +273,9 @@
 #define HS_REQ_ASSERT(assert_type, cond, req, msg, ...) HS_SUBMOD_ASSERT(assert_type, cond, req, , , msg, ##__VA_ARGS__)
 #define HS_ASSERT(assert_type, cond, msg, ...) HS_REQ_ASSERT(assert_type, cond, , msg, ##__VA_ARGS__)
 
-#define HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, req, submod_name, submod_val, detail_name, detail_val,    \
-                               ...)                                                                                    \
-    {                                                                                                                  \
+#define HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, req, submod_name, submod_val, detail_name, detail_val,      \
+                               ...)                                                                                      \
+    {                                                                                                                    \
         assert_type(                                                                                                   \
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
@@ -297,7 +297,7 @@
                 HS_ASSERT_METRICS(buf)                                                                                 \
                 return true;                                                                                           \
             },                                                                                                         \
-            ##__VA_ARGS__);                                                                                            \
+            ##__VA_ARGS__); \
     }
 
 #define HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, submod_name, submod_val, ...)                          \
@@ -312,16 +312,16 @@
     HS_REQ_ASSERT_CMP(assert_type, static_cast< const void* >(val1), !=, nullptr, req, ##__VA_ARGS__)
 #define HS_ASSERT_NOTNULL(assert_type, val1, ...) HS_REQ_ASSERT_NOTNULL(assert_type, val1, , ##__VA_ARGS__)
 #define HS_SUBMOD_ASSERT_NOTNULL(assert_type, val1, req, submod_name, submod_val, ...)                                 \
-    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1) !=, nullptr, req, submod_name, submod_val,      \
-                         ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1) !=, nullptr, req, submod_name,                  \
+                         submod_val, ##__VA_ARGS__)
 
 /* Null assert */
 #define HS_REQ_ASSERT_NULL(assert_type, val1, req, ...)                                                                \
     HS_REQ_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, ##__VA_ARGS__)
 #define HS_ASSERT_NULL(assert_type, val1, ...) HS_REQ_ASSERT_NULL(assert_type, val1, , ##__VA_ARGS__)
 #define HS_SUBMOD_ASSERT_NULL(assert_type, val1, req, submod_name, submod_val, ...)                                    \
-    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, submod_name, submod_val,     \
-                         ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, submod_name,                 \
+                         submod_val, ##__VA_ARGS__)
 
 #define HS_DBG_ASSERT(cond, ...) HS_ASSERT(DEBUG_ASSERT_FMT, cond, ##__VA_ARGS__)
 #define HS_DBG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, ==, val2, ##__VA_ARGS__)

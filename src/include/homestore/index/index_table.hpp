@@ -862,6 +862,11 @@ protected:
             LOGTRACEMOD(wbcache, "Repairing node={}, child_node=[{}] child_last_key={}", cur_parent->node_id(),
                         child_node->to_string(), child_last_key.to_string());
 
+            // If set, this child contributes nothing to the rebuilt parent (e.g. a transient empty node left
+            // behind by an in-flight split/merge) but the walk must still continue past it instead of ending
+            // the rebuild here.
+            bool skip_child = false;
+
             // Check if we are beyond the last child node.
             //
             // There can be cases where the child level merge is successfully persisted but the parent level is
@@ -881,118 +886,170 @@ protected:
                     break;
                 }
                 if (child_node->total_entries() == 0) {
-                    // this child has no entries, but maybe in the middle of the parent node, we need to update the key
-                    // of parent as previous one and go on
-                    LOGTRACEMOD(wbcache,
-                                "Reach to an empty child node {}, and this child doesn't belong to this parent; Hence "
-                                "loop ends",
-                                child_node->to_string());
-                    // now update  the next of parent node by skipping all deleted siblings of this parent node
-                    auto valid_sibling = cur_parent->next_bnode();
-                    while (valid_sibling != empty_bnodeid) {
-                        BtreeNodePtr sibling;
-                        if (read_node_impl(valid_sibling, sibling) == btree_status_t::success) {
-                            if (sibling->is_node_deleted()) {
-                                valid_sibling = sibling->next_bnode();
-                                continue;
-                            }
-                            // cur_parent->set_next_bnode(sibling->node_id());
-                            break;
-                        }
-                        LOGTRACEMOD(wbcache, "Failed to read child node {} for parent node [{}] reason {}",
-                                    valid_sibling, cur_parent->to_string(), ret);
-                    }
-                    if (valid_sibling != empty_bnodeid) {
-                        cur_parent->set_next_bnode(valid_sibling);
-                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
-                                    cur_parent->to_string(), child_node->to_string());
-
-                    } else {
-                        cur_parent->set_next_bnode(empty_bnodeid);
-                        LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
-                                    cur_parent->to_string(), child_node->to_string());
-                    }
-
-                    break;
-                }
-            }
-
-            if (!cur_parent->has_room_for_put(btree_put_type::INSERT, K::get_max_size(),
-                                              BtreeLinkInfo::get_fixed_size())) {
-                // No room in the parent_node, let us split the parent_node and continue
-                LOGTRACEMOD(wbcache,
-                            "Repairing node={}, child_node=[{}] has no room for put, so we need to split the parent "
-                            "node",
-                            cur_parent->node_id(), child_node->to_string());
-                auto new_parent = this->alloc_interior_node();
-                if (new_parent == nullptr) {
-                    ret = btree_status_t::space_not_avail;
-                    break;
-                }
-
-                new_parent->set_next_bnode(cur_parent->next_bnode());
-                cur_parent->set_next_bnode(new_parent->node_id());
-                new_parent->set_level(cur_parent->level());
-                cur_parent->inc_link_version();
-                new_parent_nodes.push_back(new_parent);
-                cur_parent = std::move(new_parent);
-            }
-
-            // Insert the last key of the child node into parent node
-            if (!child_node->is_node_deleted()) {
-                if (child_node->total_entries() == 0) {
-                    if (orig_child_infos.contains(child_node->node_id())) {
-                        child_last_key = orig_child_infos[child_node->node_id()];
+                    // This child is empty and was never a child of this parent, so by itself it gives us no clue
+                    // whether it belongs to this parent or the next one. But if the pre-scan above already found
+                    // a true last child further down this very same next_bnode chain (next_cur_child), we know
+                    // for a fact this parent's real boundary lies beyond this node - it is just a transient empty
+                    // node left behind by an in-flight split/merge. In that case skip it (no key/child to
+                    // contribute) and keep walking instead of ending the rebuild prematurely, otherwise valid
+                    // children between this node and the real boundary would be silently dropped. Only when we
+                    // have no such information (no sibling / pre-scan couldn't establish a boundary) do we fall
+                    // back to treating this empty node conservatively as the end of this parent.
+                    if (next_cur_child) {
                         LOGTRACEMOD(wbcache,
-                                    "Reach to an empty child node [{}], but not the end of the parent node, so we need "
-                                    "to update the key of parent node as original one {}",
-                                    child_node->to_string(), child_last_key.to_string());
+                                    "Reach to an empty child node [{}] that is not an original child, but pre-scan "
+                                    "already found the real parent boundary at [{}]; skip this child and continue",
+                                    child_node->to_string(), next_cur_child->to_string());
+                        skip_child = true;
                     } else {
+                        // this child has no entries, but maybe in the middle of the parent node, we need to update the
+                        // key of parent as previous one and go on
                         LOGTRACEMOD(wbcache,
-                                    "Reach to an empty child node [{}] but not belonging to this parent (probably next "
-                                    "parent sibling); Hence end loop",
+                                    "Reach to an empty child node {}, and this child doesn't belong to this parent; "
+                                    "Hence loop ends",
                                     child_node->to_string());
+                        // now update  the next of parent node by skipping all deleted siblings of this parent node
+                        auto valid_sibling = cur_parent->next_bnode();
+                        while (valid_sibling != empty_bnodeid) {
+                            BtreeNodePtr sibling;
+                            if (read_node_impl(valid_sibling, sibling) == btree_status_t::success) {
+                                if (sibling->is_node_deleted()) {
+                                    valid_sibling = sibling->next_bnode();
+                                    continue;
+                                }
+                                // cur_parent->set_next_bnode(sibling->node_id());
+                                break;
+                            }
+                            LOGTRACEMOD(wbcache, "Failed to read child node {} for parent node [{}] reason {}",
+                                        valid_sibling, cur_parent->to_string(), ret);
+                        }
+                        if (valid_sibling != empty_bnodeid) {
+                            cur_parent->set_next_bnode(valid_sibling);
+                            LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
+                                        cur_parent->to_string(), child_node->to_string());
+
+                        } else {
+                            cur_parent->set_next_bnode(empty_bnodeid);
+                            LOGTRACEMOD(wbcache, "Repairing node=[{}], child_node=[{}] is an edge node, end loop",
+                                        cur_parent->to_string(), child_node->to_string());
+                        }
+
                         break;
                     }
                 }
-                cur_parent->insert(cur_parent->total_entries(), child_last_key,
-                                   BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
-            } else {
-                // Node deleted indicates it's freed & no longer used during recovery
-                LOGTRACEMOD(wbcache, "Repairing node={}, child node=[{}] is deleted, skipping the insert",
-                            cur_parent->node_id(), child_node->to_string());
-                if (pre_child_node) {
-                    // We need to update the next of the previous child node to this child node
+            }
 
+            if (!skip_child) {
+                if (!cur_parent->has_room_for_put(btree_put_type::INSERT, K::get_max_size(),
+                                                  BtreeLinkInfo::get_fixed_size())) {
+                    // No room in the parent_node, let us split the parent_node and continue
+                    LOGTRACEMOD(
+                        wbcache,
+                        "Repairing node={}, child_node=[{}] has no room for put, so we need to split the parent "
+                        "node",
+                        cur_parent->node_id(), child_node->to_string());
+                    auto new_parent = this->alloc_interior_node();
+                    if (new_parent == nullptr) {
+                        ret = btree_status_t::space_not_avail;
+                        break;
+                    }
+
+                    new_parent->set_next_bnode(cur_parent->next_bnode());
+                    cur_parent->set_next_bnode(new_parent->node_id());
+                    new_parent->set_level(cur_parent->level());
+                    cur_parent->inc_link_version();
+                    new_parent_nodes.push_back(new_parent);
+                    cur_parent = std::move(new_parent);
+                }
+
+                // Insert the last key of the child node into parent node
+                if (!child_node->is_node_deleted()) {
+                    if (child_node->total_entries() == 0) {
+                        if (orig_child_infos.contains(child_node->node_id())) {
+                            child_last_key = orig_child_infos[child_node->node_id()];
+                            LOGTRACEMOD(wbcache,
+                                        "Reach to an empty child node [{}], but not the end of the parent node, so we "
+                                        "need to update the key of parent node as original one {}",
+                                        child_node->to_string(), child_last_key.to_string());
+                        } else {
+                            LOGTRACEMOD(wbcache,
+                                        "Reach to an empty child node [{}] but not belonging to this parent (probably "
+                                        "next parent sibling); Hence end loop",
+                                        child_node->to_string());
+                            break;
+                        }
+                    }
+                    cur_parent->insert(cur_parent->total_entries(), child_last_key,
+                                       BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
+                } else {
+                    // Node deleted indicates it's freed & no longer used during recovery
+                    LOGTRACEMOD(wbcache, "Repairing node={}, child node=[{}] is deleted, skipping the insert",
+                                cur_parent->node_id(), child_node->to_string());
+                    if (pre_child_node) {
+                        // We need to update the next of the previous child node to this child node
+
+                        LOGTRACEMOD(wbcache,
+                                    "Repairing node={}, child_node=[{}] is deleted, set next of previous child node "
+                                    "[{}] to this child node [{}]",
+                                    cur_parent->node_id(), child_node->to_string(), pre_child_node->to_string(),
+                                    child_node->next_bnode());
+                        pre_child_node->set_next_bnode(child_node->next_bnode());
+                        // repairing the next of previous child node
+                        // We need to set the state of the previous child node to clean, so that it can be flushed
+                        IndexBtreeNode* idx_node = static_cast< IndexBtreeNode* >(pre_child_node.get());
+                        idx_node->m_idx_buf->set_state(index_buf_state_t::CLEAN);
+                        write_node_impl(pre_child_node, cp_ctx);
+                        // update the key of last entry of the parent with the last key of deleted child
+                        child_last_key = orig_child_infos[child_node->node_id()];
+                        LOGTRACEMOD(wbcache, "updating parent [{}] current last key with {}", cur_parent->to_string(),
+                                    child_last_key.to_string());
+                        // update it here to go to the next child node and unlock this node
+                        LOGTRACEMOD(wbcache, "update the child node next to the next of previous child node");
+                        child_node->set_next_bnode(child_node->next_bnode());
+                    }
+                }
+
+                LOGTRACEMOD(wbcache, "Repairing node={}, repaired so_far=[{}]", cur_parent->node_id(),
+                            cur_parent->to_string());
+            } else {
+                LOGTRACEMOD(wbcache,
+                            "Repairing node={}, skipped empty non-original child_node=[{}], repaired "
+                            "so_far=[{}]",
+                            cur_parent->node_id(), child_node->to_string(), cur_parent->to_string());
+
+                // The rebuilt parent does not reference this child, so the child-level sibling chain must skip it as
+                // well. Otherwise the next parent entry will not match pre_child_node->next_bnode(), and
+                // validate_node_child_relation() will report a broken child linkage. Keep pre_child_node pointing to
+                // the last child actually inserted into the rebuilt parent so consecutive skipped children are all
+                // spliced out of that chain. Do not free the skipped live node here: deciding whether its allocation
+                // can be reclaimed requires the recovery transaction's ownership information, which repair_links()
+                // does not have.
+                if (pre_child_node) {
                     LOGTRACEMOD(wbcache,
-                                "Repairing node={}, child_node=[{}] is deleted, set next of previous child node [{}] "
-                                "to this child node [{}]",
+                                "Repairing node={}, splice skipped child_node=[{}] out of previous retained child "
+                                "node=[{}], new next child id={}",
                                 cur_parent->node_id(), child_node->to_string(), pre_child_node->to_string(),
                                 child_node->next_bnode());
                     pre_child_node->set_next_bnode(child_node->next_bnode());
-                    // repairing the next of previous child node
-                    // We need to set the state of the previous child node to clean, so that it can be flushed
                     IndexBtreeNode* idx_node = static_cast< IndexBtreeNode* >(pre_child_node.get());
                     idx_node->m_idx_buf->set_state(index_buf_state_t::CLEAN);
-                    write_node_impl(pre_child_node, cp_ctx);
-                    // update the key of last entry of the parent with the last key of deleted child
-                    child_last_key = orig_child_infos[child_node->node_id()];
-                    LOGTRACEMOD(wbcache, "updating parent [{}] current last key with {}", cur_parent->to_string(),
-                                child_last_key.to_string());
-                    // update it here to go to the next child node and unlock this node
-                    LOGTRACEMOD(wbcache, "update the child node next to the next of previous child node");
-                    child_node->set_next_bnode(child_node->next_bnode());
+                    ret = write_node_impl(pre_child_node, cp_ctx);
+                    if (ret != btree_status_t::success) {
+                        LOGERRORMOD(wbcache,
+                                    "Failed to persist previous retained child_node=[{}] while splicing skipped "
+                                    "child_node=[{}] for parent node={}",
+                                    pre_child_node->to_string(), child_node->to_string(), cur_parent->node_id());
+                        break;
+                    }
                 }
             }
-
-            LOGTRACEMOD(wbcache, "Repairing node={}, repaired so_far=[{}]", cur_parent->node_id(),
-                        cur_parent->to_string());
 
             // Move to the next child node
             auto const next_node_id = child_node->next_bnode();
             this->unlock_node(child_node, locktype_t::READ);
-            if (!child_node->is_node_deleted()) {
-                // We need to free the child node
+            if (!child_node->is_node_deleted() && !skip_child) {
+                // Track the last child actually inserted into the rebuilt parent. A skipped live child must not
+                // become pre_child_node because it is not part of the repaired parent's child sequence.
                 pre_child_node = child_node;
             }
             if (next_node_id == empty_bnodeid) {

@@ -28,8 +28,8 @@ class StateMachineStore;
 #define RD_LOG(level, traceID, msg, ...)                                                                               \
     LOG##level##MOD(replication, "[traceID={}] [{}] " msg, traceID, identify_str(), ##__VA_ARGS__)
 
-#define RD_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                               \
-    {                                                                                                                  \
+#define RD_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                                 \
+    {                                                                                                                    \
         assert_type##_ASSERT_CMP(                                                                                      \
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
@@ -40,10 +40,10 @@ class StateMachineStore;
                                 fmt::make_format_args(unmove(identify_str())));                                        \
                 return true;                                                                                           \
             },                                                                                                         \
-            ##__VA_ARGS__);                                                                                            \
+            ##__VA_ARGS__); \
     }
-#define RD_ASSERT(assert_type, cond, ...)                                                                              \
-    {                                                                                                                  \
+#define RD_ASSERT(assert_type, cond, ...)                                                                                \
+    {                                                                                                                    \
         assert_type##_ASSERT_FMT(                                                                                      \
             cond, ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                     \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}:{}] "},                                   \
@@ -53,7 +53,7 @@ class StateMachineStore;
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb}, fmt::make_format_args(args...));          \
                 return true;                                                                                           \
             }),                                                                                                        \
-            ##__VA_ARGS__);                                                                                            \
+            ##__VA_ARGS__); \
     }
 
 #define RD_DBG_ASSERT(cond, ...) RD_ASSERT(DEBUG, cond, ##__VA_ARGS__)
