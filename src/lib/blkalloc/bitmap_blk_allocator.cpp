@@ -26,7 +26,7 @@ BitmapBlkAllocator::BitmapBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh,
         meta_service().register_handler(
             get_name(),
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(mblk, std::move(buf), size); },
-            nullptr);
+            [this](bool) { on_meta_recovery_completed(); });
     }
 
     if (is_fresh) {
@@ -49,6 +49,17 @@ void BitmapBlkAllocator::on_meta_blk_found(meta_blk* mblk_cookie, sisl::byte_vie
         hs_utils::extract_byte_array(buf, meta_service().is_aligned_buf_needed(size), meta_service().align_size())}};
 
     m_alloced_blk_count.store(m_disk_bm->get_set_count(), std::memory_order_relaxed);
+    load();
+}
+
+// The bitmap is written on the first CP after the allocator is created (it starts out dirty), so after a restart it is
+// missing only when reset() removed it and the system crashed before the next CP wrote the new, empty one. Either way
+// the chunk is empty; without this the allocator would stay unloaded and the next CP would flush a null bitmap.
+void BitmapBlkAllocator::on_meta_recovery_completed() {
+    if (m_disk_bm) { return; }
+
+    LOGINFO("No persisted bitmap found for blk allocator {}, it was reset before a crash; starting empty", get_name());
+    m_disk_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
     load();
 }
 
