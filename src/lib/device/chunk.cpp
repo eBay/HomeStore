@@ -18,6 +18,7 @@
 #include "common/homestore_utils.hpp"
 #include "blkalloc/blk_allocator.h"
 #include "device/virtual_dev.hpp"
+#include "common/crash_simulator.hpp"
 #include <homestore/homestore.hpp>
 
 namespace homestore {
@@ -77,6 +78,9 @@ void Chunk::reset_block_allocator() {
     if (iomgr_flip::instance()->callback_flip("after_allocator_reset", chunk_id())) {
         LOGINFO("Flip triggered: after_allocator_reset for chunk_id={}", chunk_id());
     }
+
+    // Crash after the old bitmap is removed but before the new allocator's bitmap is written on the next CP
+    if (hs()->crash_simulator().crash_if_flip_set("abort_after_allocator_reset")) { return; }
 #endif
 
     auto vdev_ptr = hs()->device_mgr()->get_vdev_mutable(vdev_id());

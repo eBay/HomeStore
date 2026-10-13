@@ -41,7 +41,6 @@
 #define private public
 #include "blkalloc/blk_allocator.h"
 #include "blkalloc/append_blk_allocator.h"
-#include "blkalloc/bitmap_blk_allocator.h"
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
 
@@ -1024,9 +1023,10 @@ TEST_F(BlkDataServiceTest, TestRestartWithMissingDrive) {
     LOGINFO("Step 11: I/O completed, do shutdown.");
 }
 
+#ifdef _PRERELEASE
 // reset_block_allocator() removes the chunk's persisted bitmap right away, while the new allocator's empty bitmap is
 // only written on the next CP. A crash in between leaves no bitmap for the chunk on disk; after restart the chunk must
-// come back empty and usable.
+// come back empty and usable, and allocations made on it afterwards must survive another restart.
 TEST_F(BlkDataServiceTest, TestRestartAfterResetBeforeCpFlush) {
     LOGINFO("Step 1: allocate and commit blks, then flush them to the chunk's persisted bitmap");
     auto bids = inst().alloc_blks(64 * Ki, blk_alloc_hints{});
@@ -1039,26 +1039,34 @@ TEST_F(BlkDataServiceTest, TestRestartAfterResetBeforeCpFlush) {
     ASSERT_NE(chunk, nullptr);
     ASSERT_LT(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks());
 
-    LOGINFO("Step 2: reset chunk {} and simulate a crash before the next CP writes its new bitmap", chunk_id);
+    LOGINFO("Step 2: reset chunk {} and crash before the next CP writes its new bitmap", chunk_id);
+    m_helper.set_basic_flip("abort_after_allocator_reset");
     chunk->reset_block_allocator();
-    static_cast< BitmapBlkAllocator* >(chunk->blk_allocator_mutable())->m_is_disk_bm_dirty.store(false);
+    m_helper.wait_for_crash_recovery();
 
-    LOGINFO("Step 3: restart; the chunk has no persisted bitmap now");
-    m_helper.restart_homestore();
-
+    LOGINFO("Step 3: after restart the chunk has no persisted bitmap and must come back empty");
     chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
     ASSERT_NE(chunk, nullptr);
     EXPECT_EQ(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks());
 
-    LOGINFO("Step 4: CP flush and allocation work on the chunk");
-    ASSERT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+    LOGINFO("Step 4: allocate on the chunk and flush its bitmap");
     blk_alloc_hints hints;
     hints.chunk_id_hint = chunk_id;
     auto new_bids = inst().alloc_blks(64 * Ki, hints);
     ASSERT_TRUE(new_bids.has_value());
     EXPECT_EQ(new_bids.value().chunk_num(), chunk_id);
     (void)inst().commit_blk(new_bids.value());
+    ASSERT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+    auto const used_blks = chunk->blk_allocator()->get_used_blks();
+    ASSERT_GT(used_blks, 0u);
+
+    LOGINFO("Step 5: restart again; the allocation from step 4 must be recovered from the persisted bitmap");
+    m_helper.restart_homestore();
+    chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
+    ASSERT_NE(chunk, nullptr);
+    EXPECT_EQ(chunk->blk_allocator()->get_used_blks(), used_blks);
 }
+#endif
 
 // Separate test fixture for tests requiring append allocator
 class BlkDataServiceAppendTest : public testing::Test {

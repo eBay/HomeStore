@@ -26,7 +26,12 @@ BitmapBlkAllocator::BitmapBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh,
         meta_service().register_handler(
             get_name(),
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(mblk, std::move(buf), size); },
-            [this](bool) { on_meta_recovery_completed(); });
+            [this](bool success) {
+                // meta service reports every completed recovery as successful today; if that changes, starting a
+                // failed recovery with an empty bitmap would hand out blks that are still in use
+                BLKALLOC_REL_ASSERT(success, "Meta recovery completed with failure");
+                on_meta_recovery_completed();
+            });
     }
 
     if (is_fresh) {
