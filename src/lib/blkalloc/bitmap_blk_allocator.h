@@ -109,6 +109,7 @@ private:
     void do_init();
     sisl::ThreadVector< multi_blk_id >* get_alloc_blk_list();
     void on_meta_blk_found(meta_blk* mblk_cookie, sisl::byte_view const& buf, size_t size);
+    void on_meta_recovery_completed();
 
     // Acquire the underlying bitmap buffer and while the caller has acquired, all the new allocations
     // will be captured in a separate list and then pushes into buffer once released.
