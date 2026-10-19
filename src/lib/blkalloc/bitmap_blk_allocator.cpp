@@ -15,6 +15,7 @@
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include "bitmap_blk_allocator.h"
 #include "meta/meta_sb.hpp"
 #include "common/homestore_utils.hpp"
@@ -71,9 +72,22 @@ void BitmapBlkAllocator::on_meta_recovery_completed() {
 void BitmapBlkAllocator::cp_flush(CP*) {
     if (!is_persistent()) { return; }
 
+    // Clean bitmaps skip the lock; anything that dirties one after this check is written by the next CP
+    if (!m_is_disk_bm_dirty.load()) { return; }
+
+    std::lock_guard lg(m_sb_mtx);
+    // A reset allocator has been replaced by a new one for its chunk; its bitmap must not be written anymore
+    if (m_retired) { return; }
+
     if (m_is_disk_bm_dirty.load()) {
         sisl::byte_array bitmap_buf = acquire_underlying_buffer();
         if (m_meta_blk_cookie) {
+#ifdef _PRERELEASE
+            // Flip point: cp_flush is about to update the existing bitmap meta blk
+            if (iomgr_flip::instance()->callback_flip("inside_bitmap_cp_flush", static_cast< uint16_t >(m_chunk_id))) {
+                LOGINFO("Flip triggered: inside_bitmap_cp_flush for chunk_id={}", m_chunk_id);
+            }
+#endif
             meta_service().update_sub_sb(bitmap_buf->cbytes(), bitmap_buf->size(), m_meta_blk_cookie);
         } else {
             meta_service().add_sub_sb(get_name(), bitmap_buf->cbytes(), bitmap_buf->size(), m_meta_blk_cookie);
@@ -201,6 +215,16 @@ sisl::ThreadVector< multi_blk_id >* BitmapBlkAllocator::get_alloc_blk_list() {
 }
 
 void BitmapBlkAllocator::reset() {
+    // The chunk gets a new allocator after this, but a cp_flush may still hold this one (VirtualDev::cp_flush takes a
+    // shared_ptr to it). Flushing it after the meta blk is removed would either update the removed meta blk or write
+    // the bitmap from before the reset as a new one, which the chunk then recovers after a crash. Under m_sb_mtx, such
+    // a cp_flush either finishes before the meta blk is removed or finds this allocator retired and skips it.
+    //
+    // Anything that still reaches this allocator after the reset (a commit, free or alloc) is discarded with it by
+    // design: the chunk's contents are gone, and callers must not allocate on a chunk while it is being reset.
+    std::lock_guard lg(m_sb_mtx);
+    m_retired = true;
+
     // use the reset method to remove the metablk
     if (m_meta_blk_cookie) {
         meta_service().remove_sub_sb(m_meta_blk_cookie);

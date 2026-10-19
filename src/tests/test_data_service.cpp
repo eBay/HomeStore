@@ -1398,6 +1398,166 @@ TEST_F(BlkDataServiceAppendTest, TestFreeAfterResetBeforeCpFlushSafe) {
 
 #endif // _PRERELEASE
 
+#ifdef _PRERELEASE
+// Race between cp_flush and reset_block_allocator() on a chunk with a bitmap allocator (fixed or varsize).
+// VirtualDev::cp_flush takes a shared_ptr to the chunk's allocator and flushes it while the upper layer may reset the
+// chunk. Neither the bitmap from before the reset nor a crash may come out of that: after a restart without another CP,
+// the chunk must come back empty.
+class BlkDataServiceBitmapResetTest : public testing::TestWithParam< homestore::blk_allocator_type_t > {
+public:
+    blk_data_service& inst() { return homestore::data_service(); }
+
+    virtual void SetUp() override {
+        m_helper.start_homestore("test_data_service_bitmap_reset",
+                                 {{HS_SERVICE::META, {.size_pct = 5.0}},
+                                  {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = GetParam()}}});
+    }
+
+    virtual void TearDown() override {
+        auto* fc = iomgr_flip::client_instance();
+        for (auto const& name : m_flips) {
+            fc->remove_flip(name);
+        }
+        m_helper.shutdown_homestore();
+    }
+
+protected:
+    // Waits for flag, so that a missed step fails the test instead of hanging it
+    static bool wait_for(std::atomic< bool > const& flag) {
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+        while (!flag.load()) {
+            if (std::chrono::steady_clock::now() >= deadline) { return false; }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        return true;
+    }
+
+    // Runs cb in the thread that hits the flip, the first time it is hit for chunk_id. Later hits, from other chunks or
+    // from CPs that run after the one under test, pass through.
+    void inject_chunk_flip(std::string const& name, chunk_num_t chunk_id, std::function< void() > cb) {
+        auto* fc = iomgr_flip::client_instance();
+        flip::FlipFrequency freq;
+        freq.set_count(1000);
+        freq.set_percent(100);
+        auto fired = std::make_shared< std::atomic< bool > >(false);
+        fc->inject_callback_flip< void, uint16_t >(
+            name, std::array< flip::FlipCondition, 1 >{fc->create_condition("", flip::Operator::DONT_CARE, 0)}, freq,
+            std::function< void(uint16_t) >([chunk_id, fired, cb = std::move(cb)](uint16_t cid) {
+                if ((cid == chunk_id) && !fired->exchange(true)) { cb(); }
+            }));
+        m_flips.push_back(name);
+    }
+
+    // Commits blks on one chunk and flushes them to its persisted bitmap. Also allocates one more blk on that chunk
+    // without committing it, for the test to commit when it wants the bitmap dirty.
+    void prepare_chunk(homestore::Chunk*& chunk, multi_blk_id& pending) {
+        auto const blk_size = inst().get_blk_size();
+        auto bids = inst().alloc_blks(blk_size, blk_alloc_hints{});
+        ASSERT_TRUE(bids.has_value());
+        ASSERT_TRUE(inst().commit_blk(bids.value()).has_value());
+        ASSERT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+
+        auto const chunk_id = bids.value().chunk_num();
+        blk_alloc_hints hints;
+        hints.chunk_id_hint = chunk_id;
+        auto more = inst().alloc_blks(blk_size, hints);
+        ASSERT_TRUE(more.has_value());
+        ASSERT_EQ(more.value().chunk_num(), chunk_id);
+        pending = more.value();
+
+        chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
+        ASSERT_NE(chunk, nullptr);
+        ASSERT_LT(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks());
+    }
+
+    // Restarts without another CP and verifies the reset chunk came back empty
+    void crash_and_verify_chunk_empty(chunk_num_t chunk_id) {
+        hs()->crash_simulator().crash();
+        m_helper.wait_for_crash_recovery();
+
+        auto* chunk = hs()->device_mgr()->get_chunk_mutable(chunk_id);
+        ASSERT_NE(chunk, nullptr);
+        EXPECT_EQ(chunk->blk_allocator()->available_blks(), chunk->blk_allocator()->get_total_blks())
+            << "The bitmap from before the reset came back";
+    }
+
+    test_common::HSTestHelper m_helper;
+    std::vector< std::string > m_flips;
+};
+
+// Order: cp_flush gets the chunk's allocator -> reset_block_allocator() completes -> cp_flush flushes that allocator
+TEST_P(BlkDataServiceBitmapResetTest, ResetWhileCpFlushHoldsAllocator) {
+    homestore::Chunk* chunk{nullptr};
+    multi_blk_id pending;
+    ASSERT_NO_FATAL_FAILURE(prepare_chunk(chunk, pending));
+    auto const chunk_id = chunk->chunk_id();
+    ASSERT_TRUE(inst().commit_blk(pending).has_value());
+
+    std::atomic< bool > flush_got_allocator{false};
+    std::atomic< bool > reset_completed{false};
+    inject_chunk_flip("after_get_allocator_shared", chunk_id, [&]() {
+        flush_got_allocator.store(true);
+        EXPECT_TRUE(wait_for(reset_completed)) << "reset_block_allocator should complete before cp_flush continues";
+    });
+    inject_chunk_flip("before_allocator_reset", chunk_id, [&]() {
+        EXPECT_TRUE(wait_for(flush_got_allocator)) << "cp_flush should get the allocator first";
+    });
+
+    std::thread reset_thread([&]() {
+        chunk->reset_block_allocator();
+        reset_completed.store(true);
+    });
+    EXPECT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+    reset_thread.join();
+
+    crash_and_verify_chunk_empty(chunk_id);
+}
+
+// Order: cp_flush holds the bitmap lock and is about to write the bitmap -> reset_block_allocator() starts -> the reset
+// waits for that write to finish before it clears the bitmap
+TEST_P(BlkDataServiceBitmapResetTest, ResetWhileCpFlushWritesBitmap) {
+    homestore::Chunk* chunk{nullptr};
+    multi_blk_id pending;
+    ASSERT_NO_FATAL_FAILURE(prepare_chunk(chunk, pending));
+    auto const chunk_id = chunk->chunk_id();
+
+    std::atomic< bool > flush_inside{false};
+    std::atomic< bool > reset_started{false};
+    std::atomic< bool > reset_completed{false};
+    // Commit as the CP gets to the chunk, so the bitmap is dirty in whichever CP that is
+    inject_chunk_flip("after_get_allocator_shared", chunk_id,
+                      [&]() { EXPECT_TRUE(inst().commit_blk(pending).has_value()); });
+    inject_chunk_flip("inside_bitmap_cp_flush", chunk_id, [&]() {
+        flush_inside.store(true);
+        EXPECT_TRUE(wait_for(reset_started)) << "reset_block_allocator should start while cp_flush writes the bitmap";
+        // The reset needs the bitmap lock this cp_flush holds, so it can't get anywhere until the write is done
+        std::this_thread::sleep_for(std::chrono::milliseconds{200});
+        EXPECT_FALSE(reset_completed.load()) << "reset_block_allocator completed while cp_flush was writing the bitmap";
+    });
+    inject_chunk_flip("before_allocator_reset", chunk_id, [&]() {
+        EXPECT_TRUE(wait_for(flush_inside)) << "cp_flush should be about to write the bitmap first";
+        reset_started.store(true);
+    });
+
+    std::thread reset_thread([&]() {
+        chunk->reset_block_allocator();
+        reset_completed.store(true);
+    });
+    EXPECT_TRUE(sisl::async::sync_get(hs()->cp_mgr().trigger_cp_flush(true /* force */)));
+    reset_thread.join();
+
+    crash_and_verify_chunk_empty(chunk_id);
+}
+
+INSTANTIATE_TEST_SUITE_P(BitmapAllocators, BlkDataServiceBitmapResetTest,
+                         testing::Values(homestore::blk_allocator_type_t::varsize,
+                                         homestore::blk_allocator_type_t::fixed),
+                         [](testing::TestParamInfo< homestore::blk_allocator_type_t > const& info) {
+                             return std::string{(info.param == homestore::blk_allocator_type_t::fixed) ? "Fixed"
+                                                                                                       : "Varsize"};
+                         });
+#endif // _PRERELEASE
+
 // Stream related test
 
 SISL_OPTION_GROUP(test_data_service,
