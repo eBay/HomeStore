@@ -662,10 +662,16 @@ public:
     // we have no shutdown for repl_dev, since shutdown repl_dev is done by repl_service
     void stop() {
         start_stopping();
-        while (true) {
+        for (uint64_t waited_sec{0};; ++waited_sec) {
             auto pending_request_num = get_pending_request_num();
             if (!pending_request_num) break;
 
+            // No deadline: callers free resources (e.g. the raft server in leave_group()) that in-flight requests
+            // still use. Report instead, so a leaked count shows up in the logs rather than as a silent hang.
+            if (waited_sec && (waited_sec % 30 == 0)) {
+                LOGWARNMOD(replication, "repl_dev group_id={} still waiting for {} pending requests after {} sec",
+                           boost::uuids::to_string(group_id()), pending_request_num, waited_sec);
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }

@@ -36,7 +36,9 @@ private:
     CP* m_cp;
     CPManager* m_cp_mgr;
     std::shared_mutex m_cp_mtx;
-    Clock::time_point m_last_state_ch_time;
+    Clock::time_point m_last_progress_time; // start of the current stall, reported if the cp is declared stuck
+    Clock::time_point m_last_repair_time;   // last repair_slow_cp() round, gives the repairs time to take effect
+    uint32_t m_repair_attempts{0};          // repair_slow_cp() rounds in the current stall
     uint64_t m_timer_sec{0};
     iomgr::timer_handle_t m_timer_hdl;
     uint32_t m_progress_pct{0};
