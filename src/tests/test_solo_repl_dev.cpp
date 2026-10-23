@@ -14,6 +14,8 @@
  *
  *********************************************************************************/
 #include <array>
+#include <map>
+#include <mutex>
 #include <vector>
 #include <iostream>
 #include <filesystem>
@@ -100,6 +102,7 @@ public:
             if (ctx == nullptr) {
                 m_test.validate_replay(*device(), lsn, header, key, blkids);
             } else {
+                m_test.on_written(device()->group_id(), lsn);
                 auto req = boost::static_pointer_cast< test_repl_req >(ctx);
                 req->written_blkids = std::move(blkids);
                 m_test.on_write_complete(*device(), req);
@@ -169,6 +172,9 @@ public:
 protected:
     test_common::Runner m_io_runner;
     test_common::Waiter m_task_waiter;
+    std::atomic< uint64_t > m_replayed{0}; // journal entries replayed by the last restart
+    std::mutex m_written_mtx;
+    std::map< group_id_t, int64_t > m_last_written_lsn; // per repl dev
     shared< repl_dev > m_repl_dev1;
     shared< repl_dev > m_repl_dev2;
     uuid_t m_uuid1;
@@ -203,10 +209,36 @@ public:
     void restart() {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
+        m_replayed = 0;
         m_helper.restart_homestore();
 
         m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();
         m_repl_dev2 = hs()->repl_service().get_repl_dev(m_uuid2).value();
+
+        // Journal entries are replayed while homestore starts, except the ones a CP already truncated: with checkpoints
+        // every second, a slow run truncates part of the journal before the restart. Every write after the truncation
+        // point must have been replayed.
+        uint64_t expected_replays{0};
+        for (auto const& rdev : {m_repl_dev1, m_repl_dev2}) {
+            auto const [trunc_lsn, trunc_ld_key, tail_lsn] =
+                std::dynamic_pointer_cast< SoloReplDev >(rdev)->m_data_journal->truncate_info();
+            expected_replays += std::max< int64_t >(last_written_lsn(rdev->group_id()) - trunc_lsn, 0);
+        }
+        EXPECT_EQ(m_replayed.load(), expected_replays) << "journal entries replayed after the restart";
+        // validate the replayed entries, without waiting for ones that won't come if the counts differ
+        m_task_waiter.set_expected(m_replayed.load());
+    }
+
+    void on_written(group_id_t group_id, int64_t lsn) {
+        std::lock_guard lg{m_written_mtx};
+        auto [it, inserted] = m_last_written_lsn.try_emplace(group_id, lsn);
+        if (!inserted) { it->second = std::max(it->second, lsn); }
+    }
+
+    int64_t last_written_lsn(group_id_t group_id) {
+        std::lock_guard lg{m_written_mtx};
+        auto const it = m_last_written_lsn.find(group_id);
+        return (it == m_last_written_lsn.end()) ? -1 : it->second;
     }
 
     void write_io(uint32_t key_size, uint64_t data_size, uint32_t max_size_per_iov) {
@@ -275,6 +307,7 @@ public:
 
     void validate_replay(repl_dev& rdev, int64_t lsn, sisl::blob const& header, sisl::blob const& key,
                          std::vector< multi_blk_id > const& blkids) {
+        ++m_replayed;
         if (blkids.empty()) {
             m_task_waiter.one_complete();
             return;

@@ -1313,8 +1313,11 @@ TYPED_TEST(IndexCrashTest, DestroyTableWithPendingCpCrash) {
     // Step 5: Trigger the CP (do not wait).  async_cp_flush will:
     //   (a) write the txn_journal to disk (entries include the destroyed table's ordinal),
     //   (b) start flushing nodes, hit the buf with m_crash_flag_on → simulated crash.
+    // A CP that started on its own after Step 3 may already have flushed the flagged buf and begun the simulated
+    // crash. A CP triggered now would then fail against the shutting-down homestore and abort the test, so only
+    // trigger one if the crash hasn't started yet; Step 6 waits for the recovery either way.
     LOGINFO("Step 5: Trigger CP (crash expected after journal is written)");
-    test_common::HSTestHelper::trigger_cp(false /* no wait */);
+    if (!hs()->crash_simulator().is_crashed()) { test_common::HSTestHelper::trigger_cp(false /* no wait */); }
 
     // Step 6: Wait for the simulated crash and homestore recovery.
     //   Without fix : repair_index_node / sanity_check asserts → process aborts (SIGABRT).

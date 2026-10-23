@@ -29,6 +29,7 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/uuid/string_generator.hpp>
 
 #include <sisl/logging/logging.h>
@@ -51,7 +52,10 @@ SISL_OPTION_GROUP(test_repl_common_setup,
                    "Internal replica num (used to launch multi process) - don't override",
                    ::cxxopts::value< uint16_t >()->default_value("0"), "number"),
                   (replica_dev_list, "", "replica_dev_list", "Device list for all replicas",
-                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"));
+                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
+                  (wait_timeout_sec, "", "wait_timeout_sec",
+                   "Max seconds a replica waits on the others (barriers, leader, commits, group destroy); 0 = forever",
+                   ::cxxopts::value< uint32_t >()->default_value("600"), "seconds"));
 
 using namespace homestore;
 namespace bip = boost::interprocess;
@@ -61,6 +65,31 @@ namespace test_common {
 ENUM(ipc_packet_op_t, uint32_t, WAKE_UP = 0, CLEAN_EXIT = 1, UNCLEAN_EXIT = 2, PEER_GOING_DOWN = 3);
 ENUM(repl_test_phase_t, uint32_t, REGISTER, MEMBER_START, TEST_RUN, VALIDATE, CLEANUP);
 
+// Bounds the harness's waits on other replicas. If a peer crashes or a group never converges, the waiting replica fails
+// with a description of what it was waiting for, instead of hanging until the CI job is killed. --wait_timeout_sec=0
+// waits forever (e.g. for long manual runs).
+class wait_deadline {
+public:
+    explicit wait_deadline(std::string what) :
+            what_{std::move(what)},
+            timeout_sec_{SISL_OPTIONS["wait_timeout_sec"].as< uint32_t >()},
+            start_{std::chrono::steady_clock::now()} {}
+
+    // Call on every iteration of the wait loop; state describes what this replica sees right now.
+    void check(std::string const& state = {}) const {
+        if ((timeout_sec_ == 0) || (std::chrono::steady_clock::now() - start_ < std::chrono::seconds{timeout_sec_})) {
+            return;
+        }
+        RELEASE_ASSERT(false, "Timed out after {}s waiting for {}{}{}", timeout_sec_, what_, state.empty() ? "" : ": ",
+                       state);
+    }
+
+private:
+    std::string what_;
+    uint32_t timeout_sec_;
+    std::chrono::steady_clock::time_point start_;
+};
+
 class HSReplTestHelper : public HSTestHelper {
 protected:
     struct IPCData {
@@ -69,6 +98,7 @@ protected:
         bip::interprocess_mutex exec_mtx_;
 
         repl_test_phase_t phase_{repl_test_phase_t::REGISTER};
+        uint64_t generation_{0}; // number of completed barriers
         uint32_t registered_count_{0};
         uint32_t test_start_count_{0};
         uint32_t verify_start_count_{0};
@@ -92,15 +122,34 @@ protected:
         void sync_for(uint32_t& count, repl_test_phase_t new_phase, uint32_t max_count = 0) {
             if (max_count == 0) { max_count = SISL_OPTIONS["replicas"].as< uint32_t >(); }
             std::unique_lock< bip::interprocess_mutex > lg(mtx_);
-            ++count;
-            if (count == max_count) {
+            // Wait for this barrier to complete, not for phase_: consecutive barriers can share a phase (e.g. several
+            // register_listener() calls in a row), and a replica must not pass one because the previous barrier already
+            // set that phase. Only the last arriver resets count, so a slow waker can't wipe out an early arrival at
+            // the next barrier.
+            auto const my_generation = generation_;
+            if (++count == max_count) {
+                count = 0;
                 phase_ = new_phase;
+                ++generation_;
                 cv_.notify_all();
             } else {
-                cv_.wait(lg, [this, new_phase]() { return (phase_ == new_phase); });
+                auto const reached = [this, my_generation]() { return (generation_ != my_generation); };
+                auto const timeout_sec = SISL_OPTIONS["wait_timeout_sec"].as< uint32_t >();
+                if (timeout_sec == 0) {
+                    cv_.wait(lg, reached);
+                } else if (!cv_.timed_wait(lg,
+                                           boost::posix_time::microsec_clock::universal_time() +
+                                               boost::posix_time::seconds(timeout_sec),
+                                           reached)) {
+                    auto const arrived = count;
+                    // The mutex lives in shared memory and isn't robust: release it before failing, so the other
+                    // replicas can still time out instead of blocking on it forever.
+                    lg.unlock();
+                    RELEASE_ASSERT(false,
+                                   "Timed out after {}s at the barrier for phase={}: only {} of {} replicas arrived",
+                                   timeout_sec, enum_name(new_phase), arrived, max_count);
+                }
             }
-
-            count = 0;
         }
     };
 
@@ -291,7 +340,8 @@ public:
     void register_listener(std::shared_ptr< repl_dev_listener > listener) {
         if (replica_num_ != 0) { pending_listeners_.emplace_back(std::move(listener)); }
 
-        ipc_data_->sync_for_member_start();
+        // Every launched process registers its listener here, spare replicas included.
+        ipc_data_->sync_for_member_start(num_replicas_);
 
         if (replica_num_ == 0) {
             std::set< homestore::replica_id_t > members;
