@@ -466,7 +466,7 @@ void CPWatchdog::cp_watchdog_timer() {
     // check if any cp to track
     if (m_cp == nullptr) { return; }
     const auto status = m_cp->get_status();
-    if ((status != cp_status_t::cp_flush_prepare) || (status != cp_status_t::cp_flushing)) { return; }
+    if ((status != cp_status_t::cp_flush_prepare) && (status != cp_status_t::cp_flushing)) { return; }
 
     uint32_t cum_pct{0};
     uint32_t count{0};
@@ -476,35 +476,33 @@ void CPWatchdog::cp_watchdog_timer() {
             cum_pct += consumer->cp_progress_percent();
         }
     }
-    if (m_progress_pct > cum_pct / count) {
+    const uint32_t pct = count ? (cum_pct / count) : 100;
+    if (pct > m_progress_pct) {
         // We are making progress in flushing the data.
-        m_progress_pct = cum_pct / count;
+        m_progress_pct = pct;
+        m_last_state_ch_time = Clock::now();
         return;
     }
 
-    if (get_elapsed_time_ms(m_last_state_ch_time) >= m_timer_sec * 1000) {
-        LOGINFO("cp progress percent {} is not changed. time elapsed {}, cp state={} ", m_progress_pct,
-                get_elapsed_time_ms(m_last_state_ch_time), m_cp->to_string());
-    }
-
     // check if enough time passed since last state change
+    const auto elapsed_ms = get_elapsed_time_ms(m_last_state_ch_time);
     uint32_t max_time_multiplier = 12;
-    if (get_elapsed_time_ms(m_last_state_ch_time) < max_time_multiplier * m_timer_sec * 1000) {
-        uint32_t repair_attempted{0};
-        for (auto& consumer : m_cp_mgr->consumer_list()) {
-            if (consumer) {
-                const auto pct = consumer->cp_progress_percent();
-                if (pct != 100) {
-                    consumer->repair_slow_cp();
-                    ++repair_attempted;
-                }
-            }
-            if (repair_attempted) { return; }
-        }
+    if (elapsed_ms < max_time_multiplier * m_timer_sec * 1000) { return; }
 
-        HS_REL_ASSERT(0, "cp seems to be stuck. CP State={} total time elapsed {}", m_cp->to_string(),
-                      get_elapsed_time_ms(m_last_state_ch_time));
+    uint32_t repair_attempted{0};
+    for (auto& consumer : m_cp_mgr->consumer_list()) {
+        if (consumer && (consumer->cp_progress_percent() != 100)) {
+            consumer->repair_slow_cp();
+            ++repair_attempted;
+        }
     }
+    if (repair_attempted) {
+        // give the repairs time to take effect
+        m_last_state_ch_time = Clock::now();
+        return;
+    }
+
+    HS_REL_ASSERT(0, "cp seems to be stuck, no progress for {} ms. CP State={}", elapsed_ms, m_cp->to_string());
 }
 
 cp_id_t CPContext::id() const { return m_cp->id(); }

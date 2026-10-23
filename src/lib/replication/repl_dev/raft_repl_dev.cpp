@@ -1383,6 +1383,17 @@ bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rre
 }
 
 void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs) {
+    // Same gate as on_fetch_data_received, on the sending side: once this dev is no longer ACTIVE, the reaper calls
+    // leave_group(), which frees the raft server that group_msg_service() resolves the originator through. Register
+    // the request before checking, so the reaper's stop() either waits for it or this check sees is_stopping().
+    incr_pending_request_num();
+    if (is_stopping() || (get_stage() != repl_dev_stage_t::ACTIVE)) {
+        RD_LOGD(NO_TRACE_ID, "Data Channel: not fetching data while not active (stopping={} stage={})", is_stopping(),
+                static_cast< int >(get_stage()));
+        decr_pending_request_num();
+        return;
+    }
+
     auto total_size_to_fetch = 0ul;
     std::vector< repl_req_ptr_t > next_batch_rreqs;
     auto const max_batch_size = HS_DYNAMIC_CONFIG(consensus.data_fetch_max_size_kb) * 1024ull;
@@ -1415,6 +1426,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
         next_batch_rreqs.emplace_back(rreq);
     }
     fetch_data_from_remote(std::move(next_batch_rreqs));
+    decr_pending_request_num();
 }
 
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
@@ -1458,6 +1470,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     // Fetch is fire-and-forget: detach() starts the coroutine and returns. Copy originator out of
     // rreqs.front() before rreqs is moved into the coroutine frame -- the reference would otherwise dangle.
     nuraft_mesg::svr_id_t const originator_id = originator;
+    incr_pending_request_num(); // released by fetch_data_coro once the fetch is fully handled
     sisl::async::detach(fetch_data_coro(std::move(builder), originator_id, std::move(rreqs)));
 }
 
@@ -1498,6 +1511,7 @@ sisl::async::task< void > RaftReplDev::fetch_data_coro(shared< flatbuffers::Flat
             }
         }
         COUNTER_INCREMENT(m_metrics, fetch_err_cnt, 1);
+        decr_pending_request_num();
         co_return;
     }
 
@@ -1506,6 +1520,7 @@ sisl::async::task< void > RaftReplDev::fetch_data_coro(shared< flatbuffers::Flat
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
                             [this, r = std::move(response.value()), rreqs = std::move(rreqs)]() {
                                 handle_fetch_data_response(std::move(r), std::move(rreqs));
+                                decr_pending_request_num();
                             });
     co_return;
 }

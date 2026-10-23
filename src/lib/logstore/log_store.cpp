@@ -214,6 +214,16 @@ bool home_log_store::truncate(logstore_seq_num_t upto_lsn, bool in_memory_trunca
                           m_start_lsn.load(std::memory_order_relaxed));
         return false;
     }
+    // Truncates of this store must not interleave: another one can move m_start_lsn and m_records past upto_lsn
+    // between the range check and the record lookup below. Lock order is m_truncate_mtx, then the logdev's flush guard
+    // and store map lock (taken by flush() and m_logdev->truncate()). LogDev::start() calls truncate() while holding
+    // the store map lock, but only up to the already truncated lsn, which returns above without taking m_truncate_mtx.
+    std::lock_guard truncate_lg{m_truncate_mtx};
+    if (upto_lsn < m_start_lsn) {
+        // a concurrent truncate got here first
+        decr_pending_request_num();
+        return false;
+    }
     flush();
 #ifndef NDEBUG
     auto cs = get_contiguous_completed_seq_num(0);

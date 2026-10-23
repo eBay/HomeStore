@@ -302,6 +302,8 @@ private:
     LogStoreServiceMetrics& m_metrics;
 
     logdev_key m_trunc_ld_key{0, 0};
+    // Serializes truncate(); see the lock order note there.
+    std::mutex m_truncate_mtx;
 
 private:
     // graceful shutdown related fields
