@@ -228,17 +228,31 @@ jobs:
         key_prefix: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' && inputs.tooling != 'Coverage'}}
 
+    - name: Install gdb
+      # src/tests/stack_dump_launcher.sh uses it to print the stacks of a hung test, and of a crashed one from the
+      # core.<pid> file it leaves in the test directory
+      run: |
+        command -v gdb || (sudo apt-get update -q && sudo apt-get install -y -q gdb)
+        sudo sysctl -w kernel.core_pattern=core.%p
+      if: ${{ inputs.testing == 'True' }}
+
     - name: Create and Test Package
       run: |
         if [[ "${{ inputs.tooling }}" == "AddressSanitize" ]]; then sanitize="address"
         elif [[ "${{ inputs.tooling }}" == "ThreadSanitize" ]]; then sanitize="thread"
         else sanitize="False"; fi
-        conan create \
+        # ASan makes the templated btree tests much bigger to compile: four parallel compiles have run the runner out of
+        # memory, killing the job mid-build.
+        build_jobs=""
+        if [[ "${sanitize}" == "address" ]]; then build_jobs="-c tools.build:jobs=2"; fi
+        conan create ${build_jobs} \
             -o sisl/*:malloc_impl=${{ inputs.malloc-impl }} \
             -o homestore/*:sanitize=${sanitize} \
             -s:h build_type=${{ inputs.build-type }} \
             ${{ inputs.conan-channel != '' && format('--user oss --channel {0}', inputs.conan-channel) || '' }} \
             .
+      env:
+        CTEST_OUTPUT_ON_FAILURE: 1
       if: ${{ inputs.testing == 'True' && inputs.tooling != 'Coverage' }}
 
     - name: Code Coverage Run
@@ -251,6 +265,8 @@ jobs:
             ${{ inputs.conan-channel != '' && format('--user oss --channel {0}', inputs.conan-channel) || '' }} \
             .
         gcovr --cobertura ./coverage.xml
+      env:
+        CTEST_OUTPUT_ON_FAILURE: 1
       if: ${{ inputs.testing == 'True' && inputs.tooling == 'Coverage' }}
 
     - name: Upload coverage reports to Codecov
@@ -259,3 +275,22 @@ jobs:
         files: ./coverage.xml
         disable_search: true
       if: ${{ inputs.tooling == 'Coverage' }}
+
+    - name: Collect Test Logs
+      # Also after a failed, timed out or cancelled test step: the test logs are the only record of what went wrong.
+      # Pack them first: the log directories are named by time (logs/2026-10-20_19:45), and upload-artifact rejects ':'.
+      run: |
+        shopt -s nullglob
+        dirs=(~/.conan2/p/b/homes*/b/build/*/Testing/Temporary ~/.conan2/p/b/homes*/b/build/*/src/tests/logs
+              build/*/Testing/Temporary build/*/src/tests/logs)
+        if (( ${#dirs[@]} )); then tar -czf test-logs.tgz --ignore-failed-read "${dirs[@]}" || true; fi
+      if: ${{ always() && inputs.testing == 'True' }}
+
+    - name: Upload Test Logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.tooling }}
+        path: test-logs.tgz
+        if-no-files-found: ignore
+        retention-days: 7
+      if: ${{ always() && inputs.testing == 'True' }}

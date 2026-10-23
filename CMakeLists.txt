@@ -32,15 +32,13 @@ if ($ENV{ASAN_OPTIONS} MATCHES "detect_leaks=1")
   set(ASAN_ENABLED_BUILD true)
 endif()
 
-if (DEFINED MEMORY_SANITIZER_ON)
-    if (${MEMORY_SANITIZER_ON})
-        message(STATUS "Build with Memory Sanitizer ON")
-        include (cmake/mem_sanitizer.cmake)
-    else ()
-        message(STATUS "Build with Memory Sanitizer OFF")
-    endif()
+# conanfile.py sets ADDRESS_SANITIZER_ON from the sanitize option; MEMORY_SANITIZER_ON is the older name for it.
+# THREAD_SANITIZER_ON isn't supported yet: with uninstrumented dependencies TSan reports thousands of false races.
+if (ADDRESS_SANITIZER_ON OR MEMORY_SANITIZER_ON)
+    message(STATUS "Build with Address Sanitizer ON")
+    include (cmake/mem_sanitizer.cmake)
 else ()
-    message(STATUS "Build with Memory Sanitizer OFF")
+    message(STATUS "Build with Address Sanitizer OFF")
 endif ()
 
 if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
