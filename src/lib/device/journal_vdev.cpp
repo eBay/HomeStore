@@ -99,7 +99,10 @@ void JournalVirtualDev::init() {
     for (auto& [logdev_id, head] : logdev_head_map) {
         // Create descriptor for each logdev_id
         auto journal_desc = std::make_shared< JournalVirtualDev::Descriptor >(*this, logdev_id);
-        m_journal_descriptors.emplace(logdev_id, journal_desc);
+        {
+            std::lock_guard lock{m_mutex};
+            m_journal_descriptors.emplace(logdev_id, journal_desc);
+        }
         LOGINFOMOD(journalvdev, "Loading descriptor log_dev={}", logdev_id);
         // Traverse the list starting from the head and add those chunks
         // in order to the journal descriptor. next_chunk is stored in private_data.
@@ -178,6 +181,8 @@ uint64_t JournalVirtualDev::get_end_of_chunk(shared< Chunk >& chunk) const {
 }
 
 shared< JournalVirtualDev::Descriptor > JournalVirtualDev::open(logdev_id_t logdev_id) {
+    // Descriptors can be opened from several threads at once (VDevJournalIOTest.LongRunning opens one per thread)
+    std::lock_guard lock{m_mutex};
     auto it = m_journal_descriptors.find(logdev_id);
     if (it == m_journal_descriptors.end()) {
         auto journal_desc = std::make_shared< JournalVirtualDev::Descriptor >(*this, logdev_id);
@@ -194,6 +199,7 @@ shared< JournalVirtualDev::Descriptor > JournalVirtualDev::open(logdev_id_t logd
 }
 
 void JournalVirtualDev::destroy(logdev_id_t logdev_id) {
+    std::lock_guard lock{m_mutex};
     auto it = m_journal_descriptors.find(logdev_id);
     if (it == m_journal_descriptors.end()) {
         LOGERROR("logdev not found log_dev={}", logdev_id);

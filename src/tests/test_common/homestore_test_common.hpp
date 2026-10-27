@@ -142,6 +142,7 @@ struct Waiter {
     std::atomic< uint64_t > expected_comp{0};
     std::atomic< uint64_t > actual_comp{0};
     std::promise< void > comp_promise;
+    std::atomic_bool completed{false};
 
     Waiter(uint64_t num_op) : expected_comp{num_op} {}
     Waiter() : Waiter{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
@@ -155,7 +156,19 @@ struct Waiter {
     }
 
     void one_complete() {
-        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { comp_promise.set_value(); }
+        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { complete(); }
+    }
+
+    // Changes the expected number of completions once it is known (e.g. how many journal entries were left to replay
+    // after truncation); completes the wait if that many have already finished.
+    void set_expected(uint64_t num_op) {
+        expected_comp.store(num_op);
+        if (actual_comp.load() >= num_op) { complete(); }
+    }
+
+private:
+    void complete() {
+        if (!completed.exchange(true)) { comp_promise.set_value(); }
     }
 };
 

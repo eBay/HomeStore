@@ -739,7 +739,7 @@ void RaftReplService::gc_repl_devs() {
         return;
     }
 
-    std::vector< group_id_t > groups_to_leave;
+    std::vector< shared< RaftReplDev > > rdevs_to_leave;
     {
         std::shared_lock lg(m_rd_map_mtx);
         for (auto it = m_rd_map.begin(); it != m_rd_map.end(); ++it) {
@@ -750,7 +750,7 @@ void RaftReplService::gc_repl_devs() {
                 LOGINFOMOD(replication,
                            "repl_dev group_id={} was destroyed, shutting down the raft group in delayed fashion now",
                            rdev->group_id());
-                groups_to_leave.push_back(rdev->group_id());
+                rdevs_to_leave.push_back(rdev);
             }
         }
     }
@@ -758,7 +758,11 @@ void RaftReplService::gc_repl_devs() {
     // Call leave_group to shut down the raft server and destroy all resources on the repl dev.
     // This operation may require acquiring the m_rd_map_mtx lock for some steps (e.g., trigger cp flush).
     // Therefore, we perform it outside the lock scope and then remove group from m_rd_map.
-    for (const auto& group_id : groups_to_leave) {
+    for (auto const& rdev : rdevs_to_leave) {
+        auto const group_id = rdev->group_id();
+        // Wait out in-flight requests on this dev (e.g. data fetches, which resolve peers through the raft server)
+        // before leave_group() frees the raft server.
+        rdev->stop();
         m_msg_mgr->leave_group(group_id);
         // notify consumer to cleanup any resources associated with the listener itself;
         m_repl_app->destroy_repl_dev_listener(group_id);

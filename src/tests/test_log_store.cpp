@@ -620,8 +620,16 @@ protected:
 
     void wait_for_inserts() {
         std::unique_lock< std::mutex > lk{m_pending_mtx};
-        m_pending_cv.wait(lk,
-                          [&] { return (m_nrecords_waiting_to_issue == 0) && (m_nrecords_waiting_to_complete == 0); });
+        // The test logdevs only flush explicitly. Each batch asks for a flush with flush_if_necessary(), which skips
+        // the flush if another one holds the flush lock (e.g. a truncate running in parallel to the writes), and
+        // nothing would flush those records later. So keep flushing until all inserts complete.
+        while (!m_pending_cv.wait_for(lk, std::chrono::milliseconds{100}, [&] {
+            return (m_nrecords_waiting_to_issue == 0) && (m_nrecords_waiting_to_complete == 0);
+        })) {
+            lk.unlock();
+            flush();
+            lk.lock();
+        }
     }
 
     void read_validate(bool expect_all_completed = false) {

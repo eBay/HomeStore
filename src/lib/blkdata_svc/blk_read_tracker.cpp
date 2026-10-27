@@ -52,11 +52,12 @@ void BlkReadTracker::merge(const blk_id& blkid, int64_t new_ref_count,
             // trying to acquire the same write lock in its IO completion path.
             boost::container::small_vector< blk_track_waiter_ptr, 8 > fired_waiters;
             m_pending_reads_map.upsert_or_delete(
-                base_blkid, [new_ref_count, &base_blkid, &fired_waiters](BlkTrackRecord& rec, bool existing) {
+                base_blkid, [this, new_ref_count, &base_blkid, &fired_waiters](BlkTrackRecord& rec, bool existing) {
                     HS_DBG_ASSERT_EQ(existing, true, "Decrement a ref count (blk: {}) which does not exist in map",
                                      base_blkid.to_string());
                     rec.m_ref_cnt += new_ref_count;
                     if (rec.m_ref_cnt == 0) {
+                        std::lock_guard lg{m_waiters_mtx};
                         fired_waiters = std::move(rec.m_waiters);
                         return true;
                     }
@@ -65,7 +66,8 @@ void BlkReadTracker::merge(const blk_id& blkid, int64_t new_ref_count,
             // fired_waiters destructs here, outside the write lock -> m_cb() fires safely
         } else {
             // this is wait_on operation
-            m_pending_reads_map.update(base_blkid, [&waiter_rescheduled, &waiter](BlkTrackRecord& rec) {
+            m_pending_reads_map.update(base_blkid, [this, &waiter_rescheduled, &waiter](BlkTrackRecord& rec) {
+                std::lock_guard lg{m_waiters_mtx};
                 rec.m_waiters.push_back(waiter);
                 waiter_rescheduled = true;
             });

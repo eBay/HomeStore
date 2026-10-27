@@ -530,7 +530,10 @@ public:
             if (!repl_dev) continue;
             int i = 0;
             bool force_leave = false;
+            test_common::wait_deadline const deadline{
+                fmt::format("repl dev of group={} to get destroyed", boost::uuids::to_string(repl_dev->group_id()))};
             do {
+                deadline.check();
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 auto& raft_repl_svc = dynamic_cast< RaftReplService& >(hs()->repl_service());
                 raft_repl_svc.gc_repl_devs();
@@ -559,6 +562,7 @@ public:
 
     void wait_for_commits(uint64_t exp_writes) {
         uint64_t total_writes{0};
+        test_common::wait_deadline const deadline{fmt::format("{} commits", exp_writes)};
         while (true) {
             total_writes = 0;
             for (auto const& db : dbs_) {
@@ -566,6 +570,7 @@ public:
             }
 
             if (total_writes >= exp_writes) { break; }
+            deadline.check(fmt::format("received {}", total_writes));
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             LOGINFO("Replica={} received {} commits but expected {}", g_helper->replica_num(), total_writes,
                     exp_writes);
@@ -583,9 +588,11 @@ public:
 
     void assign_leader(uint16_t replica) {
         LOGINFO("Switch the leader to replica_num = {}", replica);
+        test_common::wait_deadline const deadline{fmt::format("replica={} to become leader", replica)};
         if (g_helper->replica_num() == replica) {
             for (auto const& db : dbs_) {
                 do {
+                    deadline.check("become_leader() keeps failing on this replica");
                     auto result = sisl::async::sync_get(db->device()->become_leader());
                     if (!result) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -600,6 +607,9 @@ public:
                 while (true) {
                     leader_uuid = db->device()->get_leader_id();
                     if (!leader_uuid.is_nil() && (g_helper->member_id(leader_uuid) == replica)) { break; }
+                    deadline.check(fmt::format("group={} leader seen by this replica={}",
+                                               boost::uuids::to_string(db->device()->group_id()),
+                                               boost::uuids::to_string(leader_uuid)));
 
                     LOGINFO("Waiting for replica={} to become leader", replica);
                     std::this_thread::sleep_for(std::chrono::milliseconds{500});
@@ -614,10 +624,13 @@ public:
             return;
         }
 
+        test_common::wait_deadline const deadline{
+            fmt::format("a leader for group={}", boost::uuids::to_string(db->device()->group_id()))};
         do {
             auto leader_uuid = db->device()->get_leader_id();
 
             if (leader_uuid.is_nil()) {
+                deadline.check();
                 LOGINFO("Waiting for leader to be elected for group={}", db->device()->group_id());
                 std::this_thread::sleep_for(std::chrono::milliseconds{500});
             } else if (leader_uuid == g_helper->my_replica_id()) {
@@ -633,11 +646,13 @@ public:
                          uint64_t* data_size = nullptr) {
         if (dbs_[0]->device() == nullptr) return;
 
+        test_common::wait_deadline const deadline{"a leader to write on"};
         do {
             auto repl_dev = dbs_[0]->device();
             auto leader_uuid = repl_dev->get_leader_id();
 
             if (leader_uuid.is_nil()) {
+                deadline.check();
                 LOGINFO("Waiting for leader to be elected");
                 std::this_thread::sleep_for(std::chrono::milliseconds{500});
             } else if (leader_uuid == g_helper->my_replica_id()) {
@@ -670,9 +685,11 @@ public:
         if (wait_for_commit) { this->wait_for_all_commits(); }
     }
     replica_id_t wait_and_get_leader_id() {
+        test_common::wait_deadline const deadline{"a leader to be elected"};
         do {
             auto leader_uuid = dbs_[0]->device()->get_leader_id();
             if (leader_uuid.is_nil()) {
+                deadline.check();
                 LOGINFO("Waiting for leader to be elected");
                 std::this_thread::sleep_for(std::chrono::milliseconds{500});
             } else {
@@ -748,9 +765,11 @@ public:
     }
 
     void wait_for_listener_destroy(uint64_t exp_listeners) {
+        test_common::wait_deadline const deadline{fmt::format("{} listeners to remain", exp_listeners)};
         while (true) {
             auto total_listeners = g_helper->num_listeners();
             if (total_listeners == exp_listeners) { break; }
+            deadline.check(fmt::format("{} listeners", total_listeners));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
@@ -819,7 +838,10 @@ public:
     void remove_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_id) {
         this->run_on_leader(db, [this, db, member_id]() {
             LOGINFO("remove member, member={}", boost::uuids::to_string(member_id));
+            test_common::wait_deadline const deadline{
+                fmt::format("remove_member of member={}", boost::uuids::to_string(member_id))};
             while (true) {
+                deadline.check();
                 auto result =
                     sisl::async::sync_get(hs()->repl_service().remove_member(db->device()->group_id(), member_id, 0));
                 if (result.has_value() || result.error() == ReplServiceError::OK) {
@@ -894,7 +916,9 @@ public:
         LOGINFO("check replace member rollback result, task_id={}, out={} in={}", task_id,
                 boost::uuids::to_string(member_out), boost::uuids::to_string(member_in));
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(db->device());
+        test_common::wait_deadline const deadline{fmt::format("replace member task={} to roll back", task_id)};
         while (true) {
+            deadline.check();
             auto ret = rdev->get_ongoing_replace_member_task();
             if (ret.has_value()) {
                 LOGDEBUG("replace member task still exists");

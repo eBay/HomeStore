@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 
+# Run every test through stack_dump_launcher.sh (CMake >= 3.29 applies CMAKE_TEST_LAUNCHER to the test executables
+# created below): a test that hangs prints the stacks of all its threads before the ctest timeout kills it.
+set(CMAKE_TEST_LAUNCHER ${CMAKE_CURRENT_SOURCE_DIR}/stack_dump_launcher.sh)
+
 include_directories (BEFORE ../include/)
 include_directories (BEFORE ../lib/)
 include_directories (BEFORE ../tests/)
@@ -173,4 +177,11 @@ if (${non_coverage_build})
     target_sources(index_btree_benchmark PRIVATE index_btree_benchmark.cpp)
     target_link_libraries(index_btree_benchmark homestore ${COMMON_TEST_DEPS} benchmark::benchmark)
 endif()
+
+# ctest has no default timeout: give every test one, so a hung test fails and prints its output instead of running until
+# the CI job is killed.
+get_property(all_tests DIRECTORY PROPERTY TESTS)
+if (all_tests)
+    set_tests_properties(${all_tests} PROPERTIES TIMEOUT 1800)
+endif ()
 

@@ -14,6 +14,7 @@
  *********************************************************************************/
 #pragma once
 #include <functional>
+#include <mutex>
 
 #include <boost/container/small_vector.hpp>
 #include <sisl/cache/simple_hashmap.hpp>
@@ -115,6 +116,9 @@ class BlkReadTracker {
 
 private:
     sisl::SimpleHashMap< blk_id, BlkTrackRecord > m_pending_reads_map;
+    // wait_on() appends to BlkTrackRecord::m_waiters through SimpleHashMap::update(), which only holds the bucket's
+    // shared lock, so concurrent wait_on()s on the same record need this to modify m_waiters.
+    std::mutex m_waiters_mtx;
     BlkReadTrackerMetrics m_metrics;
     uint32_t m_entries_per_record{s_entries_per_record};
 
