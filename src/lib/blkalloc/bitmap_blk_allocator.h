@@ -126,6 +126,8 @@ private:
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::atomic< bool > m_is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
+    std::mutex m_sb_mtx;                          // Serializes cp flush and reset on the bitmap meta blk
+    bool m_retired{false}; // Set by reset(): the chunk has a new allocator, and this one is no longer flushed
     meta_blk* m_meta_blk_cookie{nullptr};
     std::atomic< int64_t > m_alloced_blk_count{0};
 };
