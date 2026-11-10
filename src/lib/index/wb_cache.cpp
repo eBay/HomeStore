@@ -567,11 +567,18 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
     m_in_recovery = true; // For entirity of this call, we should mark it as being recovered.
 
+    using clock = std::chrono::steady_clock;
+    auto const elapsed_ms = [](clock::time_point since) {
+        return std::chrono::duration_cast< std::chrono::milliseconds >(clock::now() - since).count();
+    };
+    auto phase_start = clock::now();
+
     // Recover the CP Context with the buf_map of all the buffers that were dirtied in the last cp with its
     // relationship (up/down buf links) as it was by the cp that was flushing the buffers prior to unclean shutdown.
     auto cpg = cp_mgr().cp_guard();
     auto icp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
     std::map< blk_id, IndexBufferPtr > bufs = icp_ctx->recover(std::move(sb));
+    auto const journal_ms = elapsed_ms(phase_start);
 
     LOGINFOMOD(wbcache, "Detected unclean shutdown, prior cp={} had to flush {} nodes, recovering... ", icp_ctx->id(),
                bufs.size());
@@ -643,6 +650,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     };
 
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
+    phase_start = clock::now();
     for (auto const& [_, buf] : bufs) {
         // Meta buffers are journal placeholders rather than vdev blocks.
         if (!buf->is_meta_buf()) { load_buf(buf); }
@@ -788,6 +796,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     }
 
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing Ends\n\n\n");
+    auto const pass1_ms = elapsed_ms(phase_start);
 #ifdef _PRERELEASE
     LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
                pending_bufs.size(), bufs.size(), icp_ctx->id());
@@ -798,6 +807,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     LOGTRACEMOD(wbcache, "After recovery: {}", to_string_dag_bufs(modified_dags, icp_ctx->id()));
 
 #endif
+    phase_start = clock::now();
     [[maybe_unused]] uint32_t cnt = 0;
     LOGTRACEMOD(wbcache, "Potential parent recovered bufs (#of bufs = {})", potential_parent_recovered_bufs.size());
     for (auto const& buf : potential_parent_recovered_bufs) {
@@ -844,6 +854,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(icp_ctx));
     }
 
+    auto const repair_ms = elapsed_ms(phase_start);
+    phase_start = clock::now();
     if (pending_bufs.empty()) {
         LOGTRACEMOD(wbcache, "No buffers to repair, recovery completed");
     } else {
@@ -871,6 +883,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             }
         }
     }
+    LOGINFO("Index wbcache recovery timing: bufs={} pending={} journal_ms={} pass1_ms={} repair_ms={} sanity_ms={}",
+            bufs.size(), pending_bufs.size(), journal_ms, pass1_ms, repair_ms, elapsed_ms(phase_start));
     m_in_recovery = false;
     m_vdev->recovery_completed();
 }
