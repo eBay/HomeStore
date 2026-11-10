@@ -20,6 +20,7 @@
 #include "index/wb_cache.hpp"
 #include "index/index_cp.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/homestore_config.hpp"
 #include <sisl/async/coro.hpp>
 #include "common/homestore_assert.hpp"
 #include "device/virtual_dev.hpp"
@@ -125,24 +126,32 @@ void IndexService::start() {
     m_wb_cache->recover(m_wbcache_sb.second);
     auto const recover_ms = elapsed_ms(recover_start);
 
-    // Notify each table that we have completed recovery
+    // Notify each table that we have completed recovery, and audit it in prerelease builds. Completing a table is cheap
+    // (at most it creates the root node of a table that crashed right after creation), so it runs on this thread. The
+    // prerelease audit walks every node of every table, so it runs one table per thread.
     auto const completed_start = clock::now();
-    std::unique_lock lg(m_index_map_mtx);
-    for (const auto& [_, tbl] : m_index_map) {
-        tbl->recovery_completed();
+    std::vector< std::shared_ptr< IndexTableBase > > tables;
+    {
+        std::unique_lock lg(m_index_map_mtx);
+        for (const auto& [_, tbl] : m_index_map) {
+            tables.push_back(tbl);
+        }
     }
-    auto const completed_ms = elapsed_ms(completed_start);
-
-    auto const audit_start = clock::now();
 #ifdef _PRERELEASE
-    for (const auto& [_, tbl] : m_index_map) {
-        tbl->audit_tree();
-    }
+    auto const completion_threads = uint32_cast(
+        std::max< size_t >(std::min< size_t >(tables.size(), HS_DYNAMIC_CONFIG(generic.index_recovery_threads)), 1));
+#else
+    uint32_t const completion_threads = 1;
 #endif
-    auto const audit_ms = elapsed_ms(audit_start);
-    LOGINFO("Index recovery timing: tables={} load_sb_ms={} wbcache_recover_ms={} recovery_completed_ms={} "
-            "audit_ms={} total_ms={}",
-            m_index_map.size(), load_ms, recover_ms, completed_ms, audit_ms, elapsed_ms(start_time));
+    hs_utils::parallel_for(tables.size(), completion_threads, [&tables](size_t i) {
+        tables[i]->recovery_completed();
+#ifdef _PRERELEASE
+        tables[i]->audit_tree();
+#endif
+    });
+    LOGINFO("Index recovery timing: tables={} load_sb_ms={} wbcache_recover_ms={} recovery_completed_audit_ms={} "
+            "total_ms={}",
+            tables.size(), load_ms, recover_ms, elapsed_ms(completed_start), elapsed_ms(start_time));
 #ifdef _PRERELEASE
     // Tests can keep the recovered journal current, then perform a second crash sequentially to verify replay
     // idempotence without racing nested HomeStore restarts.

@@ -67,6 +67,9 @@ SISL_OPTION_GROUP(test_index_recovery_bench,
                    ::cxxopts::value< uint32_t >()->default_value("50"), "number"),
                   (verify, "", "verify", "verify all preloaded keys after recovery",
                    ::cxxopts::value< bool >()->default_value("true"), "true or false"),
+                  (recovery_threads, "", "recovery_threads",
+                   "cap of index recovery threads (generic.index_recovery_threads); 0 keeps the configured value",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "number"),
                   (seed, "", "seed", "random seed", ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 using BtreeType = FixedLenBtree::BtreeType;
@@ -97,7 +100,9 @@ struct IndexRecoveryBench : public test_common::HSTestHelper, public ::testing::
     };
 
     void SetUp() override {
-        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        auto const recovery_threads = SISL_OPTIONS["recovery_threads"].as< uint32_t >();
+        HS_SETTINGS_FACTORY().modifiable_settings([recovery_threads](auto& s) {
+            if (recovery_threads > 0) { s.generic.index_recovery_threads = recovery_threads; }
             s.generic.cache_max_throttle_cnt = 10000;
             s.generic.cp_timer_us = 0x8000000000000000; // Only explicit CPs
             s.resource_limits.dirty_buf_percent = 100;
