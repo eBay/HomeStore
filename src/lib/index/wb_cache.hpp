@@ -14,7 +14,10 @@
  *
  *********************************************************************************/
 #pragma once
+#include <map>
 #include <memory>
+#include <set>
+#include <vector>
 
 #include <iomgr/iomgr.hpp>
 #include <homestore/index/wb_cache_base.hpp>
@@ -41,7 +44,26 @@ private:
     std::mutex m_flush_mtx;
     meta_blk* m_meta_blk;
     bool m_in_recovery{false};
+    cp_id_t m_recovery_cp_id{-1}; // Id of the crashed CP that is being recovered
     std::unordered_set< uint32_t > m_updated_ordinals;
+
+    // Recovery state of one index table
+    struct OrdinalRecovery {
+        struct LevelOrder {
+            bool operator()(IndexBufferPtr const& a, IndexBufferPtr const& b) const {
+                return a->m_node_level < b->m_node_level;
+            }
+        };
+
+        uint32_t ordinal{0};
+        std::map< blk_id, IndexBufferPtr > bufs; // Buffers of this table in the crashed CP's journal
+        std::vector< IndexBufferPtr > pending_bufs;
+        std::vector< IndexBufferPtr > deleted_bufs;
+        std::vector< IndexBufferPtr > pruned_bufs_to_repair;
+        std::multiset< IndexBufferPtr, LevelOrder > potential_parent_recovered_bufs;
+        std::set< IndexBufferPtr > bufs_to_skip_sanity_check;
+        IndexBufferPtr new_root_candidate;
+    };
 
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
@@ -87,6 +109,10 @@ private:
     void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtr const& prev_flushed_buf,
                                 IndexBufferPtrList& bufs);
 
+    // First recovery pass of one table: commits/frees the blkids of the new/freed nodes in the crashed CP
+    void recover_pass1(IndexCPContext* icp_ctx, OrdinalRecovery& rec);
+    // Second recovery pass of one table: repairs the nodes and optionally sanity checks them
+    void recover_pass2(IndexCPContext* icp_ctx, OrdinalRecovery& rec, bool do_sanity_check);
     void recover_buf(IndexBufferPtr const& buf);
     void parent_recover(IndexBufferPtr const& buf);
     std::string to_string_dag_bufs(DagMap& dags, cp_id_t cp_id = 0);

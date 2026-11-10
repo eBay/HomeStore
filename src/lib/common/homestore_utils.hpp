@@ -52,6 +52,13 @@ public:
      */
     static bool topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
                                  std::vector< std::string >& ordered_entries);
+
+    /**
+     * @brief Runs fn(i) for every i in [0, count) on up to max_threads plain threads, including the calling thread,
+     * so fn may block on synchronous IO. The first exception thrown by fn is rethrown once every thread has finished;
+     * items not yet started at that point are skipped.
+     */
+    static void parallel_for(size_t count, uint32_t max_threads, std::function< void(size_t) > const& fn);
 };
 
 static bool wait_and_check(const std::function< bool() >& check_func, uint32_t timeout_ms, uint32_t interval_ms = 100);

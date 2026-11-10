@@ -129,6 +129,10 @@ table Generic {
     // writeback cache flush threads
     cache_flush_threads : int32 = 1;
 
+    // upper limit of threads that recover index tables in parallel after an unclean shutdown (1 = one table at a
+    // time). Recovery uses no more threads than tables with work to recover.
+    index_recovery_threads : uint32 = 16;
+
     cp_watchdog_timer_sec : uint32 = 10; // it checks if cp stuck every 10 seconds
 
     cache_max_throttle_cnt : uint32 = 4; // writeback cache max q depth
