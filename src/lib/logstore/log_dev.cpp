@@ -187,10 +187,29 @@ void LogDev::start_timer() {
             m_flush_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000, true /* recurring */, nullptr /* cookie */,
                 [this](void*, uint64_t exp_count) {
-                    if (exp_count > 1) { LOGINFO("log flush timer expired {} times, running once", exp_count); }
+                    if (exp_count > 1) { note_late_flush_timer(exp_count); }
                     flush_if_necessary();
                 });
         });
+}
+
+// The flush timer runs every flush_timer_frequency_us on the flush reactor, which also performs the (blocking)
+// journal writes and their completions; under load it services the timer late all the time. Logging each
+// occurrence flooded the log, so aggregate and report at most once a minute. Only called on the flush reactor.
+void LogDev::note_late_flush_timer(uint64_t exp_count) {
+    ++m_flush_timer_late_count;
+    m_flush_timer_missed_ticks += exp_count - 1;
+    m_flush_timer_max_exp_count = std::max(m_flush_timer_max_exp_count, exp_count);
+    auto const now = Clock::now();
+    if (now - m_flush_timer_last_report < std::chrono::minutes(1)) { return; }
+    THIS_LOGDEV_LOG(INFO, "log flush timer ran late {} times in the last {}s ({} ticks coalesced, up to {} at once)",
+                    m_flush_timer_late_count,
+                    std::chrono::duration_cast< std::chrono::seconds >(now - m_flush_timer_last_report).count(),
+                    m_flush_timer_missed_ticks, m_flush_timer_max_exp_count);
+    m_flush_timer_late_count = 0;
+    m_flush_timer_missed_ticks = 0;
+    m_flush_timer_max_exp_count = 0;
+    m_flush_timer_last_report = now;
 }
 
 sisl::async::task< int > LogDev::stop_timer() {

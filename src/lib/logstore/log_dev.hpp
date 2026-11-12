@@ -729,6 +729,7 @@ public:
 private:
     void start_timer();
     sisl::async::task< int > stop_timer();
+    void note_late_flush_timer(uint64_t exp_count);
 
     bool is_ready() const { return m_is_ready.load(); }
 
@@ -809,6 +810,11 @@ private:
     uint32_t m_log_group_idx{0};
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl{iomgr::timer_handle_t{}};
+    // Aggregated "flush timer serviced late" stats, reported at most once a minute (flush reactor only).
+    uint64_t m_flush_timer_late_count{0};
+    uint64_t m_flush_timer_missed_ticks{0};
+    uint64_t m_flush_timer_max_exp_count{0};
+    Clock::time_point m_flush_timer_last_report{Clock::now()};
 
     // if we support inline flush mode, we might schedule flush operation in the same thread(for exampel, in the
     // callback of the append_async we schedule another flush.), so we need the lock to be locked for multitimes in the
