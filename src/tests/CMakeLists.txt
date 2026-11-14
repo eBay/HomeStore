@@ -66,6 +66,11 @@ if (${build_nonio_tests})
     target_link_libraries(test_blkid ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME TestBlkid COMMAND test_blkid)
 
+    add_executable(test_solo_repl_lsn_bug)
+    target_sources(test_solo_repl_lsn_bug PRIVATE test_solo_repl_lsn_bug.cpp)
+    target_link_libraries(test_solo_repl_lsn_bug ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME SoloReplLsnBug COMMAND test_solo_repl_lsn_bug)
+
 endif()
 
 can_build_io_tests(io_tests)

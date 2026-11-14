@@ -172,14 +172,18 @@ void SoloReplDev::async_write_journal(const std::vector< MultiBlkId >& blkids, s
 }
 
 void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
-    auto cur_lsn = m_commit_upto.load();
+    // Use the checkpointed superblock value as a fixed skip threshold. m_commit_upto
+    // advances as entries are replayed in physical log order, which may differ from LSN
+    // order because the two counters (log-store LSN and log-device position) are assigned
+    // by independent fetch_adds with no lock between them. A lower LSN that lands later
+    // in physical order would be incorrectly skipped if we compared against m_commit_upto.
+    const auto durable_lsn = m_rd_sb->durable_commit_lsn;
 
     bool force_replay = false;
     if (SISL_OPTIONS.count("solo_force_replay")) { force_replay = SISL_OPTIONS["solo_force_replay"].as< bool >(); }
 
-    if (cur_lsn >= lsn and !force_replay) {
-        // Already committed
-        LOGINFO("SoloReplDev skipping already committed log_entry lsn={}, m_commit_upto at lsn={}", lsn, cur_lsn);
+    if (durable_lsn >= lsn and !force_replay) {
+        LOGINFO("SoloReplDev skipping already checkpointed log_entry lsn={}, durable_commit_lsn={}", lsn, durable_lsn);
         return;
     }
 
@@ -211,8 +215,8 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     }
 
     m_listener->on_pre_commit(lsn, header, key, nullptr /* context */);
+    auto cur_lsn = m_commit_upto.load();
     if (cur_lsn < lsn) {
-        // we will only be here when we experienced a crash recocovery;
         m_commit_upto.compare_exchange_strong(cur_lsn, lsn);
     }
 
