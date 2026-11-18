@@ -90,6 +90,10 @@ if (${io_tests})
     add_test(NAME IndexCrashRecovery COMMAND test_index_crash_recovery)
     set_property(TEST IndexCrashRecovery PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
 
+    # Benchmark only: not registered with ctest
+    add_executable(test_index_recovery_bench test_index_recovery_bench.cpp)
+    target_link_libraries(test_index_recovery_bench homestore ${COMMON_TEST_DEPS} GTest::gtest)
+
     set(TEST_RECOVERY_INDEX_SOURCE_FILES test_index_chunk_selector.cpp)
     add_executable(test_index_chunk_selector ${TEST_RECOVERY_INDEX_SOURCE_FILES})
     target_link_libraries(test_index_chunk_selector homestore ${COMMON_TEST_DEPS} GTest::gtest)

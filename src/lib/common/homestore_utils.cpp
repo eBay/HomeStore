@@ -13,7 +13,12 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <algorithm>
+#include <atomic>
+#include <exception>
+#include <mutex>
 #include <queue>
+#include <thread>
 
 #include <boost/uuid/random_generator.hpp>
 #include "homestore_utils.hpp"
@@ -117,6 +122,44 @@ bool hs_utils::topological_sort(std::unordered_map< std::string, std::vector< st
 
     // Check for cycle
     return ordered_entries.size() != DAG.size();
+}
+
+void hs_utils::parallel_for(size_t count, uint32_t max_threads, std::function< void(size_t) > const& fn) {
+    auto const nthreads = std::min< size_t >(std::max< uint32_t >(max_threads, 1), count);
+    std::atomic< size_t > next{0};
+    std::exception_ptr error;
+    std::mutex error_mtx;
+    auto const worker = [&]() {
+        for (size_t i; (i = next.fetch_add(1)) < count;) {
+            try {
+                fn(i);
+            } catch (...) {
+                std::lock_guard lg{error_mtx};
+                if (!error) { error = std::current_exception(); }
+                next.store(count);
+            }
+        }
+    };
+
+    std::vector< std::thread > threads;
+    auto const join_all = [&threads]() {
+        for (auto& t : threads) {
+            t.join();
+        }
+    };
+    try {
+        for (size_t t{1}; t < nthreads; ++t) {
+            threads.emplace_back(worker);
+        }
+    } catch (...) {
+        // Stop the started workers and join them; destroying joinable threads would terminate the process.
+        next.store(count);
+        join_all();
+        throw;
+    }
+    worker();
+    join_all();
+    if (error) { std::rethrow_exception(error); }
 }
 
 size_t hs_utils::m_btree_mempool_size;

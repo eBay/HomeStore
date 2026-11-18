@@ -323,8 +323,10 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
     }
 #ifdef _PRERELEASE
     // log new nodes and freed nodes and parent and child
+    static std::mutex txn_log_mtx;
     static uint32_t txn_id = 0;
     static int last_cp_id = -2;
+    std::lock_guard txn_log_lg{txn_log_mtx};
     std::string txn = "";
     if (last_cp_id != icp_ctx->id()) {
         last_cp_id = icp_ctx->id();
@@ -567,11 +569,19 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
     m_in_recovery = true; // For entirity of this call, we should mark it as being recovered.
 
+    using clock = std::chrono::steady_clock;
+    auto const elapsed_ms = [](clock::time_point since) {
+        return std::chrono::duration_cast< std::chrono::milliseconds >(clock::now() - since).count();
+    };
+    auto phase_start = clock::now();
+
     // Recover the CP Context with the buf_map of all the buffers that were dirtied in the last cp with its
     // relationship (up/down buf links) as it was by the cp that was flushing the buffers prior to unclean shutdown.
     auto cpg = cp_mgr().cp_guard();
     auto icp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+    m_recovery_cp_id = icp_ctx->id();
     std::map< blk_id, IndexBufferPtr > bufs = icp_ctx->recover(std::move(sb));
+    auto const journal_ms = elapsed_ms(phase_start);
 
     LOGINFOMOD(wbcache, "Detected unclean shutdown, prior cp={} had to flush {} nodes, recovering... ", icp_ctx->id(),
                bufs.size());
@@ -610,15 +620,82 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     // the same blkid which could clash with the blkid next in the buf list.
     //
     // On the second pass, we only take part of the parents/siblings and then repair them, if needed.
-    std::vector< IndexBufferPtr > pending_bufs;
-    std::vector< IndexBufferPtr > deleted_bufs;
-    std::multiset< IndexBufferPtr, bool (*)(const IndexBufferPtr&, const IndexBufferPtr&) >
-        potential_parent_recovered_bufs(
-            [](const IndexBufferPtr& a, const IndexBufferPtr& b) { return a->m_node_level < b->m_node_level; });
+    //
+    // The DAG never links buffers of different index tables (IndexCPContext::recover asserts it), so each pass runs
+    // per table in parallel. All tables finish the first pass before any table starts the second one, because a
+    // repair in one table must not allocate a blkid that the first pass of another table has yet to commit.
+    std::map< uint32_t, OrdinalRecovery > ordinal_recoveries;
+    for (auto const& [blkid, buf] : bufs) {
+        auto& rec = ordinal_recoveries[buf->m_index_ordinal];
+        rec.ordinal = buf->m_index_ordinal;
+        rec.bufs.emplace(blkid, buf);
+    }
+    // Largest tables first, so that they don't end up as the tail of the parallel run
+    std::vector< OrdinalRecovery* > recs;
+    for (auto& [_, rec] : ordinal_recoveries) {
+        recs.push_back(&rec);
+    }
+    std::stable_sort(recs.begin(), recs.end(), [](OrdinalRecovery const* a, OrdinalRecovery const* b) {
+        return a->bufs.size() > b->bufs.size();
+    });
 
-    std::vector< IndexBufferPtr > pruned_bufs_to_repair;
-    std::set< IndexBufferPtr > bufs_to_skip_sanity_check;
-    std::map< uint32_t, IndexBufferPtr > new_root_candidates;
+    // Every table in recs has buffers in the journal, so all of them have work to do
+    auto const cap = uint32_cast(HS_DYNAMIC_CONFIG(generic.index_recovery_threads));
+    auto const nthreads = uint32_cast(std::max< size_t >(std::min< size_t >(recs.size(), cap), 1));
+    LOGINFO("Index recovery uses {} threads: tables_with_work={} cap={} (generic.index_recovery_threads)", nthreads,
+            recs.size(), cap);
+    auto const for_each_table = [&](std::function< void(OrdinalRecovery&) > const& fn) {
+        hs_utils::parallel_for(recs.size(), nthreads, [&](size_t i) {
+            // Workers act within the CP that is being recovered
+            CPGuard worker_cpg{cpg};
+            worker_cpg.get();
+            fn(*recs[i]);
+        });
+    };
+
+    LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
+    phase_start = clock::now();
+    for_each_table([this, icp_ctx](OrdinalRecovery& rec) { recover_pass1(icp_ctx, rec); });
+    LOGTRACEMOD(wbcache, "\n\n\nRecovery processing Ends\n\n\n");
+    auto const pass1_ms = elapsed_ms(phase_start);
+
+    size_t num_pending{0};
+    for (auto const* rec : recs) {
+        num_pending += rec->pending_bufs.size();
+    }
+#ifdef _PRERELEASE
+    LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
+               num_pending, bufs.size(), icp_ctx->id());
+    std::vector< IndexBufferPtr > all_pending_bufs;
+    std::vector< IndexBufferPtr > all_pruned_bufs;
+    for (auto const* rec : recs) {
+        all_pending_bufs.insert(all_pending_bufs.end(), rec->pending_bufs.begin(), rec->pending_bufs.end());
+        all_pruned_bufs.insert(all_pruned_bufs.end(), rec->pruned_bufs_to_repair.begin(),
+                               rec->pruned_bufs_to_repair.end());
+    }
+    // add deleted bufs to logs here as well
+    auto modified_dags = generate_dag_buffers(bufs);
+    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log({}, all_pending_bufs));
+    LOGTRACEMOD(wbcache, "All pruned bufs for recovery\n{}", detailed_log({}, all_pruned_bufs));
+    LOGTRACEMOD(wbcache, "After recovery: {}", to_string_dag_bufs(modified_dags, icp_ctx->id()));
+#endif
+
+    // As before, sanity checks run for every table as soon as any table had buffers to repair
+    phase_start = clock::now();
+    bool const do_sanity_check = (num_pending > 0);
+    for_each_table(
+        [this, icp_ctx, do_sanity_check](OrdinalRecovery& rec) { recover_pass2(icp_ctx, rec, do_sanity_check); });
+    if (!do_sanity_check) { LOGTRACEMOD(wbcache, "No buffers to repair, recovery completed"); }
+
+    LOGINFO("Index wbcache recovery timing: tables={} threads={} bufs={} pending={} journal_ms={} pass1_ms={} "
+            "pass2_ms={}",
+            recs.size(), nthreads, bufs.size(), num_pending, journal_ms, pass1_ms, elapsed_ms(phase_start));
+    m_in_recovery = false;
+    m_vdev->recovery_completed();
+}
+
+void IndexWBCache::recover_pass1(IndexCPContext* icp_ctx, OrdinalRecovery& rec) {
+    auto const& bufs = rec.bufs;
 
     auto persisted_root_was_committed = [&](uint32_t ordinal) {
         auto const table = index_service().get_index_table(ordinal);
@@ -638,11 +715,10 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
                     buf->m_up_buffer->to_string());
         buf->m_up_buffer->remove_down_buffer(buf);
-        prune_up_buffers(buf, pruned_bufs_to_repair);
+        prune_up_buffers(buf, rec.pruned_bufs_to_repair);
         buf->m_up_buffer = nullptr;
     };
 
-    LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
     for (auto const& [_, buf] : bufs) {
         // Meta buffers are journal placeholders rather than vdev blocks.
         if (!buf->is_meta_buf()) { load_buf(buf); }
@@ -667,7 +743,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             && buf->m_created_cp_id < icp_ctx->id() // C0 predates the crashed CP, confirming root-collapse (not split)
             && was_node_committed(buf)) // C0 is durable; because R precedes C0 in the DAG, R is also on disk
         {
-            new_root_candidates[buf->m_index_ordinal] = buf;
+            rec.new_root_candidate = buf;
             continue; // C0 is neither freed nor new-CP; no further processing applies
         }
 
@@ -680,7 +756,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 // live repair node that reused the same blkid.
                 LOGINFO("Ignoring same-CP created+freed buf {} for allocator free", buf->to_string());
                 if (was_node_committed(buf)) {
-                    pending_bufs.push_back(buf->m_up_buffer);
+                    rec.pending_bufs.push_back(buf->m_up_buffer);
                 } else {
                     prune_from_up_buffer(buf);
                 }
@@ -691,8 +767,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 // parent link, schedule the blkid for release, and queue the parent for repair.
                 r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = true;
                 write_buf(nullptr, buf, icp_ctx);
-                deleted_bufs.push_back(buf);
-                pending_bufs.push_back(buf->m_up_buffer);
+                rec.deleted_bufs.push_back(buf);
+                rec.pending_bufs.push_back(buf->m_up_buffer);
                 LOGINFOMOD(wbcache, "Freeing deleted buf {} and adding up buffer to pending {}", buf->to_string(),
                            buf->m_up_buffer->to_string());
             } else {
@@ -704,7 +780,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 buf->m_node_freed = false;
                 r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted = false;
                 commit_recovered_blk(buf);
-                if (buf->m_node_level) { potential_parent_recovered_bufs.insert(buf); }
+                if (buf->m_node_level) { rec.potential_parent_recovered_bufs.insert(buf); }
                 prune_from_up_buffer(buf);
             }
         } else if (buf->m_created_cp_id == icp_ctx->id()) {
@@ -713,7 +789,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             if (!buf_was_committed) {
                 // This node was never written in the crashed CP; discard it.
                 prune_from_up_buffer(buf);
-                bufs_to_skip_sanity_check.insert(buf);
+                rec.bufs_to_skip_sanity_check.insert(buf);
             } else if (buf->m_up_buffer && buf->m_up_buffer->is_meta_buf()) {
                 // Root-split recovery: buf is a new root node (new_root_buf) created in the
                 // crashed CP, sitting directly under the SB in the flush DAG:
@@ -751,14 +827,14 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 if (persisted_root_was_committed(buf->m_index_ordinal)) {
                     commit_recovered_blk(buf);
                     if (is_final_root) {
-                        new_root_candidates[buf->m_index_ordinal] = buf;
+                        rec.new_root_candidate = buf;
                         LOGINFOMOD(wbcache, "Recovery found final committed root candidate {}", buf->to_string());
                     }
                 } else {
                     LOGTRACEMOD(wbcache, "Discard new-root candidate {} because persisted old root was not written",
                                 buf->to_string());
                     prune_from_up_buffer(buf);
-                    bufs_to_skip_sanity_check.insert(buf);
+                    rec.bufs_to_skip_sanity_check.insert(buf);
                 }
             } else {
                 // Non-root-split new node: every new-CP node must have an up_buffer in the DAG.
@@ -768,51 +844,42 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                     LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
                                 buf->m_up_buffer->to_string());
                     commit_recovered_blk(buf);
-                    pending_bufs.push_back(buf->m_up_buffer);
+                    rec.pending_bufs.push_back(buf->m_up_buffer);
                 } else {
                     // Parent is not yet on disk; discard this node and let the parent be repaired.
                     LOGTRACEMOD(wbcache, "The up buffer {} is not committed for the new buffer {}",
                                 buf->m_up_buffer->to_string(), buf->to_string());
                     prune_from_up_buffer(buf);
-                    bufs_to_skip_sanity_check.insert(buf);
+                    rec.bufs_to_skip_sanity_check.insert(buf);
                 }
             }
         }
     }
 
-    for (auto const& [ordinal, candidate] : new_root_candidates) {
-        auto const table = index_service().get_index_table(ordinal);
-        HS_REL_ASSERT(table && table->set_root_from_committed_buf(candidate),
-                      "Unable to publish committed root candidate {} for index ordinal {}", candidate->to_string(),
-                      ordinal);
+    if (rec.new_root_candidate) {
+        auto const table = index_service().get_index_table(rec.ordinal);
+        HS_REL_ASSERT(table && table->set_root_from_committed_buf(rec.new_root_candidate),
+                      "Unable to publish committed root candidate {} for index ordinal {}",
+                      rec.new_root_candidate->to_string(), rec.ordinal);
     }
+}
 
-    LOGTRACEMOD(wbcache, "\n\n\nRecovery processing Ends\n\n\n");
-#ifdef _PRERELEASE
-    LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
-               pending_bufs.size(), bufs.size(), icp_ctx->id());
-    // add deleted bufs to logs here as well
-    auto modified_dags = generate_dag_buffers(bufs);
-    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log({}, pending_bufs));
-    LOGTRACEMOD(wbcache, "All pruned bufs for recovery\n{}", detailed_log({}, pruned_bufs_to_repair));
-    LOGTRACEMOD(wbcache, "After recovery: {}", to_string_dag_bufs(modified_dags, icp_ctx->id()));
-
-#endif
+void IndexWBCache::recover_pass2(IndexCPContext* icp_ctx, OrdinalRecovery& rec, bool do_sanity_check) {
     [[maybe_unused]] uint32_t cnt = 0;
-    LOGTRACEMOD(wbcache, "Potential parent recovered bufs (#of bufs = {})", potential_parent_recovered_bufs.size());
-    for (auto const& buf : potential_parent_recovered_bufs) {
+    LOGTRACEMOD(wbcache, "Potential parent recovered bufs (#of bufs = {})", rec.potential_parent_recovered_bufs.size());
+    for (auto const& buf : rec.potential_parent_recovered_bufs) {
         LOGTRACEMOD(wbcache, " {} - check stale recovered buf {}", cnt++, buf->to_string());
     }
     // This step is needed since there is a case where all(or some) children of an interior node is freed (after moving
     // to a previous sibling parent) and after crash, this node has stale links to its children
     cnt = 0;
     std::vector< IndexBufferPtr > buffers_to_repair;
-    for (auto const& buf : potential_parent_recovered_bufs) {
+    for (auto const& buf : rec.potential_parent_recovered_bufs) {
         LOGTRACEMOD(wbcache, " {} - potential parent recovered buf {}", cnt, buf->to_string());
         parent_recover(buf);
         if (buf->m_bytes == nullptr || r_cast< persistent_hdr_t* >(buf->m_bytes)->node_deleted) {
             // This buffer was marked as deleted during repair, so we also need to free it
-            deleted_bufs.push_back(buf);
+            rec.deleted_bufs.push_back(buf);
         } else {
             // This buffer was not marked as deleted during repair, so we need to repair it
             buffers_to_repair.push_back(buf);
@@ -825,7 +892,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         index_service().repair_index_node(buf->m_index_ordinal, buf);
     }
     // actual recover is done here in recovery path
-    for (auto const& buf : pending_bufs) {
+    for (auto const& buf : rec.pending_bufs) {
         LOGTRACEMOD(wbcache, "recover and repairing  up_buffer buf {}", buf->to_string());
         recover_buf(buf);
     }
@@ -834,45 +901,37 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     // adjusted. This can happen when a child is merged and its right sibling is flushed before the parent is flushed.
     // And during recovery, we prune the node and keep the deleted child and keep the parent as is.
     // We need to call repair_links directly on them as the recovery_buf() path will not trigger it.
-    for (auto const& buf : pruned_bufs_to_repair) {
+    for (auto const& buf : rec.pruned_bufs_to_repair) {
         LOGTRACEMOD(wbcache, "pruned buf {} is repaired", buf->to_string());
         index_service().repair_index_node(buf->m_index_ordinal, buf);
     }
 
-    for (auto const& buf : deleted_bufs) {
+    for (auto const& buf : rec.deleted_bufs) {
         LOGTRACEMOD(wbcache, "freeing buf after repairing (last step) {}", buf->to_string());
         m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(icp_ctx));
     }
 
-    if (pending_bufs.empty()) {
-        LOGTRACEMOD(wbcache, "No buffers to repair, recovery completed");
-    } else {
-        std::map< uint32_t, IndexBufferPtrList > changed_bufs;
-        for (auto const& [_, buf] : bufs) {
-            LOGTRACEMOD(wbcache, "{}", buf->to_string());
-            if (!buf->m_node_freed && !bufs_to_skip_sanity_check.contains(buf)) {
-                changed_bufs[buf->m_index_ordinal].push_back(buf);
-            }
-        }
-        for (auto const& [index_ordinal, bufs] : changed_bufs) {
-            LOGTRACEMOD(wbcache, "Sanity checking buffers for index ordinal {}: # of bufs {}", index_ordinal,
-                        bufs.size());
-            auto ret = index_service().sanity_check(index_ordinal, bufs);
-            if (ret) {
-                LOGTRACEMOD(wbcache, "Sanity check for index ordinal {} passed", index_ordinal);
-            } else {
-                LOGERRORMOD(wbcache, "Sanity check for index ordinal {} failed", index_ordinal);
-#ifdef _PRELEASE
-                HS_DBG_ASSERT(true, "sanity failed: {}", ret);
-#else
-                // TODO: make this index table offline and let others work
-                HS_REL_ASSERT(0, "sanity failed: {}", ret);
-#endif
-            }
-        }
+    if (!do_sanity_check) { return; }
+    IndexBufferPtrList changed_bufs;
+    for (auto const& [_, buf] : rec.bufs) {
+        LOGTRACEMOD(wbcache, "{}", buf->to_string());
+        if (!buf->m_node_freed && !rec.bufs_to_skip_sanity_check.contains(buf)) { changed_bufs.push_back(buf); }
     }
-    m_in_recovery = false;
-    m_vdev->recovery_completed();
+    if (changed_bufs.empty()) { return; }
+    LOGTRACEMOD(wbcache, "Sanity checking buffers for index ordinal {}: # of bufs {}", rec.ordinal,
+                changed_bufs.size());
+    auto ret = index_service().sanity_check(rec.ordinal, changed_bufs);
+    if (ret) {
+        LOGTRACEMOD(wbcache, "Sanity check for index ordinal {} passed", rec.ordinal);
+    } else {
+        LOGERRORMOD(wbcache, "Sanity check for index ordinal {} failed", rec.ordinal);
+#ifdef _PRELEASE
+        HS_DBG_ASSERT(true, "sanity failed: {}", ret);
+#else
+        // TODO: make this index table offline and let others work
+        HS_REL_ASSERT(0, "sanity failed: {}", ret);
+#endif
+    }
 }
 
 void IndexWBCache::parent_recover(IndexBufferPtr const& buf) {
@@ -936,7 +995,7 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 
     load_buf(buf);
     if (!BtreeNode::is_valid_node(sisl::blob{buf->m_bytes, m_node_size})) { return false; }
-    return (buf->m_dirtied_cp_id == cp_mgr().cp_guard()->id());
+    return (buf->m_dirtied_cp_id == m_recovery_cp_id);
 }
 
 //////////////////// CP Related API section /////////////////////////////////
