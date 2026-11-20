@@ -2045,8 +2045,8 @@ struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::tes
         m_cfg = BtreeConfig(hs()->index_service().node_size());
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
-        m_cfg.m_max_keys_in_node = 20;
-        m_cfg.m_min_keys_in_node = 6;
+        m_cfg.m_max_keys_in_node = m_max_keys_in_node;
+        m_cfg.m_min_keys_in_node = m_min_keys_in_node;
         m_cfg.m_merge_turned_on = false;
 
         m_tables.resize(num_tables);
@@ -2119,9 +2119,10 @@ struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::tes
             << "table=" << tbl << " key count mismatch";
     }
 
-    void run_crash_recovery(uint32_t recovery_threads) {
+    // seed 0 draws the workload from the test's global random engine; any other value fixes the workload
+    void run_crash_recovery(uint32_t recovery_threads, bool with_removes = true, uint64_t seed = 0) {
         set_recovery_threads(recovery_threads);
-        std::mt19937_64 rng{g_re()};
+        std::mt19937_64 rng{seed ? seed : g_re()};
         auto const rand_key = [&rng]() { return rng() % 1000000000ull; };
 
         // Step 1: preload tables of different sizes and make them durable
@@ -2147,7 +2148,7 @@ struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::tes
         std::vector< std::set< uint64_t > > touched(num_tables);
         for (uint32_t round{0}; round < 80; ++round) {
             for (uint32_t t{0}; t < idle_table; ++t) {
-                if ((round % 3 == 2) && !removable[t].empty()) {
+                if (with_removes && (round % 3 == 2) && !removable[t].empty()) {
                     auto const k = removable[t].back();
                     removable[t].pop_back();
                     remove(t, k);
@@ -2197,6 +2198,8 @@ struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::tes
         }
     }
 
+    uint32_t m_max_keys_in_node{20};
+    uint32_t m_min_keys_in_node{6};
     BtreeConfig m_cfg{4096};
     std::vector< uuid_t > m_uuids;
     std::vector< std::shared_ptr< BtType > > m_tables;
@@ -2206,6 +2209,21 @@ struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::tes
 TEST_F(IndexCrashTestMultiTable, ParallelRecovery) { run_crash_recovery(3 /* recovery threads */); }
 
 TEST_F(IndexCrashTestMultiTable, SequentialRecovery) { run_crash_recovery(1 /* recovery threads */); }
+
+// Tiny nodes make splits cascade within the crashed CP: an interior node splits, existing children move under the
+// new sibling, and the new sibling is discarded by recovery because its parent was never written. The fixed
+// workload below hits that case; recovery must re-attach those children to the real parent before repairing it.
+struct IndexCrashTestMultiTableTinyNodes : public IndexCrashTestMultiTable {
+    IndexCrashTestMultiTableTinyNodes() {
+        m_max_keys_in_node = 6;
+        m_min_keys_in_node = 2;
+    }
+};
+
+TEST_F(IndexCrashTestMultiTableTinyNodes, CascadingSplitRecovery) {
+    // The workload generated from engine seed 3003, which discards a new interior node with re-parented children
+    run_crash_recovery(3 /* recovery threads */, false /* with_removes */, std::default_random_engine{3003}());
+}
 
 #endif
 

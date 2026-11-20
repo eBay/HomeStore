@@ -710,8 +710,35 @@ void IndexWBCache::recover_pass1(IndexCPContext* icp_ctx, OrdinalRecovery& rec) 
                       buf->m_blkid.to_string());
     };
 
+    // Children of every buffer, so a discarded buffer's children can be handed to its own up buffer.
+    std::unordered_map< IndexBuffer*, std::vector< IndexBufferPtr > > children;
+    for (auto const& [_, b] : bufs) {
+        if (b->m_up_buffer) { children[b->m_up_buffer.get()].push_back(b); }
+    }
+    // Discarded buffer -> the up buffer its children were re-attached to, to redirect their repair notifications
+    std::unordered_map< IndexBuffer*, IndexBufferPtr > reattached_to;
+
     auto prune_from_up_buffer = [&](IndexBufferPtr const& buf) {
         if (!buf->m_up_buffer) { return; }
+        // A discarded new interior node can have existing children that moved under it in the crashed CP (e.g. when
+        // its parent split). Re-attach them to the discarded node's own up buffer, so their repair chain still
+        // reaches the real parent and the parent is repaired only after them. Otherwise the parent can be repaired
+        // first, and a split during a later child repair is never linked into it. Re-attached children are recorded
+        // under the new up buffer too, so this also holds when that up buffer is discarded later (cascading).
+        // Only when that up buffer is a real node: a discarded new root sits under the meta buffer, and its children
+        // (the old root) must not become children of the meta buffer, which recovery treats as the root position.
+        if (auto it = children.find(buf.get()); (it != children.end()) && !buf->m_up_buffer->is_meta_buf()) {
+            for (auto const& child : it->second) {
+                if (child->m_up_buffer.get() != buf.get()) { continue; } // Already re-attached or pruned
+                LOGTRACEMOD(wbcache, "re-attach child {} of discarded {} to {}", child->to_string(), buf->to_string(),
+                            buf->m_up_buffer->to_string());
+                buf->remove_down_buffer(child);
+                child->m_up_buffer = buf->m_up_buffer;
+                buf->m_up_buffer->add_down_buffer(child);
+                children[buf->m_up_buffer.get()].push_back(child);
+            }
+            reattached_to[buf.get()] = buf->m_up_buffer;
+        }
         LOGTRACEMOD(wbcache, "remove_down_buffer {} from up buffer {}", buf->to_string(),
                     buf->m_up_buffer->to_string());
         buf->m_up_buffer->remove_down_buffer(buf);
@@ -853,6 +880,15 @@ void IndexWBCache::recover_pass1(IndexCPContext* icp_ctx, OrdinalRecovery& rec) 
                     rec.bufs_to_skip_sanity_check.insert(buf);
                 }
             }
+        }
+    }
+
+    // A child processed before its up buffer was discarded queued that discarded buffer for repair. The child now
+    // counts toward the up buffer it was re-attached to, so its repair notification has to go there instead.
+    for (auto& pending : rec.pending_bufs) {
+        for (auto it = reattached_to.find(pending.get()); it != reattached_to.end();
+             it = reattached_to.find(pending.get())) {
+            pending = it->second;
         }
     }
 
