@@ -1988,6 +1988,243 @@ TEST_F(IndexCrashCreatedFreedReuseTest, CreatedAndFreedBlkReusedByRecoveryRepair
     }
 }
 
+// Crash recovery with several index tables of different sizes, recovered in parallel. The crashed CP carries
+// splits and removes from all tables but one, which has no journal work. After recovery every table must
+// still hold the state of the last completed CP (apart from keys touched in the crashed CP), and after reapplying
+// the crashed operations it must match its shadow state exactly.
+struct IndexCrashTestMultiTable : public test_common::HSTestHelper, public ::testing::Test {
+    using T = FixedLenBtree;
+    using K = T::KeyType;
+    using V = T::ValueType;
+    using BtType = T::BtreeType;
+    using KVMap = std::map< uint64_t, uint32_t >;
+
+    static constexpr uint32_t num_tables = 8;
+    static constexpr uint32_t idle_table = num_tables - 1; // No writes in the crashed CP
+
+    struct Op {
+        uint64_t key;
+        uint32_t value;
+        bool is_put;
+    };
+
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        explicit TestIndexServiceCallbacks(IndexCrashTestMultiTable* test) : m_test{test} {}
+
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
+            auto const it = std::find(m_test->m_uuids.begin(), m_test->m_uuids.end(), sb->uuid);
+            RELEASE_ASSERT(it != m_test->m_uuids.end(), "Recovered unknown index table uuid={}",
+                           boost::uuids::to_string(sb->uuid));
+            auto const idx = std::distance(m_test->m_uuids.begin(), it);
+            LOGINFO("Index table recovered: table={} ordinal={} uuid={}", idx, sb->ordinal,
+                    boost::uuids::to_string(sb->uuid));
+            m_test->m_tables[idx] = std::make_shared< BtType >(std::move(sb), m_test->m_cfg);
+            return m_test->m_tables[idx];
+        }
+
+    private:
+        IndexCrashTestMultiTable* m_test;
+    };
+
+    void SetUp() override {
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            s.generic.cp_timer_us = 0x8000000000000000; // Only explicit CPs
+            s.resource_limits.dirty_buf_percent = 100;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        start_homestore("test_index_crash_recovery",
+                        {{HS_SERVICE::META, {.size_pct = 10.0}},
+                         {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+                        nullptr, {}, true /* init_device */);
+
+        // Same node limits as the single-table crash tests. Merges are off: crash recovery of merges is covered by
+        // the single-table tests, and this test is about many tables.
+        m_cfg = BtreeConfig(hs()->index_service().node_size());
+        m_cfg.m_leaf_node_type = T::leaf_node_type;
+        m_cfg.m_int_node_type = T::interior_node_type;
+        m_cfg.m_max_keys_in_node = m_max_keys_in_node;
+        m_cfg.m_min_keys_in_node = m_min_keys_in_node;
+        m_cfg.m_merge_turned_on = false;
+
+        m_tables.resize(num_tables);
+        m_uuids.resize(num_tables);
+        for (uint32_t i{0}; i < num_tables; ++i) {
+            m_uuids[i] = boost::uuids::random_generator()();
+            m_tables[i] = std::make_shared< BtType >(m_uuids[i], boost::uuids::random_generator()(), 0, m_cfg);
+            hs()->index_service().add_index_table(m_tables[i]);
+        }
+        m_expected.resize(num_tables);
+    }
+
+    void TearDown() override {
+        m_tables.clear();
+        shutdown_homestore(false);
+    }
+
+    void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
+        params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        test_common::HSTestHelper::restart_homestore(shutdown_delay_sec);
+    }
+
+    static void set_recovery_threads(uint32_t nthreads) {
+        HS_SETTINGS_FACTORY().modifiable_settings([nthreads](auto& s) {
+            s.generic.index_recovery_threads = nthreads;
+            HS_SETTINGS_FACTORY().save();
+        });
+    }
+
+    void put(uint32_t tbl, uint64_t k, uint32_t v) {
+        K key{k};
+        V value{v};
+        auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT};
+        ASSERT_EQ(m_tables[tbl]->put(req), btree_status_t::success) << "put table=" << tbl << " key=" << k;
+        m_expected[tbl][k] = v;
+    }
+
+    void remove(uint32_t tbl, uint64_t k) {
+        K key{k};
+        V out;
+        auto req = BtreeSingleRemoveRequest{&key, &out};
+        std::ignore = m_tables[tbl]->remove(req); // May already be absent after a crash
+        m_expected[tbl].erase(k);
+    }
+
+    // Every key of the last completed CP that the crashed CP didn't touch must have survived with its value
+    void verify_durable(uint32_t tbl, KVMap const& durable, std::set< uint64_t > const& touched) const {
+        uint32_t checked{0};
+        for (auto const& [k, v] : durable) {
+            if (touched.contains(k)) { continue; }
+            K key{k};
+            V out;
+            auto req = BtreeSingleGetRequest{&key, &out};
+            ASSERT_EQ(m_tables[tbl]->get(req), btree_status_t::success) << "table=" << tbl << " lost key=" << k;
+            ASSERT_EQ(out.value(), v) << "table=" << tbl << " key=" << k;
+            ++checked;
+        }
+        LOGINFO("Table {}: {} durable keys intact after recovery", tbl, checked);
+    }
+
+    void verify_exact(uint32_t tbl) const {
+        for (auto const& [k, v] : m_expected[tbl]) {
+            K key{k};
+            V out;
+            auto req = BtreeSingleGetRequest{&key, &out};
+            ASSERT_EQ(m_tables[tbl]->get(req), btree_status_t::success) << "table=" << tbl << " missing key=" << k;
+            ASSERT_EQ(out.value(), v) << "table=" << tbl << " key=" << k;
+        }
+        ASSERT_EQ(m_tables[tbl]->count_keys(m_tables[tbl]->root_node_id()), m_expected[tbl].size())
+            << "table=" << tbl << " key count mismatch";
+    }
+
+    // seed 0 draws the workload from the test's global random engine; any other value fixes the workload
+    void run_crash_recovery(uint32_t recovery_threads, bool with_removes = true, uint64_t seed = 0) {
+        set_recovery_threads(recovery_threads);
+        std::mt19937_64 rng{seed ? seed : g_re()};
+        auto const rand_key = [&rng]() { return rng() % 1000000000ull; };
+
+        // Step 1: preload tables of different sizes and make them durable
+        std::vector< std::vector< uint64_t > > removable(num_tables);
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            uint32_t const nkeys = 60 * (t + 1);
+            while (m_expected[t].size() < nkeys) {
+                put(t, rand_key(), uint32_cast(rng()));
+            }
+            for (auto const& [k, _] : m_expected[t]) {
+                removable[t].push_back(k);
+            }
+            std::shuffle(removable[t].begin(), removable[t].end(), rng);
+        }
+        test_common::HSTestHelper::trigger_cp(true);
+        auto const durable = m_expected;
+        LOGINFO("Step 1: preloaded {} tables with 60..{} keys", num_tables, 60 * num_tables);
+
+        // Step 2: in one CP, interleave puts and removes across all tables but the idle one, with a crash flip armed
+        // on the first split, so the crashed CP holds structural changes of many tables.
+        set_basic_flip("crash_flush_on_split_at_parent");
+        std::vector< std::vector< Op > > ops(num_tables);
+        std::vector< std::set< uint64_t > > touched(num_tables);
+        for (uint32_t round{0}; round < 80; ++round) {
+            for (uint32_t t{0}; t < idle_table; ++t) {
+                if (with_removes && (round % 3 == 2) && !removable[t].empty()) {
+                    auto const k = removable[t].back();
+                    removable[t].pop_back();
+                    remove(t, k);
+                    ops[t].push_back(Op{k, 0, false});
+                    touched[t].insert(k);
+                } else {
+                    auto const k = rand_key();
+                    auto const v = uint32_cast(rng());
+                    put(t, k, v);
+                    ops[t].push_back(Op{k, v, true});
+                    touched[t].insert(k);
+                }
+            }
+        }
+        ASSERT_TRUE(hs()->crash_simulator().will_crash()) << "crash flip did not fire";
+
+        // Step 3: crash in the middle of the CP flush and recover
+        LOGINFO("Step 3: trigger the CP that crashes, recover with {} recovery threads", recovery_threads);
+        test_common::HSTestHelper::trigger_cp(false);
+        wait_for_crash_recovery(true);
+        ASSERT_EQ(hs()->index_service().num_tables(), num_tables);
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            ASSERT_NE(m_tables[t], nullptr) << "table " << t << " not recovered";
+        }
+
+        // Step 4: state of the last completed CP survived in every table
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            verify_durable(t, durable[t], touched[t]);
+        }
+
+        // Step 5: reapply the crashed operations, then each table matches its shadow state exactly, also after a CP
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            for (auto const& op : ops[t]) {
+                if (op.is_put) {
+                    put(t, op.key, op.value);
+                } else {
+                    remove(t, op.key);
+                }
+            }
+        }
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            verify_exact(t);
+        }
+        test_common::HSTestHelper::trigger_cp(true);
+        for (uint32_t t{0}; t < num_tables; ++t) {
+            verify_exact(t);
+        }
+    }
+
+    uint32_t m_max_keys_in_node{20};
+    uint32_t m_min_keys_in_node{6};
+    BtreeConfig m_cfg{4096};
+    std::vector< uuid_t > m_uuids;
+    std::vector< std::shared_ptr< BtType > > m_tables;
+    std::vector< KVMap > m_expected;
+};
+
+TEST_F(IndexCrashTestMultiTable, ParallelRecovery) { run_crash_recovery(3 /* recovery threads */); }
+
+TEST_F(IndexCrashTestMultiTable, SequentialRecovery) { run_crash_recovery(1 /* recovery threads */); }
+
+// Tiny nodes make splits cascade within the crashed CP: an interior node splits, existing children move under the
+// new sibling, and the new sibling is discarded by recovery because its parent was never written. The fixed
+// workload below hits that case; recovery must re-attach those children to the real parent before repairing it.
+struct IndexCrashTestMultiTableTinyNodes : public IndexCrashTestMultiTable {
+    IndexCrashTestMultiTableTinyNodes() {
+        m_max_keys_in_node = 6;
+        m_min_keys_in_node = 2;
+    }
+};
+
+TEST_F(IndexCrashTestMultiTableTinyNodes, CascadingSplitRecovery) {
+    // The workload generated from engine seed 3003, which discards a new interior node with re-parented children
+    run_crash_recovery(3 /* recovery threads */, false /* with_removes */, std::default_random_engine{3003}());
+}
+
 #endif
 
 int main(int argc, char* argv[]) {

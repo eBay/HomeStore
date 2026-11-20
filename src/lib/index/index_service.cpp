@@ -20,6 +20,7 @@
 #include "index/wb_cache.hpp"
 #include "index/index_cp.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/homestore_config.hpp"
 #include <sisl/async/coro.hpp>
 #include "common/homestore_assert.hpp"
 #include "device/virtual_dev.hpp"
@@ -94,6 +95,12 @@ bool IndexService::unreserve_ordinal(uint32_t ordinal) {
 }
 
 void IndexService::start() {
+    using clock = std::chrono::steady_clock;
+    auto const elapsed_ms = [](clock::time_point since) {
+        return std::chrono::duration_cast< std::chrono::milliseconds >(clock::now() - since).count();
+    };
+    auto const start_time = clock::now();
+
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, m_wbcache_sb, hs()->evictor(),
                                                   hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
@@ -112,17 +119,39 @@ void IndexService::start() {
         add_index_table(tbl);
     }
 
-    // Recover the writeback cache, which in-turns recovers any index table nodes
-    m_wb_cache->recover(m_wbcache_sb.second);
+    auto const load_ms = elapsed_ms(start_time);
 
-    // Notify each table that we have completed recovery
-    std::unique_lock lg(m_index_map_mtx);
-    for (const auto& [_, tbl] : m_index_map) {
-        tbl->recovery_completed();
-#ifdef _PRERELEASE
-        tbl->audit_tree();
-#endif
+    // Recover the writeback cache, which in-turns recovers any index table nodes
+    auto const recover_start = clock::now();
+    m_wb_cache->recover(m_wbcache_sb.second);
+    auto const recover_ms = elapsed_ms(recover_start);
+
+    // Notify each table that we have completed recovery, and audit it in prerelease builds. Completing a table is cheap
+    // (at most it creates the root node of a table that crashed right after creation), so it runs on this thread. The
+    // prerelease audit walks every node of every table, so it runs one table per thread.
+    auto const completed_start = clock::now();
+    std::vector< std::shared_ptr< IndexTableBase > > tables;
+    {
+        std::unique_lock lg(m_index_map_mtx);
+        for (const auto& [_, tbl] : m_index_map) {
+            tables.push_back(tbl);
+        }
     }
+#ifdef _PRERELEASE
+    auto const completion_threads = uint32_cast(
+        std::max< size_t >(std::min< size_t >(tables.size(), HS_DYNAMIC_CONFIG(generic.index_recovery_threads)), 1));
+#else
+    uint32_t const completion_threads = 1;
+#endif
+    hs_utils::parallel_for(tables.size(), completion_threads, [&tables](size_t i) {
+        tables[i]->recovery_completed();
+#ifdef _PRERELEASE
+        tables[i]->audit_tree();
+#endif
+    });
+    LOGINFO("Index recovery timing: tables={} load_sb_ms={} wbcache_recover_ms={} recovery_completed_audit_ms={} "
+            "total_ms={}",
+            tables.size(), load_ms, recover_ms, elapsed_ms(completed_start), elapsed_ms(start_time));
 #ifdef _PRERELEASE
     // Tests can keep the recovered journal current, then perform a second crash sequentially to verify replay
     // idempotence without racing nested HomeStore restarts.
