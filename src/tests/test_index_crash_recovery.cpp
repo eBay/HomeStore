@@ -1622,6 +1622,40 @@ struct IndexCrashTestTwoTables : public test_common::HSTestHelper,
     }
 };
 
+// A root split of a table other than ordinal 0 must preflush the new root before the old root reaches disk in its
+// split state. Crash when the new root is about to be flushed: durable keys in the old root's right half must stay
+// reachable after recovery.
+TEST_F(IndexCrashTestTwoTables, RootSplitOfNonZeroOrdinalTable) {
+    uint32_t next_key = 0;
+    while (this->m_bt2->get_btree_depth() < 1) {
+        insert_into(this->m_bt2, next_key, next_key + 1);
+        ++next_key;
+    }
+    test_common::HSTestHelper::trigger_cp(true);
+
+    this->set_basic_flip("crash_flush_on_root");
+    while (this->m_bt2->get_btree_depth() < 2) {
+        insert_into(this->m_bt2, next_key, next_key + 1);
+        ++next_key;
+    }
+    ASSERT_TRUE(hs()->crash_simulator().will_crash());
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    for (uint32_t k = 0; k < next_key; ++k) {
+        K key{k};
+        V value{V::generate_rand()};
+        auto put_req = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT};
+        ASSERT_EQ(this->m_bt2->put(put_req), btree_status_t::success) << "reapply key " << k << " failed";
+    }
+    for (uint32_t k = 0; k < next_key; ++k) {
+        K key{k};
+        V value;
+        auto get_req = BtreeSingleGetRequest{&key, &value};
+        ASSERT_EQ(this->m_bt2->get(get_req), btree_status_t::success) << "key " << k << " missing";
+    }
+}
+
 TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
     // With max_keys_in_node=5, inserting 6+ entries into a single-node BTree
     // forces a root split where MetaIndexBuffer becomes the DAG parent.

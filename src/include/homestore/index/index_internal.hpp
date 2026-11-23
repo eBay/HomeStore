@@ -144,7 +144,7 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     void set_crash_flag() { m_crash_flag_on = true; }
 #endif
 
-    uint32_t m_index_ordinal{0};  // Ordinal of the index table this buffer belongs to, used only during recovery
+    uint32_t m_index_ordinal{0};  // Ordinal of the index table this buffer belongs to
     uint8_t m_is_meta_buf{false}; // Is the index buffer writing to metablk?
     bool m_node_freed{false};
 

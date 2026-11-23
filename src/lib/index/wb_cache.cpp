@@ -115,6 +115,7 @@ BtreeNodePtr IndexWBCache::alloc_buf(uint32_t ordinal, node_initializer_t&& node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
     idx_buf->m_created_cp_id = cpg->id();
     idx_buf->m_dirtied_cp_id = cpg->id();
+    idx_buf->m_index_ordinal = ordinal;
     auto node = node_initializer(idx_buf);
     idx_buf->m_node_level = node->level();
 
@@ -192,6 +193,7 @@ bool IndexWBCache::get_writable_buf(const BtreeNodePtr& node, CPContext* context
         auto new_buf = std::make_shared< IndexBuffer >(idx_buf->m_blkid, m_node_size, m_vdev->align_size());
         new_buf->m_created_cp_id = idx_buf->m_created_cp_id;
         new_buf->m_node_level = idx_buf->m_node_level;
+        new_buf->m_index_ordinal = idx_buf->m_index_ordinal;
         std::memcpy(new_buf->raw_buffer(), idx_buf->raw_buffer(), m_node_size);
 
         node->update_phys_buf(new_buf->raw_buffer());
