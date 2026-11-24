@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 #include <boost/uuid/random_generator.hpp>
 
+#include <array>
 #include <set>
 #include <vector>
 #include <sisl/utility/enum.hpp>
@@ -1534,6 +1535,7 @@ struct IndexCrashTestTwoTables : public test_common::HSTestHelper,
     using BtType = T::BtreeType;
 
     std::shared_ptr< BtType > m_bt2;
+    uint32_t m_max_keys_in_node{5};
 
     // During recovery each table's superblk triggers on_index_table_found.
     // We route by ordinal: 0 → m_bt, 1 → m_bt2.
@@ -1546,7 +1548,7 @@ struct IndexCrashTestTwoTables : public test_common::HSTestHelper,
             m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
             m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
             m_test->m_cfg.m_int_node_type = T::interior_node_type;
-            m_test->m_cfg.m_max_keys_in_node = 5;
+            m_test->m_cfg.m_max_keys_in_node = m_test->m_max_keys_in_node;
             m_test->m_cfg.m_min_keys_in_node = 2;
             if (sb->ordinal == 0) {
                 m_test->m_bt = std::make_shared< BtType >(std::move(sb), m_test->m_cfg);
@@ -1580,7 +1582,7 @@ struct IndexCrashTestTwoTables : public test_common::HSTestHelper,
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
         this->m_cfg.m_leaf_node_type = T::leaf_node_type;
         this->m_cfg.m_int_node_type = T::interior_node_type;
-        this->m_cfg.m_max_keys_in_node = 5;
+        this->m_cfg.m_max_keys_in_node = m_max_keys_in_node;
         this->m_cfg.m_min_keys_in_node = 2;
 
         BtreeTestHelper< FixedLenBtree >::SetUp();
@@ -1658,6 +1660,126 @@ TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
 
     LOGINFO("Step 6: Recovery succeeded - bug is fixed (SDSTOR-21880)");
     ASSERT_EQ(hs()->index_service().num_tables(), 2) << "Both tables should be recovered";
+}
+
+// SDSTOR-26752: recovery discards new nodes of the crashed CP whose parent was not written. Both tables get the same
+// layout and the same writes in the crashed CP, the crash flip fires in one of them, and no key that was durable before
+// the crashed CP may be lost.
+struct IndexCrashTestTinyNodes : public IndexCrashTestTwoTables {
+    IndexCrashTestTinyNodes() { m_max_keys_in_node = 6; }
+
+    std::array< std::vector< uint64_t >, 2 > m_keys, m_durable_keys;
+
+    std::shared_ptr< BtType >& table(uint32_t t) { return (t == 0) ? this->m_bt : this->m_bt2; }
+
+    void put_keys(uint32_t t, std::initializer_list< uint64_t > keys) {
+        for (auto const k : keys) {
+            K key{k};
+            V value{uint32_cast(k)};
+            auto req = BtreeSinglePutRequest{&key, &value, btree_put_type::INSERT};
+            ASSERT_EQ(table(t)->put(req), btree_status_t::success) << "table " << t << " insert key=" << k << " failed";
+            m_keys[t].push_back(k);
+        }
+    }
+
+    void remove_keys(uint32_t t, std::initializer_list< uint64_t > keys) {
+        for (auto const k : keys) {
+            K key{k};
+            V value;
+            auto req = BtreeSingleRemoveRequest{&key, &value};
+            ASSERT_EQ(table(t)->remove(req), btree_status_t::success)
+                << "table " << t << " remove key=" << k << " failed";
+            std::erase(m_keys[t], k);
+        }
+    }
+
+    void durable_cp() {
+        test_common::HSTestHelper::trigger_cp(true);
+        m_durable_keys = m_keys;
+    }
+
+    // Keys removed in the crashed CP may or may not survive
+    void crash_and_verify(std::set< uint64_t > const& removed_in_crashed_cp = {}) {
+        test_common::HSTestHelper::trigger_cp(false);
+        this->wait_for_crash_recovery(true);
+        for (uint32_t t{0}; t < 2; ++t) {
+            for (auto const k : m_durable_keys[t]) {
+                if (removed_in_crashed_cp.contains(k)) { continue; }
+                K key{k};
+                V value;
+                auto req = BtreeSingleGetRequest{&key, &value};
+                ASSERT_EQ(table(t)->get(req), btree_status_t::success) << "table " << t << " lost durable key " << k;
+                ASSERT_EQ(value, V{uint32_cast(k)}) << "table " << t << " durable key " << k << " has a wrong value";
+            }
+        }
+    }
+
+    // A split in the crashed CP creates a new interior node that is discarded, because its parent was not written. One
+    // of the children that moved under it splits again while it is repaired, and that split must be linked into the
+    // real parent, or recovery's sanity check aborts.
+    void run_discarded_new_node_child_split(uint32_t crash_table) {
+        for (uint32_t t{0}; t < 2; ++t) {
+            for (uint64_t k{1000}; k <= 66000; k += 1000) {
+                put_keys(t, {k});
+            }
+            put_keys(t, {1100,  1200,  1300,  4100,  4200,  4300,  4400,  4500,  4600,  4700,
+                         7100,  7200,  7300,  7400,  37100, 37200, 37300, 40100, 40200, 40300,
+                         40400, 40500, 40600, 40700, 43100, 43200, 43300, 43400, 67000, 68000});
+        }
+        durable_cp();
+
+        for (uint32_t t{0}; t < 2; ++t) {
+            put_keys(t, {1400});
+        }
+        // The flip fires on the first split after it is armed, so the crash table goes first
+        this->set_basic_flip("crash_flush_on_split_at_left_child");
+        put_keys(crash_table, {37400});
+        ASSERT_TRUE(hs()->crash_simulator().will_crash()) << "crash flip did not fire";
+        put_keys(1 - crash_table, {37400});
+        crash_and_verify();
+    }
+
+    // In one CP, merge A merges leaves L1, L2, L3 into L1 and a new leaf N, freeing L2 and L3. Merge B then merges N
+    // (now the left node) with L4 and L5 into N and a new leaf N2, freeing L4 and L5. The crash hits while L1 is
+    // flushed, after N and N2 reached disk, so recovery discards N and N2. L4 and L5 were freed under the discarded N:
+    // they must be kept, their keys never became durable anywhere else.
+    void run_freed_under_discarded_merge_node(uint32_t crash_table) {
+        for (uint32_t t{0}; t < 2; ++t) {
+            // Ascending inserts leave 3 keys per leaf; the last level-1 node then holds the leaves
+            // L1 [460-480], L2 [490-510], L3 [520-540], L4 [550-570], L5 [580-600] and [610-630]
+            for (uint64_t k{1}; k <= 60; ++k) {
+                put_keys(t, {k * 10});
+            }
+            put_keys(t, {610, 620, 630, 491, 492, 521, 522, 561, 562, 611, 612});
+            remove_keys(t, {470, 480}); // L1 keeps only 460, so the next remove in L1 merges it
+        }
+        durable_cp();
+
+        // The flip fires on the first merge after it is armed (merge A of the crash table) and marks its left child L1
+        this->set_basic_flip("crash_flush_on_merge_at_left_child");
+        for (auto const t : {crash_table, 1 - crash_table}) {
+            remove_keys(t, {460});                     // Merge A: L1 + L2 + L3 -> L1 + N
+            remove_keys(t, {520, 521, 522, 530, 540}); // Empties N down to 1 key, then merge B: N + L4 + L5 -> N + N2
+            ASSERT_TRUE(hs()->crash_simulator().will_crash()) << "crash flip did not fire";
+        }
+        crash_and_verify({460, 520, 521, 522, 530, 540});
+    }
+};
+
+TEST_F(IndexCrashTestTinyNodes, DiscardedNewNodeChildSplitsDuringRepairInTable0) {
+    run_discarded_new_node_child_split(0 /* crash_table */);
+}
+
+TEST_F(IndexCrashTestTinyNodes, DiscardedNewNodeChildSplitsDuringRepairInTable1) {
+    run_discarded_new_node_child_split(1 /* crash_table */);
+}
+
+TEST_F(IndexCrashTestTinyNodes, FreedUnderDiscardedMergeNodeInTable0) {
+    run_freed_under_discarded_merge_node(0 /* crash_table */);
+}
+
+TEST_F(IndexCrashTestTinyNodes, FreedUnderDiscardedMergeNodeInTable1) {
+    run_freed_under_discarded_merge_node(1 /* crash_table */);
 }
 
 // Regression reproducer for the recovery ordering bug where a node that is
