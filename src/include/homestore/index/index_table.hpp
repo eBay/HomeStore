@@ -36,6 +36,7 @@ class IndexTable : public IndexTableBase, public Btree< K, V > {
 private:
     superblk< index_table_sb > m_sb;
     shared< MetaIndexBuffer > m_sb_buffer;
+    std::mutex m_sb_mtx; // Orders root changes in m_sb against the post-CP superblock refresh in update_sb()
     static constexpr uint32_t INVALID_ORDINAL = std::numeric_limits< uint32_t >::max();
 
     // graceful shutdown
@@ -479,6 +480,7 @@ protected:
     btree_status_t on_root_changed(BtreeNodePtr const& new_root, void* context) override {
         // todo: if(m_sb->root_node == new_root->node_id() && m_sb->root_link_version == new_root->link_version()){
         // return btree_status_t::success;}
+        std::lock_guard lg{m_sb_mtx};
         LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node, new_root->node_id());
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
@@ -498,14 +500,22 @@ protected:
     }
 
     void update_sb() override {
-        if (!this->m_sb_buffer || !this->m_sb_buffer->m_valid) {
-            LOGERROR("Attempting to update superblk when it is already invalid");
-            return;
+        shared< MetaIndexBuffer > sb_copy;
+        {
+            std::lock_guard lg{m_sb_mtx};
+            if (!this->m_sb_buffer || !this->m_sb_buffer->m_valid) {
+                LOGERROR("Attempting to update superblk when it is already invalid");
+                return;
+            }
+            // A dirty meta buffer means a CP that is not flushed yet changed the root in m_sb. That root must reach
+            // disk only through that CP's meta buffer, after the CP wrote its nodes.
+            if (!this->m_sb_buffer->is_clean()) { return; }
+            m_sb->total_interior_nodes = this->m_total_interior_nodes;
+            m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
+            m_sb->btree_depth = this->m_btree_depth;
+            sb_copy = std::make_shared< MetaIndexBuffer >(this->m_sb_buffer); // Copy of m_sb, written without the lock
         }
-        m_sb->total_interior_nodes = this->m_total_interior_nodes;
-        m_sb->total_leaf_nodes = this->m_total_leaf_nodes;
-        m_sb->btree_depth = this->m_btree_depth;
-        m_sb.write();
+        meta_service().update_sub_sb(sb_copy->m_bytes, m_sb.size(), m_sb.meta_blk());
     }
 
     void load_metrics(uint64_t interior, uint64_t leaf, uint8_t depth) override {
