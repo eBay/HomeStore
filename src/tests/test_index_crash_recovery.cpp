@@ -1660,6 +1660,45 @@ TEST_F(IndexCrashTestTwoTables, MultiTableMetaBufOrdinalCollisionOnRecovery) {
     ASSERT_EQ(hs()->index_service().num_tables(), 2) << "Both tables should be recovered";
 }
 
+// SDSTOR-26785: table 1 splits its root in the crashed CP while table 0 only updates its leaf root. The crash hits
+// before table 1's new root is written, after its old root was written in split state, covering only the left half of
+// the keys. Recovery needs the new nodes that the root-split preflush writes first, which it used to select only for
+// the table with ordinal 0.
+TEST_F(IndexCrashTestTwoTables, RootSplitOfNonZeroOrdinalTable) {
+    constexpr uint32_t gap = 1000;
+    auto get = [](std::shared_ptr< BtType > const& bt, uint32_t k) {
+        K key{k};
+        V value;
+        auto req = BtreeSingleGetRequest{&key, &value};
+        return bt->get(req);
+    };
+
+    // Durable level-1 tree in table 1 with keys 0, gap, 2 * gap, ... and a durable key in table 0
+    uint32_t n_durable = 0;
+    for (; this->m_bt2->get_btree_depth() < 1; ++n_durable) {
+        insert_into(this->m_bt2, n_durable * gap, n_durable * gap + 1);
+    }
+    insert_into(this->m_bt, 0, 1);
+    test_common::HSTestHelper::trigger_cp(true);
+
+    // Fill all gaps evenly until table 1's root splits, so that durable keys end up on both sides of the split
+    this->set_basic_flip("crash_flush_on_root");
+    for (uint32_t off = 1; (off < gap) && (this->m_bt2->get_btree_depth() < 2); ++off) {
+        for (uint32_t g = 0; (g <= n_durable) && (this->m_bt2->get_btree_depth() < 2); ++g) {
+            insert_into(this->m_bt2, g * gap + off, g * gap + off + 1);
+        }
+    }
+    ASSERT_EQ(this->m_bt2->get_btree_depth(), 2);
+    insert_into(this->m_bt, 1, 2);
+    test_common::HSTestHelper::trigger_cp(false);
+    this->wait_for_crash_recovery(true);
+
+    ASSERT_EQ(get(this->m_bt, 0), btree_status_t::success);
+    for (uint32_t i = 0; i < n_durable; ++i) {
+        ASSERT_EQ(get(this->m_bt2, i * gap), btree_status_t::success) << "durable key " << i * gap << " lost";
+    }
+}
+
 // Regression reproducer for the recovery ordering bug where a node that is
 // created and freed in the crashed CP is put into deleted_bufs even though its
 // blkid was never persisted in the allocator bitmap.

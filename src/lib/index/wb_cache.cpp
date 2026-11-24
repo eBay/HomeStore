@@ -115,6 +115,7 @@ BtreeNodePtr IndexWBCache::alloc_buf(uint32_t ordinal, node_initializer_t&& node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
     idx_buf->m_created_cp_id = cpg->id();
     idx_buf->m_dirtied_cp_id = cpg->id();
+    idx_buf->m_index_ordinal = ordinal;
     auto node = node_initializer(idx_buf);
     idx_buf->m_node_level = node->level();
 
@@ -1117,7 +1118,6 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
     LOGTRACEMOD(wbcache, "cp {} completed flushed for buf {} blkid {}", cp_ctx->id(), buf->to_string(),
                 buf->blkid().to_string());
     resource_mgr().dec_dirty_buf_size(m_node_size);
-    m_updated_ordinals.insert(buf->m_index_ordinal);
     auto [next_buf, has_more] = on_buf_flush_done(cp_ctx, buf);
     if (next_buf) {
         do_flush_one_buf(cp_ctx, next_buf, false);
@@ -1152,6 +1152,7 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done(IndexCPContext
 
 std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(IndexCPContext* cp_ctx,
                                                                            IndexBufferPtr const& buf) {
+    m_updated_ordinals.insert(buf->m_index_ordinal); // Under m_flush_mtx when several reactors complete flushes
     IndexBufferPtrList buf_list;
 #ifndef NDEBUG
     {
