@@ -642,6 +642,42 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         buf->m_up_buffer = nullptr;
     };
 
+    // Before anything is repaired, decide which new nodes of the crashed CP are discarded. This only depends on what
+    // is on disk: a new node is kept if it was written and so was its place in the tree.
+    auto is_discarded_new_buf = [&](IndexBufferPtr const& buf) {
+        if (buf->is_meta_buf() || buf->m_node_freed || (buf->m_created_cp_id != icp_ctx->id())) { return false; }
+        if (!was_node_committed(buf)) { return true; }
+        if (buf->m_up_buffer && buf->m_up_buffer->is_meta_buf()) {
+            // Root split: meta_buf(SB) <-- new_root_buf <-- old_root_buf. If the SB still points to the old root, the
+            // split is only complete on disk if the old root was written too. If the SB already points to buf, buf is
+            // the persisted root and was written. link_buf's Condition 1 keeps every intermediate new root of the CP
+            // directly under meta_buf as well, so they are decided the same way.
+            return !persisted_root_was_committed(buf->m_index_ordinal);
+        }
+        HS_DBG_ASSERT(buf->m_up_buffer, "New-CP buf {} has no up_buffer", buf->to_string());
+        return !was_node_committed(buf->m_up_buffer);
+    };
+    std::set< IndexBufferPtr > discarded_bufs;
+    for (auto const& [_, buf] : bufs) {
+        if (is_discarded_new_buf(buf)) { discarded_bufs.insert(buf); }
+    }
+
+    // A discarded node can still have children: existing nodes that moved under it in a split, and nodes freed by a
+    // merge into it. Hand them to the discarded node's up buffer (new-to-new links are flattened, so that is never a
+    // discarded node). Otherwise their repair chain ends at the discarded node: its parent can be repaired before them
+    // and miss a split made while repairing them, the discarded node itself can be repaired and written over a blkid
+    // reused by repair, and freed nodes count as committed although the node that took over their keys is gone. Under
+    // a discarded new root the child is the old root, which then has no up buffer.
+    for (auto const& [_, child] : bufs) {
+        auto const up = child->m_up_buffer;
+        if (!up || !discarded_bufs.contains(up)) { continue; }
+        LOGTRACEMOD(wbcache, "Hand child {} of discarded buf {} to its up buffer", child->to_string(), up->to_string());
+        up->remove_down_buffer(child);
+        auto const new_up = up->m_up_buffer;
+        child->m_up_buffer = (new_up && !new_up->is_meta_buf()) ? new_up : nullptr;
+        if (child->m_up_buffer) { child->m_up_buffer->add_down_buffer(child); }
+    }
+
     LOGTRACEMOD(wbcache, "\n\n\nRecovery processing begins\n\n\n");
     for (auto const& [_, buf] : bufs) {
         // Meta buffers are journal placeholders rather than vdev blocks.
@@ -709,73 +745,23 @@ void IndexWBCache::recover(sisl::byte_view sb) {
             }
         } else if (buf->m_created_cp_id == icp_ctx->id()) {
             LOGTRACEMOD(wbcache, "recovering new buf {}", buf->to_string());
-            auto const buf_was_committed = was_node_committed(buf);
-            if (!buf_was_committed) {
-                // This node was never written in the crashed CP; discard it.
+            if (discarded_bufs.contains(buf)) {
                 prune_from_up_buffer(buf);
                 bufs_to_skip_sanity_check.insert(buf);
             } else if (buf->m_up_buffer && buf->m_up_buffer->is_meta_buf()) {
-                // Root-split recovery: buf is a new root node (new_root_buf) created in the
-                // crashed CP, sitting directly under the SB in the flush DAG:
-                //   meta_buf(SB) <-- new_root_buf(new-CP) <-- old_root_buf(old-CP, modified)
-                //
-                // There are two sub-cases depending on how far the flush progressed:
-                //
-                // Case A — SB still points to old_root (crash before meta_buf was written):
-                //   persisted_root_was_committed() looks up old_root_buf in bufs and calls
-                //   was_node_committed(old_root_buf).  Returns true only if old_root was
-                //   flushed to disk, confirming the tree is in a consistent mid-split state
-                //   (both old_root and new_root are on disk, only the SB pointer is stale).
-                //   If old_root was NOT flushed, the split is half-done and new_root_buf must
-                //   be discarded.
-                //
-                // Case B — SB already points to new_root (crash after meta_buf was written):
-                //   persisted_root_was_committed() resolves the SB root to new_root_buf's own
-                //   blkid, finds buf itself in bufs, and calls was_node_committed(buf).  Since
-                //   buf_was_committed is already true (we're in this branch), the function
-                //   always returns true.  The blkid is re-committed to the allocator to restore
-                //   any in-memory bitmap state lost during the crash.  set_root_from_committed_buf
-                //   later detects that the SB root already matches new_root and only refreshes
-                //   the in-memory root pointer without rewriting the SB.
-                //
-                // is_final_root is true when the journal's last root-change record for this
-                // ordinal points to buf, and false for intermediate new roots created by earlier
-                // splits in the same CP.  When the same CP contains two or more root splits,
-                // link_buf's Condition 1 (flatten new-to-new links) keeps every intermediate new
-                // root directly under meta_buf rather than under the next new root, so all of
-                // them reach this branch.  m_recovered_root_ids[ordinal] retains only the blkid
-                // from the last root-change journal entry (the final root), so intermediate roots
-                // have is_final_root == false.  They are still committed in the allocator to
-                // prevent blkid reuse, because they were written to disk; but they are reachable
-                // from the final new root as ordinary interior nodes and must not be re-promoted.
-                if (persisted_root_was_committed(buf->m_index_ordinal)) {
-                    commit_recovered_blk(buf);
-                    if (is_final_root) {
-                        new_root_candidates[buf->m_index_ordinal] = buf;
-                        LOGINFOMOD(wbcache, "Recovery found final committed root candidate {}", buf->to_string());
-                    }
-                } else {
-                    LOGTRACEMOD(wbcache, "Discard new-root candidate {} because persisted old root was not written",
-                                buf->to_string());
-                    prune_from_up_buffer(buf);
-                    bufs_to_skip_sanity_check.insert(buf);
+                // Kept root-split node. Only the final new root of the CP is promoted; intermediate new roots are
+                // reachable from it as ordinary interior nodes.
+                commit_recovered_blk(buf);
+                if (is_final_root) {
+                    new_root_candidates[buf->m_index_ordinal] = buf;
+                    LOGINFOMOD(wbcache, "Recovery found final committed root candidate {}", buf->to_string());
                 }
             } else {
-                // Non-root-split new node: every new-CP node must have an up_buffer in the DAG.
-                HS_DBG_ASSERT(buf->m_up_buffer, "New-CP buf {} has no up_buffer", buf->to_string());
-                if (was_node_committed(buf->m_up_buffer)) {
-                    // Both this node and its parent are on disk; safe to commit.
-                    LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
-                                buf->m_up_buffer->to_string());
-                    commit_recovered_blk(buf);
-                    pending_bufs.push_back(buf->m_up_buffer);
-                } else {
-                    // Parent is not yet on disk; discard this node and let the parent be repaired.
-                    LOGTRACEMOD(wbcache, "The up buffer {} is not committed for the new buffer {}",
-                                buf->m_up_buffer->to_string(), buf->to_string());
-                    prune_from_up_buffer(buf);
-                    bufs_to_skip_sanity_check.insert(buf);
-                }
+                // Both this node and its parent are on disk; safe to commit.
+                LOGTRACEMOD(wbcache, "New buffer {} and the up buffer {} are committed", buf->to_string(),
+                            buf->m_up_buffer->to_string());
+                commit_recovered_blk(buf);
+                pending_bufs.push_back(buf->m_up_buffer);
             }
         }
     }
